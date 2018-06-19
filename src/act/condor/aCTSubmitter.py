@@ -158,7 +158,7 @@ class aCTSubmitter(aCTProcess):
 
             # Set number of submitted jobs to running * 0.15 + 400/num of shares
             # Note: assumes only a few shares are used
-            jlimit = len(rjobs)*0.1 + 10/len(fairshares)
+            jlimit = len(rjobs)*0.15 + 400/len(fairshares)
 
             if len(qjobs) < jlimit or ( ( maxpriowaiting > maxprioqueued ) and ( maxpriowaiting > 10 ) ) :
                 if maxpriowaiting > maxprioqueued :
@@ -180,7 +180,6 @@ class aCTSubmitter(aCTProcess):
             for j in jobs:
                 self.log.debug("%s: preparing submission" % j['appjobid'])
                 jobdescstr = self.dbcondor.getCondorJobDescription(str(j['jobdesc']))
-                self.log.debug(jobdescstr)
                 try:
                     # Not so nice using eval but condor doesn't accept unicode
                     # strings returned from json.loads()
@@ -198,8 +197,11 @@ class aCTSubmitter(aCTProcess):
                     gridresource = re.sub(r' %s$' % queue, '', gridresource)
                 jobdesc['GridResource'] = gridresource
                 # Set the remote queue
-                jobdesc['+queue'] = '"%s"' % queue 
+                jobdesc['+queue'] = '"%s"' % queue
+                # Set tag for aCTStatus to query
+                jobdesc['+ACTCluster'] = '"%s"' % self.cluster
                 self.log.debug('%s: Set GridResource to %s, queue %s' % (j['appjobid'], gridresource, queue))
+                self.log.debug(jobdesc)
                 t = SubmitThr(Submit, j['id'], j['appjobid'], jobdesc, self.log, self.schedd)
                 self.RunThreadsSplit([t], 1)
                 count += 1
