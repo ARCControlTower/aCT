@@ -19,7 +19,7 @@ import sys
 
 # program parameters that are paths and might have to be expanded
 # (~) as home folder
-PATH_PARAMS = ('proxy', )#'cert', 'key', 'cadir')
+PATH_PARAMS = ('proxy', )
 
 # defaults that are used if no parameters or config is available
 DEFAULT_CONF = os.path.join(os.path.expanduser('~'), '.aCT-client', 'aCT-client.conf')
@@ -27,9 +27,6 @@ DEFAULTS = {
     'proxy':    '/tmp/x509up_u' + str(os.getuid()),
     'server':   'http://localhost',
     'port':     8000,
-    ##'cert':     os.path.join(os.path.expanduser('~'), '.globus', 'usercert.pem'),
-    ##'key':      os.path.join(os.path.expanduser('~'), '.globus', 'userkey.pem'),
-    ##'cadir':    '/etc/grid-security/certificates',
 }
 
 def parseConfFile(confFile, confDict):
