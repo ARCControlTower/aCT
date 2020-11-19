@@ -1,28 +1,23 @@
-#!/usr/bin/env python3
-
 import argparse
 import sys
-
 import requests
 
-import config
+from config import parseNonParamConf
+from common import readProxyFile
 
 
 def main():
 
-    conf_dict = {}
+    confDict = {}
 
-    # get config from arguments
     parser = argparse.ArgumentParser(description="Resubmit failed jobs")
-    parser.add_argument('--proxy', default=None,
+    parser.add_argument('--proxy', default=None, type=str,
             help='path to proxy file')
-    parser.add_argument('--server', default=None,
+    parser.add_argument('--server', default=None, type=str,
             help='URL to aCT server')
-    parser.add_argument('--port', default=None,
+    parser.add_argument('--port', default=None, type=int,
             help='port on aCT server')
-    parser.add_argument('--cadir', default=None,
-            help='path to directory with CA certificates')
-    parser.add_argument('--conf', default=None,
+    parser.add_argument('--conf', default=None, type=str,
             help='path to configuration file')
     parser.add_argument('--id', default=None,
             help='a list of IDs of jobs that should be queried')
@@ -30,36 +25,38 @@ def main():
             help='substring that jobs should have in name')
     args = parser.parse_args()
 
-    conf_dict['proxy']  = args.proxy
-    conf_dict['server'] = args.server
-    conf_dict['port']   = args.port
-    conf_dict['cadir']  = args.cadir
+    confDict['proxy']  = args.proxy
+    confDict['server'] = args.server
+    confDict['port']   = args.port
 
-    config.parse_non_param_conf(conf_dict, args.conf)
+    parseNonParamConf(confDict, args.conf)
 
-    post_data = {'arcstate': 'toresubmit'}
+    proxyStr = readProxyFile(confDict['proxy'])
 
-    request_url = conf_dict['server'] + ':' + str(conf_dict['port']) + '/jobs'
+    requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/jobs'
 
-    # add parameters
     if args.id or args.name:
-        request_url += '?'
+        requestUrl += '?'
         if args.id:
-            request_url += 'id=' + args.id + '&'
+            requestUrl += 'id=' + args.id + '&'
         if args.name:
-            request_url += 'name=' + args.name
-        request_url = request_url.rstrip('&')
+            requestUrl += 'name=' + args.name
+        requestUrl = requestUrl.rstrip('&')
 
     try:
-        r = requests.patch(request_url, cert=conf_dict['proxy'], verify=conf_dict['cadir'], json=post_data)
+        r = requests.patch(requestUrl, data={'proxy':proxyStr,'arcstate':'toresubmit'})
     except Exception as e:
-        print('requests error: {}'.format(str(e)))
-        sys.exit(5)
+        print('error: request: {}'.format(str(e)))
+        sys.exit(1)
 
-    if r.status_code == 200:
-        print('Will resubmit {} jobs'.format(r.text))
-    else:
-        print('{} - {}'.format(r.status_code, r.text))
-        sys.exit(4)
+    if r.status_code != 200:
+        print('error: request response: {} - {}'.format(r.status_code, r.text))
+        sys.exit(1)
+
+    print('Will resubmit {} jobs'.format(r.text))
+
+
+if __name__ == '__main__':
+    main()
 
 

@@ -11,10 +11,9 @@ There are also some utility functions which are common to all response
 functions.
 """
 
-import act.client.jobmgr as jobmgr
-import act.client.proxymgr as proxymgr
-import act.client.clientdb as clientdb
-import act.client.errors as errors
+from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
+from act.client.proxymgr import ProxyManager
+from act.client.errors import NoSuchProxyError, InvalidJobDescriptionError, NoSuchSiteError
 
 import json
 import os
@@ -58,7 +57,7 @@ def stat():
     """
     try:
         proxyid = getProxyId()
-    except errors.NoSuchProxyError:
+    except NoSuchProxyError:
         return 'Wrong or no client certificate', 401
 
     try:
@@ -77,12 +76,12 @@ def stat():
     if arccols:
         arccols = arccols.split(',')
 
-    jmgr = jobmgr.JobManager()
+    jmgr = JobManager()
     try:
         jobdicts = jmgr.getJobStats(proxyid, jobids, state_filter, name_filter, clicols, arccols)
     except Exception as e:
         # TODO: could also be server error
-        return str(e), 400
+        return 'Error', 400
     else:
         return json.dumps(jobdicts)
 
@@ -103,7 +102,7 @@ def clean():
     """
     try:
         proxyid = getProxyId()
-    except errors.NoSuchProxyError:
+    except NoSuchProxyError:
         return 'Wrong or no client certificate', 401
 
     try:
@@ -114,7 +113,7 @@ def clean():
     name_filter = request.args.get('name', default='')
     state_filter = request.args.get('state', default='')
 
-    jmgr = jobmgr.JobManager()
+    jmgr = JobManager()
     numDeleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
     return json.dumps(numDeleted)
 
@@ -140,7 +139,7 @@ def patch():
     """
     try:
         proxyid = getProxyId()
-    except errors.NoSuchProxyError:
+    except NoSuchProxyError:
         return 'Wrong or no client certificate', 401
 
     try:
@@ -151,18 +150,12 @@ def patch():
     name_filter = request.args.get('name', default='')
     state_filter = request.args.get('state', default='')
 
-    jmgr = jobmgr.JobManager()
-
-    # force ignores incomptable mimetype, silent returns None instead of
-    # calling on_json_loading_failed() of request object
-    patch = request.get_json(force=True, silent=True)
-    if not patch:
-        return 'Request data is not valid JSON', 400
-
     try:
-        arcstate = patch['arcstate']
+        arcstate = request.form['arcstate']
     except KeyError:
         return "Request data has no 'arcstate' property", 400
+
+    jmgr = JobManager()
 
     if arcstate == 'tofetch':
         num = jmgr.fetchJobs(proxyid, jobids, name_filter)
@@ -175,7 +168,6 @@ def patch():
     return json.dumps(num)
 
 
-# TODO: is it secure to return exception messages?
 @app.route('/jobs', methods=['POST'])
 def submit():
     """
@@ -191,30 +183,29 @@ def submit():
     """
     try:
         proxyid = getProxyId()
-    except errors.NoSuchProxyError:
+    except NoSuchProxyError:
         return 'Wrong or no client certificate', 401
 
-    jmgr = jobmgr.JobManager()
+    jmgr = JobManager()
 
     site = request.form.get('site', None)
     if not site:
         return 'No site given', 400
-    xrsl_file = request.files.get('xrsl', None)
-    if not xrsl_file:
+    jobdesc = request.form.get('xrsl', "")
+    if not jobdesc:
         return 'No job description file given', 400
-    jobdesc = xrsl_file.read()
     try:
-        jobmgr.checkJobDesc(jobdesc)
-        jobmgr.checkSite(site)
-    except errors.InvalidJobDescriptionError as e:
+        checkJobDesc(jobdesc)
+        checkSite(site)
+    except InvalidJobDescriptionError:
         return 'Invalid job description', 400
-    except errors.NoSuchSiteError as e:
+    except NoSuchSiteError:
         return 'Invalid site', 400
     else:
         try:
             jobid = jmgr.clidb.insertJobAndDescription(jobdesc, proxyid, site)
-        except Exception as e:
-            return 'Server error: {}'.format(str(e)), 500
+        except Exception:
+            return 'Server error', 500
         else:
             return str(jobid)
 
@@ -240,7 +231,7 @@ def getResults():
     """
     try:
         proxyid = getProxyId()
-    except errors.NoSuchProxyError:
+    except NoSuchProxyError:
         return 'Wrong or no client certificate', 401
 
     try:
@@ -249,10 +240,12 @@ def getResults():
         return 'Invalid id parameter', 400
     if not jobids:
         return 'No job ID given', 400
+    elif len(jobids) > 1:
+        return 'Cannot fetch results of more than one job', 400
     jobid = [jobids[0]] # only take first job
 
     # get job results
-    jmgr = jobmgr.JobManager()
+    jmgr = JobManager()
     results = jmgr.getJobs(proxyid, jobid)
     if not results.jobdicts:
         return 'Results for job not found', 404
@@ -271,7 +264,7 @@ def getResults():
         archive.close()
         os.remove(archivePath)
     except Exception as e:
-        return 'Server error: {}'.format(str(e)), 500
+        return 'Server error', 500
 
     return send_file(byteStream,
             mimetype='application/zip',
@@ -296,46 +289,40 @@ def submitProxy():
         status 200: A string with ID of a proxy certificate.
         status 401 or 500: A string with error message.
     """
-    # The following validation procedure is done as per:
-    # https://stackoverflow.com/questions/30700348/how-to-validate-verify-an-x509-certificate-chain-of-trust-in-python
+    ## The following validation procedure is done as per:
+    ## https://stackoverflow.com/questions/30700348/how-to-validate-verify-an-x509-certificate-chain-of-trust-in-python
 
-    # user pem is client certificate in header
-    user_pem = getCertString()
-    if not user_pem:
-        return 'Wrong or no client certificate', 401
+    ## user pem is client certificate in header
+    #user_pem = getCertString()
+    #if not user_pem:
+    #    return 'Wrong or no client certificate', 401
 
-    # get pem for CA
-    caPath = os.path.join(os.environ['PATH'].split(':')[-1], 'ca.pem')
-    try:
-        caFile = open(caPath, 'r') # TODO: ca.pem in bin directory
-    except Exception as e:
-        return 'Server error: {}'.format(str(e)), 500
-    else:
-        root_pem = caFile.read()
-        caFile.close()
+    ## get pem for CA
+    #caPath = os.path.join(os.environ['PATH'].split(':')[-1], 'ca.pem')
+    #try:
+    #    caFile = open(caPath, 'r') # TODO: ca.pem in bin directory
+    #except Exception:
+    #    return 'Server error', 500
+    #else:
+    #    root_pem = caFile.read()
+    #    caFile.close()
 
-    # verify
-    root_cert = load_certificate(FILETYPE_PEM, root_pem)
-    user_cert = load_certificate(FILETYPE_PEM, user_pem)
-    store = X509Store()
-    store.add_cert(root_cert)
-    store_ctx = X509StoreContext(store, user_cert)
-    try:
-        store_ctx.verify_certificate()
-    except Exception as e:
-        return 'Client certificate verification failed', 401
+    ## verify
+    #root_cert = load_certificate(FILETYPE_PEM, root_pem)
+    #user_cert = load_certificate(FILETYPE_PEM, user_pem)
+    #store = X509Store()
+    #store.add_cert(root_cert)
+    #store_ctx = X509StoreContext(store, user_cert)
+    #try:
+    #    store_ctx.verify_certificate()
+    #except Exception:
+    #    return 'Client certificate verification failed', 401
 
-    pmgr = proxymgr.ProxyManager() # TODO: handle error with pmgr and jmgr
-
-    try:
-        # TODO: ARC API does not fail when given genproxy script as proxy!!!!
-        proxyStr = request.get_data()
-        dn, exp_time = pmgr.readProxyString(proxyStr)
-        proxyid = pmgr.actproxy.updateProxy(proxyStr, dn, '', exp_time)
-    except Exception as e:
-        return 'Server error: {}'.format(str(e)), 500
-    else:
-        return json.dumps(proxyid)
+    proxyStr = getProxyString()
+    pmgr = ProxyManager()
+    dn, expTime = pmgr.readProxyString(proxyStr)
+    proxyid = pmgr.actproxy.updateProxy(proxyStr, dn, '', expTime)
+    return json.dumps(proxyid)
 
 
 @app.route('/proxies', methods=['GET'])
@@ -349,8 +336,8 @@ def getProxies():
     Returns:
         JSON list of JSON objects with proxy information (status 200).
     """
-    dn = getCertDN()
-    pmgr = proxymgr.ProxyManager()
+    dn, _ = getProxyDNAndAttr()
+    pmgr = ProxyManager()
     proxies = pmgr.getProxiesWithDN(dn, columns=['id', 'attribute'])
     return json.dumps(proxies)
 
@@ -373,9 +360,9 @@ def deleteProxies():
         status 200: A string with a number of deleted proxies.
         status 401: A string with error message.
     """
-    dn = getCertDN()
-    pmgr = proxymgr.ProxyManager()
-    jmgr = jobmgr.JobManager()
+    dn, _ = getProxyDNAndAttr()
+    pmgr = ProxyManager()
+    jmgr = JobManager()
     proxies = pmgr.getProxiesWithDN(dn, columns=['id'])
 
     try:
@@ -398,29 +385,27 @@ def deleteProxies():
 
 def getProxyId():
     """Get proxy id from proxy info in current request context."""
-    pmgr = proxymgr.ProxyManager()
-    dn = getCertDN()
+    dn, _ = getProxyDNAndAttr()
+    pmgr = ProxyManager()
     proxyid = pmgr.getProxyInfo(dn, '', ['id'])['id']
     return proxyid
 
 
-def getCertDN():
+def getProxyDNAndAttr():
     """Get cert DN from cert in current request context."""
-    pmgr = proxymgr.ProxyManager()
-    cert = getCertString()
-    dn, _ = pmgr.readProxyString(cert)
-    return dn
+    proxy = getProxyString()
+    pmgr = ProxyManager()
+    dn, attr =  pmgr.readProxyString(proxy)
+    return dn, attr
 
 
-def getCertString():
-    """
-    Get cert string from current request context.
-
-    Function expects certificate to be in header as X-Ssl-Client-Cert.
-    """
-    cert = request.headers.get('X-Ssl-Client-Cert', default='')
-    fixedCert = fixCertStr(cert)
-    return fixedCert
+def getProxyString():
+    """Get cert string from current request context."""
+    proxy = request.form.get('proxy', None)
+    if not proxy:
+        raise NoSuchProxyError()
+    proxyStr = str(proxy)
+    return proxyStr
 
 
 def getIDs():
@@ -432,20 +417,8 @@ def getIDs():
     """
     ids = request.args.get('id', default=[])
     if ids:
-        return jobmgr.getIDsFromList(ids)
+        return getIDsFromList(ids)
     else:
         return []
-
-
-def fixCertStr(certStr):
-    """
-    Remove spaces after newlines.
-
-    When certificate is put in header by NGINX, one space is put after each
-    newline character, which breaks certificate. This function fixes
-    certificate string by removing those spaces.
-    """
-    newCertStr = certStr.replace('\n ', '\n')
-    return newCertStr
 
 

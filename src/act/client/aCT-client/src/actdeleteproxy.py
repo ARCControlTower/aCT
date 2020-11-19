@@ -1,18 +1,15 @@
-#!/usr/bin/env python3
-
 import argparse
 import sys
-
 import requests
 
-import config
+from config import parseNonParamConf
+from common import readProxyFile
 
 
 def main():
 
-    conf_dict = {}
+    confDict = {}
 
-    # get config from arguments
     parser = argparse.ArgumentParser(description='Delete proxy from aCT server')
     parser.add_argument('--proxy', default=None,
             help='path to proxy file')
@@ -20,8 +17,6 @@ def main():
             help='URL to aCT server')
     parser.add_argument('--port', default=None,
             help='port on aCT server')
-    parser.add_argument('--cadir', default=None,
-            help='path to directory with CA certificates')
     parser.add_argument('--conf', default=None,
             help='path to configuration file')
     parser.add_argument('--id', default=None,
@@ -32,26 +27,31 @@ def main():
         print('error: no proxy id given')
         sys.exit(1)
 
-    conf_dict['proxy']  = args.proxy
-    conf_dict['server'] = args.server
-    conf_dict['port']   = args.port
-    conf_dict['cadir']  = args.cadir
+    confDict['proxy']  = args.proxy
+    confDict['server'] = args.server
+    confDict['port']   = args.port
 
-    config.parse_non_param_conf(conf_dict, args.conf)
+    parseNonParamConf(confDict, args.conf)
 
-    request_url = conf_dict['server'] + ':' + str(conf_dict['port']) + '/proxies'
-    request_url += '?id=' + args.id
+    proxyStr = readProxyFile(confDict['proxy'])
+
+    requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/proxies'
+    requestUrl += '?id=' + args.id
 
     try:
-        r = requests.delete(request_url, cert=conf_dict['proxy'], verify=conf_dict['cadir'])
+        r = requests.delete(requestUrl, data={'proxy':proxyStr})
     except Exception as e:
-        print('requests error: {}'.format(str(e)))
-        sys.exit(5)
+        print('error: requests: {}'.format(str(e)))
+        sys.exit(1)
 
-    if r.status_code == 200:
-        print('Deleted {} proxies'.format(r.text))
-    else:
-        print('{} - {}'.format(r.status_code, r.text))
-        sys.exit(4)
+    if r.status_code != 200:
+        print('error: request response: {} - {}'.format(r.status_code, r.text))
+        sys.exit(1)
+
+    print('Deleted {} proxies'.format(r.text))
+
+
+if __name__ == '__main__':
+    main()
 
 
