@@ -1,28 +1,23 @@
-#!/usr/bin/env python3
-
 import argparse
 import sys
-
 import requests
 
-import config
+from config import parseNonParamConf
+from common import readProxyFile
 
 
 def main():
 
-    conf_dict = {}
+    confDict = {}
 
-    # get config from arguments
     parser = argparse.ArgumentParser(description="Get jobs' status")
-    parser.add_argument('--proxy', default=None,
+    parser.add_argument('--proxy', default=None, type=str,
             help='path to proxy file')
-    parser.add_argument('--server', default=None,
+    parser.add_argument('--server', default=None, type=str,
             help='URL to aCT server')
-    parser.add_argument('--port', default=None,
+    parser.add_argument('--port', default=None, type=int,
             help='port on aCT server')
-    parser.add_argument('--cadir', default=None,
-            help='path to directory with CA certificates')
-    parser.add_argument('--conf', default=None,
+    parser.add_argument('--conf', default=None, type=str,
             help='path to configuration file')
     parser.add_argument('--id', default=None,
             help='a list of IDs of jobs that should be queried')
@@ -36,35 +31,35 @@ def main():
             help='substring that jobs should have in name')
     args = parser.parse_args()
 
-    conf_dict['proxy']  = args.proxy
-    conf_dict['server'] = args.server
-    conf_dict['port']   = args.port
-    conf_dict['cadir']  = args.cadir
+    confDict['proxy']  = args.proxy
+    confDict['server'] = args.server
+    confDict['port']   = args.port
 
-    config.parse_non_param_conf(conf_dict, args.conf)
+    parseNonParamConf(confDict, args.conf)
 
-    request_url = conf_dict['server'] + ':' + str(conf_dict['port']) + '/jobs'
+    proxyStr = readProxyFile(confDict['proxy'])
 
-    # add parameters
+    requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/jobs'
+
     if args.id or args.arc or args.client or args.state or args.name:
-        request_url += '?'
+        requestUrl += '?'
         if args.id:
-            request_url += 'id=' + args.id + '&'
+            requestUrl += 'id=' + args.id + '&'
         if args.arc:
-            request_url += 'arc=' + args.arc + '&'
+            requestUrl += 'arc=' + args.arc + '&'
         if args.client:
-            request_url += 'client=' + args.client + '&'
+            requestUrl += 'client=' + args.client + '&'
         if args.state:
-            request_url += 'state=' + args.state + '&'
+            requestUrl += 'state=' + args.state + '&'
         if args.name:
-            request_url += 'name=' + args.name
-        request_url = request_url.rstrip('&')
+            requestUrl += 'name=' + args.name
+        requestUrl = requestUrl.rstrip('&')
 
     try:
-        r = requests.get(request_url, cert=conf_dict['proxy'], verify=conf_dict['cadir'])
+        r = requests.get(requestUrl, data={'proxy':proxyStr})
     except Exception as e:
-        print('requests error: {}'.format(str(e)))
-        sys.exit(5)
+        print('error: request: {}'.format(str(e)))
+        sys.exit(1)
 
     if args.arc:
         arccols = args.arc.split(',')
@@ -75,36 +70,72 @@ def main():
     else:
         clicols = []
 
-    if r.status_code == 200:
-        try:
-            json_resp = r.json()
-        except ValueError as e:
-            print('Response error: {}. Response status: {}'.format(e, r.status_code))
-            sys.exit(3)
-        # For each column, determine biggest sized value so that output can
-        # be nicely formatted.
-        colsizes = {}
-        for job in json_resp:
-            for key, value in job.items():
-                # All keys have a letter and underscore prepended, which is not
-                # used when printing
-                colsize = max(len(str(key[2:])), len(str(value)))
-                try:
-                    if colsize > colsizes[key]:
-                        colsizes[key] = colsize
-                except KeyError:
+    if r.status_code != 200:
+        print('error: request response: {} - {}'.format(r.status_code, r.text))
+        sys.exit(1)
+
+    try:
+        jsonResp = r.json()
+        import pprint
+        pp = pprint.PrettyPrinter()
+        pp.pprint(jsonResp)
+    except ValueError as e:
+        print('error: response JSON: {}'.format(str(e)))
+        sys.exit(1)
+
+    if not jsonResp:
+        sys.exit(0)
+
+    # For each column, determine biggest sized value so that output can
+    # be nicely formatted.
+    colsizes = {}
+    for job in jsonResp:
+        for key, value in job.items():
+            # All keys have a letter and underscore prepended, which is not
+            # used when printing
+            colsize = max(len(str(key[2:])), len(str(value)))
+            try:
+                if colsize > colsizes[key]:
                     colsizes[key] = colsize
-        # Print jobs
-        for job in json_resp:
-            for col in clicols:
-                fullKey = 'c_' + col
-                print('{:<{width}}'.format(job[fullKey], width=colsizes[fullKey]), end=' ')
-            for col in arccols:
-                fullKey = 'a_' + col
-                print('{:<{width}}'.format(job[fullKey], width=colsizes[fullKey]), end=' ')
-            print()
-    else:
-        print('{} - {}'.format(r.status_code, r.text))
-        sys.exit(4)
+            except KeyError:
+                colsizes[key] = colsize
+
+    print(colsizes)
+
+    # Print table header
+    for col in clicols:
+        print('{:<{width}}'.format(col, width=colsizes['c_' + col]), end=' ')
+    for col in arccols:
+        print('{:<{width}}'.format(col, width=colsizes['a_' + col]), end=' ')
+    print()
+    line = ''
+    for value in colsizes.values():
+        line += '-' * value
+    line += '-' * (len(colsizes) - 1)
+    print(line)
+
+    # Print jobs
+    for job in jsonResp:
+        for col in clicols:
+            fullKey = 'c_' + col
+            # fix from CLI actstat
+            #print('{:<{width}}'.format(job.get(fullKey, ""), width=colsizes[fullKey]), end=' ')
+            txt = job.get(fullKey)
+            if not txt or str(txt).strip() == '': # short circuit important!
+                txt = "''"
+            print('{:<{width}}'.format(txt, width=colsizes[fullKey]), end=' ')
+        for col in arccols:
+            fullKey = 'a_' + col
+            # fix from CLI actstat
+            #print('{:<{width}}'.format(job.get(fullKey, ""), width=colsizes[fullKey]), end=' ')
+            txt = job.get(fullKey)
+            if not txt or str(txt).strip() == '': # short circuit important!
+                txt = "''"
+            print('{:<{width}}'.format(txt, width=colsizes[fullKey]), end=' ')
+        print()
+
+
+if __name__ == '__main__':
+    main()
 
 

@@ -1,55 +1,55 @@
-#!/usr/bin/env python3
-
 import argparse
 import sys
 import json
-
 import requests
 
-import config
+from config import parseNonParamConf
+from common import readProxyFile
 
 
 def main():
 
-    conf_dict = {}
+    confDict = {}
 
-    # get config from arguments
     parser = argparse.ArgumentParser(description='List proxies on aCT server')
-    parser.add_argument('--proxy', default=None,
+    parser.add_argument('--proxy', default=None, type=str,
             help='path to proxy file')
-    parser.add_argument('--server', default=None,
+    parser.add_argument('--server', default=None, type=str,
             help='URL to aCT server')
-    parser.add_argument('--port', default=None,
+    parser.add_argument('--port', default=None, type=int,
             help='port on aCT server')
-    parser.add_argument('--cadir', default=None,
-            help='path to directory with CA certificates')
-    parser.add_argument('--conf', default=None,
+    parser.add_argument('--conf', default=None, type=str,
             help='path to configuration file')
     args = parser.parse_args()
 
-    conf_dict['proxy']  = args.proxy
-    conf_dict['server'] = args.server
-    conf_dict['port']   = args.port
-    conf_dict['cadir']  = args.cadir
+    confDict['proxy']  = args.proxy
+    confDict['server'] = args.server
+    confDict['port']   = args.port
 
-    config.parse_non_param_conf(conf_dict, args.conf)
+    parseNonParamConf(confDict, args.conf)
 
-    request_url = conf_dict['server'] + ':' + str(conf_dict['port']) + '/proxies'
+    proxyStr = readProxyFile(confDict['proxy'])
+
+    requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/proxies'
 
     try:
-        r = requests.get(request_url, cert=conf_dict['proxy'], verify=conf_dict['cadir'])
+        r = requests.get(requestUrl, data={'proxy':proxyStr})
     except Exception as e:
         print('requests error: {}'.format(str(e)))
-        sys.exit(5)
+        sys.exit(1)
 
-    if r.status_code == 200:
-        json_r = json.loads(r.text)
-        for proxy in json_r:
-            for key, value in proxy.items():
-                print('{}:{} '.format(key, value), end=' ')
-            print()
-    else:
-        print('{} - {}'.format(r.status_code, r.text))
-        sys.exit(4)
+    if r.status_code != 200:
+        print('error: request response: {} - {}'.format(r.status_code, r.text))
+        sys.exit(1)
+
+    json_r = json.loads(r.text)
+    for proxy in json_r:
+        for key, value in proxy.items():
+            print('{}:{} '.format(key, value), end=' ')
+        print()
+
+
+if __name__ == '__main__':
+    main()
 
 
