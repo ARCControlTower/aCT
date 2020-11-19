@@ -3,7 +3,7 @@ import sys
 import requests
 
 from config import parseNonParamConf
-from common import readProxyFile
+from common import readProxyFile, addCommonArguments
 
 
 def main():
@@ -11,14 +11,7 @@ def main():
     confDict = {}
 
     parser = argparse.ArgumentParser(description='Delete proxy from aCT server')
-    parser.add_argument('--proxy', default=None,
-            help='path to proxy file')
-    parser.add_argument('--server', default=None,
-            help='URL to aCT server')
-    parser.add_argument('--port', default=None,
-            help='port on aCT server')
-    parser.add_argument('--conf', default=None,
-            help='path to configuration file')
+    addCommonArguments(parser)
     parser.add_argument('--id', default=None,
             help='a list of proxy IDs of proxies that should be deleted')
     args = parser.parse_args()
