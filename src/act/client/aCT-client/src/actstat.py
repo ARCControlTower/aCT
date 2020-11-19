@@ -69,9 +69,6 @@ def main():
 
     try:
         jsonResp = r.json()
-        import pprint
-        pp = pprint.PrettyPrinter()
-        pp.pprint(jsonResp)
     except ValueError as e:
         print('error: response JSON: {}'.format(str(e)))
         sys.exit(1)
