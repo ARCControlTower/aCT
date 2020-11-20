@@ -3,7 +3,7 @@ import sys
 import requests
 
 from config import parseNonParamConf
-from common import readProxyFile, addCommonArguments
+from common import readProxyFile, addCommonArgs
 
 
 def main():
@@ -11,7 +11,7 @@ def main():
     confDict = {}
 
     parser = argparse.ArgumentParser(description='Submit proxy to aCT server')
-    addCommonArguments(parser)
+    addCommonArgs(parser)
     args = parser.parse_args()
 
     confDict['proxy']  = args.proxy

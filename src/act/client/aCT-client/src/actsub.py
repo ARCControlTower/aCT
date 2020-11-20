@@ -3,7 +3,7 @@ import sys
 import requests
 
 from config import parseNonParamConf
-from common import readProxyFile, addCommonArguments
+from common import readProxyFile, addCommonArgs
 
 
 def main():
@@ -11,7 +11,7 @@ def main():
     confDict = {}
 
     parser = argparse.ArgumentParser(description='Submit job to aCT server')
-    addCommonArguments(parser)
+    addCommonArgs(parser)
     parser.add_argument('--site', default='default',
             help='site that jobs should be submitted to')
     parser.add_argument('xRSL', help='path to job description file')
