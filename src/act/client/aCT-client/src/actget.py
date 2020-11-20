@@ -5,7 +5,7 @@ import zipfile
 import requests
 
 from config import parseNonParamConf
-from common import readProxyFile, addCommonArguments
+from common import readProxyFile, addCommonArgs, showHelpOnCommandOnly
 
 
 def main():
@@ -13,10 +13,11 @@ def main():
     confDict = {}
 
     parser = argparse.ArgumentParser(description='Submit proxy to aCT server')
-    addCommonArguments(parser)
+    addCommonArgs(parser)
     parser.add_argument('--id', default='',
             help='a list of IDs of jobs that should be queried')
     args = parser.parse_args()
+    showHelpOnCommandOnly(parser)
 
     confDict['proxy']  = args.proxy
     confDict['server'] = args.server

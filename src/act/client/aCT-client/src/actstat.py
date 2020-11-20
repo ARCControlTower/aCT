@@ -3,7 +3,8 @@ import sys
 import requests
 
 from config import parseNonParamConf
-from common import readProxyFile, addCommonArguments
+from common import readProxyFile, addCommonArgs, showHelpOnCommandOnly
+from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
 
 
 def main():
@@ -11,18 +12,18 @@ def main():
     confDict = {}
 
     parser = argparse.ArgumentParser(description="Get jobs' status")
-    addCommonArguments(parser)
-    parser.add_argument('--id', default=None,
-            help='a list of IDs of jobs that should be queried')
+    addCommonArgs(parser)
+    addCommonJobFilterArgs(parser)
+    parser.add_argument('--state', default=None,
+            help='the state that jobs should be in')
     parser.add_argument('--arc', default='arcstate',
             help='a list of columns from ARC table')
     parser.add_argument('--client', default='id,jobname',
             help='a list of columns from client table')
-    parser.add_argument('--state', default=None,
-            help='the state that jobs should be in')
-    parser.add_argument('--name', default=None,
-            help='substring that jobs should have in name')
     args = parser.parse_args()
+    showHelpOnCommandOnly(parser)
+
+    checkJobParams(args)
 
     confDict['proxy']  = args.proxy
     confDict['server'] = args.server
@@ -89,8 +90,6 @@ def main():
                     colsizes[key] = colsize
             except KeyError:
                 colsizes[key] = colsize
-
-    print(colsizes)
 
     # Print table header
     for col in clicols:

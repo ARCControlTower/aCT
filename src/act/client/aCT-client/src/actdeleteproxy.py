@@ -3,7 +3,7 @@ import sys
 import requests
 
 from config import parseNonParamConf
-from common import readProxyFile, addCommonArguments
+from common import readProxyFile, addCommonArgs, showHelpOnCommandOnly
 
 
 def main():
@@ -11,14 +11,11 @@ def main():
     confDict = {}
 
     parser = argparse.ArgumentParser(description='Delete proxy from aCT server')
-    addCommonArguments(parser)
+    addCommonArgs(parser)
     parser.add_argument('--id', default=None,
             help='a list of proxy IDs of proxies that should be deleted')
     args = parser.parse_args()
-
-    if not args.id:
-        print('error: no proxy id given')
-        sys.exit(1)
+    showHelpOnCommandOnly(parser)
 
     confDict['proxy']  = args.proxy
     confDict['server'] = args.server

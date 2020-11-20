@@ -242,7 +242,7 @@ def getResults():
         return 'No job ID given', 400
     elif len(jobids) > 1:
         return 'Cannot fetch results of more than one job', 400
-    jobid = [jobids[0]] # only take first job
+    jobid = jobids[:1] # only take first job
 
     # get job results
     jmgr = JobManager()

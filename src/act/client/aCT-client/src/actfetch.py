@@ -3,7 +3,8 @@ import sys
 import requests
 
 from config import parseNonParamConf
-from common import readProxyFile, addCommonArguments
+from common import readProxyFile, addCommonArgs, showHelpOnCommandOnly
+from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
 
 
 def main():
@@ -11,12 +12,12 @@ def main():
     confDict = {}
 
     parser = argparse.ArgumentParser(description="Fetch failed jobs")
-    addCommonArguments(parser)
-    parser.add_argument('--id', default=None,
-            help='a list of IDs of jobs that should be queried')
-    parser.add_argument('--name', default=None,
-            help='substring that jobs should have in name')
+    addCommonArgs(parser)
+    addCommonJobFilterArgs(parser)
     args = parser.parse_args()
+    showHelpOnCommandOnly(parser)
+
+    checkJobParams(args)
 
     confDict['proxy']  = args.proxy
     confDict['server'] = args.server
