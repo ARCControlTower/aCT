@@ -11,11 +11,11 @@ import sys
 import traceback
 import time
 
-import act.arc.aCTDBArc as aCTDBArc
-import act.common.aCTConfig as aCTConfig
-import act.common.aCTLogger as aCTLogger
-import act.common.aCTSignal as aCTSignal
-import act.client.clientdb as clientdb
+from act.arc.aCTDBArc import aCTDBArc
+from act.common.aCTConfig import aCTConfigARC
+from act.common.aCTLogger import aCTLogger
+from act.common.aCTSignal import ExceptInterrupt
+from act.client.clientdb import ClientDB
 from act.client.common import readSites
 
 
@@ -48,12 +48,12 @@ class Client2Arc(object):
         # get name, remove .py from the end
         self.name = os.path.basename(sys.argv[0])[:-3]
 
-        self.arcconf = aCTConfig.aCTConfigARC()
+        self.arcconf = aCTConfigARC()
 
-        self.logger = aCTLogger.aCTLogger(self.name)
+        self.logger = aCTLogger(self.name)
         self.log = self.logger()
-        self.clidb = clientdb.ClientDB(self.log)
-        self.arcdb = aCTDBArc.aCTDBArc(self.log)
+        self.clidb = ClientDB(self.log)
+        self.arcdb = aCTDBArc(self.log)
 
         self.log.info('Started {}'.format(self.name))
 
@@ -71,7 +71,7 @@ class Client2Arc(object):
                 self.arcconf.parse()
                 self.process()
                 time.sleep(10) # TODO: HARDCODED
-        except aCTSignal.ExceptInterrupt as x:
+        except ExceptInterrupt as x:
             self.log.info('Received interrupt {}, exiting'.format(str(x)))
         except:
             self.log.critical('*** Unexpected exception! ***')

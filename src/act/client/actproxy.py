@@ -14,9 +14,8 @@ import os
 import sys
 import logging
 
-import act.client.proxymgr as proxymgr
-from act.client.errors import NoProxyFileError
-from act.client.errors import ProxyFileExpiredError
+from act.client.proxymgr import ProxyManager
+from act.client.errors import NoProxyFileError, ProxyFileExpiredError
 
 
 def printProxyInfo(proxyInfo):
@@ -46,7 +45,7 @@ def main():
     else:
         proxyPath = args.proxy
 
-    manager = proxymgr.ProxyManager()
+    manager = ProxyManager()
     try:
         manager.updateProxy(proxyPath)
     except NoProxyFileError as e:

@@ -6,7 +6,7 @@ import sys
 import json
 import os
 
-import act.client.proxymgr as proxymgr
+from act.client.proxymgr import ProxyManager
 from act.client.errors import NoSuchProxyError
 from act.client.errors import NoProxyFileError
 from act.client.errors import ProxyFileExpiredError
@@ -25,7 +25,7 @@ def getProxyIdFromProxy(proxyPath):
             in proxy path is not in the database.
         NoProxyFileError: No proxy on given path.
     """
-    manager = proxymgr.ProxyManager()
+    manager = ProxyManager()
     try:
         return manager.getProxyIdForProxyFile(proxyPath)
     except NoSuchProxyError as e:
