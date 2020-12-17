@@ -16,11 +16,11 @@ import argparse
 import sys
 import logging
 
-import act.client.jobmgr as jobmgr
-import act.client.clientdb as clientdb
+from act.client.clientdb import ClientDB
 from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
-import act.common.aCTConfig as aCTConfig
-import act.client.errors as errors
+from act.client.jobmgr import checkSite, checkJobDesc
+from act.common.aCTConfig import aCTConfigARC
+from act.client.errors import NoSuchSiteError, InvalidJobDescriptionError
 
 
 def readXRSL(filepath):
@@ -56,8 +56,8 @@ def main():
 
     # check site
     try:
-        jobmgr.checkSite(args.site) # use default path for sites.json
-    except errors.NoSuchSiteError as e:
+        checkSite(args.site) # use default path for sites.json
+    except NoSuchSiteError as e:
         print('error: site \'{}\' is not configured'.format(args.site))
         sys.exit(4)
     except Exception as e:
@@ -67,8 +67,8 @@ def main():
     # get and check job description
     try:
         jobdesc = readXRSL(args.xRSL)
-        jobmgr.checkJobDesc(jobdesc)
-    except errors.InvalidJobDescriptionError:
+        checkJobDesc(jobdesc)
+    except InvalidJobDescriptionError:
         print('error: invalid job description')
         sys.exit(6)
     except IOError:
@@ -76,8 +76,8 @@ def main():
         sys.exit(7)
 
     # insert job
-    arcconf = aCTConfig.aCTConfigARC()
-    clidb = clientdb.ClientDB()
+    arcconf = aCTConfigARC()
+    clidb = ClientDB()
     jobid = clidb.insertJobAndDescription(jobdesc, proxyid, args.site)
     print('Successfully inserted job with id {}'.format(jobid))
 

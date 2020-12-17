@@ -15,10 +15,9 @@ import sys
 import logging
 import os
 
-import act.client.jobmgr as jobmgr
+from act.client.jobmgr import getIDsFromList, JobManager
 from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
-from act.client.errors import InvalidJobRangeError
-from act.client.errors import InvalidJobIDError
+from act.client.errors import InvalidJobRangeError, InvalidJobIDError
 
 
 def main():
@@ -53,7 +52,7 @@ def main():
         jobs = [] # empty means all jobs
     elif args.jobs:
         try:
-            jobs = jobmgr.getIDsFromList(args.jobs)
+            jobs = getIDsFromList(args.jobs)
         except InvalidJobRangeError as e:
             print("error: range '{}' is not a valid range".format(e.jobRange))
             sys.exit(2)
@@ -68,7 +67,7 @@ def main():
     proxyid = getProxyIdFromProxy(args.proxy)
 
     # kill jobs
-    manager = jobmgr.JobManager()
+    manager = JobManager()
     numKilled = manager.killJobs(proxyid, jobs, args.state, args.find)
     print('Jobs killed: {}'.format(numKilled))
 

@@ -8,10 +8,13 @@ import shutil
 import os
 
 import arc
-import act.arc.aCTDBArc as aCTDBArc
-import act.common.aCTConfig as aCTConfig
-import act.client.clientdb as clientdb
-import act.client.errors as errors
+from act.arc.aCTDBArc import aCTDBArc
+from act.common.aCTConfig import aCTConfigARC
+from act.client.clientdb import ClientDB, createMysqlEscapeList
+from act.client.errors import NoSuchProxyError, NoJobDirectoryError
+from act.client.errors import TmpConfigurationError, InvalidJobDescriptionError
+from act.client.errors import NoSuchSiteError, InvalidJobRangeError
+from act.client.errors import InvalidJobIDError
 from act.client.common import readSites
 
 
@@ -57,12 +60,12 @@ class JobManager(object):
     def __init__(self):
         """Initialize object's attributes."""
         self.logger = logging.getLogger(__name__)
-        self.arcdb = aCTDBArc.aCTDBArc(self.logger)
-        self.clidb = clientdb.ClientDB(self.logger)
+        self.arcdb = aCTDBArc(self.logger)
+        self.clidb = ClientDB(self.logger)
 
         # TODO: if and when sites from arc config are used, move everything
         # that uses arc config to this class
-        arcconf = aCTConfig.aCTConfigARC()
+        arcconf = aCTConfigARC()
         self.tmpdir = arcconf.get(['tmp', 'dir'])
 
     def checkProxy(self, proxyid):
@@ -80,7 +83,7 @@ class JobManager(object):
             NoSuchProxyError: Proxy does not exist in database.
         """
         if not self.arcdb.getProxy(proxyid):
-            raise errors.NoSuchProxyError(proxyid, None)
+            raise NoSuchProxyError(proxyid, None)
 
     def getClientColumns(self):
         """Return a list of column names from client engine's table."""
@@ -155,7 +158,7 @@ class JobManager(object):
                     # just log this problem, user doesn't need results anyway
                     self.logger.exception('Could not clean job results in {}'.format(
                         jobdir))
-                except errors.NoJobDirectoryError as e:
+                except NoJobDirectoryError as e:
                     # just log this problem, user doesn't need results anyway
                     self.logger.exception('Could not clean job results in {}'.format(
                         e.jobdir))
@@ -170,8 +173,7 @@ class JobManager(object):
         if numDeleted:
             arc_where = arc_where.rstrip(', ')
             arc_where = ' id IN ({})'.format(arc_where)
-            client_where = ' id IN ({})'.format(
-                    clientdb.createMysqlEscapeList(len(client_params)))
+            client_where = ' id IN ({})'.format(createMysqlEscapeList(len(client_params)))
             patch = {'arcstate': 'toclean', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
             self.clidb.deleteJobs(client_where, client_params)
@@ -200,8 +202,7 @@ class JobManager(object):
             patch = {'arcstate': 'toclean', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
         if results.clientIDs:
-            client_where = ' id in ({})'.format(
-                    clientdb.createMysqlEscapeList(len(results.clientIDs)))
+            client_where = ' id in ({})'.format(createMysqlEscapeList(len(results.clientIDs)))
             self.clidb.deleteJobs(client_where, results.clientIDs)
 
         for result in results.jobdicts:
@@ -294,7 +295,7 @@ class JobManager(object):
                     # just log this problem, user doesn't need results anyway
                     self.logger.exception('Could not clean job results in {}'.format(
                         jobdir))
-                except errors.NoJobDirectoryError as e:
+                except NoJobDirectoryError as e:
                     # just log this problem, user doesn't need results anyway
                     self.logger.exception('Could not clean job results in {}'.format(
                         e.jobdir))
@@ -362,7 +363,7 @@ class JobManager(object):
         for job in jobs:
             try:
                 srcdir = self.getACTJobDir(job['a_JobID'])
-            except errors.NoJobDirectoryError:
+            except NoJobDirectoryError:
                 srcdir = None
             results.arcIDs.append(job['a_id'])
             results.clientIDs.append(int(job['c_id']))
@@ -445,8 +446,7 @@ class JobManager(object):
             patch = {'arcstate': 'tocancel', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
         if client_ids:
-            client_where = ' id IN ({})'.format(
-                    clientdb.createMysqlEscapeList(len(client_ids)))
+            client_where = ' id IN ({})'.format(createMysqlEscapeList(len(client_ids)))
             self.clidb.deleteJobs(client_where, client_ids)
 
         res = self.arcdb.db.releaseMutexLock('arcjobs')
@@ -573,10 +573,10 @@ class JobManager(object):
                 return actJobDir
             else:
                 self.logger.error('Could not find job directory: {}'.format(actJobDir))
-                raise errors.NoJobDirectoryError(actJobDir)
+                raise NoJobDirectoryError(actJobDir)
         else:
             self.logger.error('tmp directory is not in config')
-            raise errors.TmpConfigurationError()
+            raise TmpConfigurationError()
 
     def _createMysqlIntList(self, integers):
         """
@@ -606,8 +606,7 @@ class JobManager(object):
 
     def _addIDFilter(self, ids=[], where='', where_params=[]):
         if ids:
-            where += ' c.id IN ({}) AND '.format(
-                    clientdb.createMysqlEscapeList(len(ids)))
+            where += ' c.id IN ({}) AND '.format(createMysqlEscapeList(len(ids)))
             where_params.extend(ids)
         return where, where_params
 
@@ -652,7 +651,7 @@ def checkJobDesc(jobdesc):
     jobdescs = arc.JobDescriptionList()
     if not arc.JobDescription_Parse(str(jobdesc), jobdescs):
         logger.error('Job description is not valid')
-        raise errors.InvalidJobDescriptionError()
+        raise InvalidJobDescriptionError()
 
 
 def checkSite(siteName, confpath='/etc/act/sites.json'):
@@ -677,7 +676,7 @@ def checkSite(siteName, confpath='/etc/act/sites.json'):
         logger.exception('Problem reading configuration')
         raise
 
-    raise errors.NoSuchSiteError(siteName)
+    raise NoSuchSiteError(siteName)
 
 
 def getIDsFromList(listStr):
@@ -712,21 +711,21 @@ def getIDsFromList(listStr):
             try:
                 firstIx, lastIx = group.split('-')
             except ValueError: # if there is more than one dash
-                raise errors.InvalidJobRangeError(group)
+                raise InvalidJobRangeError(group)
             try:
                 firstIx = int(firstIx)
             except ValueError:
-                raise errors.InvalidJobIDError(firstIx)
+                raise InvalidJobIDError(firstIx)
             try:
                 lastIx = int(lastIx)
             except ValueError:
-                raise errors.InvalidJobIDError(lastIx)
+                raise InvalidJobIDError(lastIx)
             ids.extend(range(int(firstIx), int(lastIx) + 1))
         else:
             try:
                 ids.append(int(group))
             except ValueError:
-                raise errors.InvalidJobIDError(group)
+                raise InvalidJobIDError(group)
     return ids
 
 

@@ -7,9 +7,10 @@ import os
 import arc
 import datetime
 
-import act.common.aCTProxy as aCTProxy
-import act.arc.aCTDBArc as aCTDBArc
-import act.client.errors as errors
+from act.common.aCTProxy import aCTProxy
+from act.arc.aCTDBArc import aCTDBArc
+from act.client.errors import NoSuchProxyError, NoProxyFileError
+from act.client.errors import ProxyFileExpiredError, ProxyDBExpiredError
 
 DEFAULT_PROXY_PATH = '/tmp/x509up_u'
 
@@ -35,8 +36,8 @@ class ProxyManager(object):
     def __init__(self):
         """Initialize object."""
         self.logger = logging.getLogger(__name__)
-        self.actproxy = aCTProxy.aCTProxy(self.logger)
-        self.arcdb = aCTDBArc.aCTDBArc(self.logger)
+        self.actproxy = aCTProxy(self.logger)
+        self.arcdb = aCTDBArc(self.logger)
 
     def getProxyInfo(self, dn, attribute='', columns=[]):
         """
@@ -61,7 +62,7 @@ class ProxyManager(object):
         else:
             if not proxyInfo:
                 self.logger.error('No proxy with dn={} and attribute={}'.format(dn, attribute))
-                raise errors.NoSuchProxyError(dn, attribute)
+                raise NoSuchProxyError(dn, attribute)
             else:
                 return proxyInfo
 
@@ -80,14 +81,14 @@ class ProxyManager(object):
             ProxyFileExpiredError: Proxy has expired.
         """
         if not os.path.isfile(proxyPath):
-            raise errors.NoProxyFileError(proxyPath)
+            raise NoProxyFileError(proxyPath)
         try:
             proxystr, dn, expirytime = self.actproxy._readProxyFromFile(proxyPath)
         except: # probably some file reading error
             self.logger.exception('Error reading proxy file {}'.format(proxyPath))
             raise
         if expirytime < datetime.datetime.now():
-            raise errors.ProxyFileExpiredError()
+            raise ProxyFileExpiredError()
         return proxystr, dn, expirytime
 
     def readProxyString(self, proxyStr):
@@ -148,7 +149,7 @@ class ProxyManager(object):
         _, dn, expirytime = self.readProxyFile(path)
         proxyinfo = self.getProxyInfo(dn, '', ['id', 'expirytime'])
         if expirytime != proxyinfo["expirytime"]:
-            raise errors.ProxyDBExpiredError()
+            raise ProxyDBExpiredError()
         return proxyinfo["id"]
 
     def getProxiesWithDN(self, dn, columns=[]):

@@ -19,10 +19,9 @@ import sys
 import logging
 import os
 
-import act.client.jobmgr as jobmgr
+from act.client.jobmgr import getIDsFromList, JobManager
 from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
-from act.client.errors import InvalidJobRangeError
-from act.client.errors import InvalidJobIDError
+from act.client.errors import InvalidJobRangeError, InvalidJobIDError
 
 def main():
     # parse arguments
@@ -56,7 +55,7 @@ def main():
         jobs = [] # empty means all jobs
     elif args.jobs: #TODO: should warning be added when both -a and -j are used?
         try:
-            jobs = jobmgr.getIDsFromList(args.jobs)
+            jobs = getIDsFromList(args.jobs)
         except InvalidJobRangeError as e:
             print("error: range '{}' is not a valid range".format(e.jobRange))
             sys.exit(2)
@@ -71,7 +70,7 @@ def main():
     proxyid = getProxyIdFromProxy(args.proxy)
 
     # clean jobs
-    manager = jobmgr.JobManager()
+    manager = JobManager()
     numDeleted = manager.cleanJobs(proxyid, jobs, args.state, args.find)
     print('Jobs deleted: {}'.format(numDeleted))
 
