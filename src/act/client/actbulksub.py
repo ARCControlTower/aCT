@@ -17,7 +17,7 @@ import os
 import act.client.jobmgr as jobmgr
 import act.client.clientdb as clientdb
 import act.common.aCTConfig as aCTConfig
-import act.client.clicommon as clicommon
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
 from act.client.errors import NoSuchSiteError
 from act.client.errors import InvalidJobDescriptionError
 
@@ -39,7 +39,7 @@ def main():
             help='show more information')
     parser.add_argument('xRSL', nargs='+', help='path(s) to xRSL file(s)')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -52,7 +52,7 @@ def main():
 
 
     # get ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # check site
     try:

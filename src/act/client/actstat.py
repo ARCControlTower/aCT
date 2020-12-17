@@ -18,7 +18,7 @@ import logging
 import os
 
 import act.client.jobmgr as jobmgr
-import act.client.clicommon as clicommon
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
 from act.client.errors import InvalidJobRangeError
 from act.client.errors import InvalidJobIDError
 
@@ -45,7 +45,7 @@ def main():
     parser.add_argument('--get-cols', action='store_true',
             help='print all available column names')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -98,7 +98,7 @@ def main():
         arccols = args.arc_cols.split(',')
 
     # get proxy ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # get information
     try:

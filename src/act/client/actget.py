@@ -19,7 +19,7 @@ import os.path
 import logging
 
 import act.client.jobmgr as jobmgr
-import act.client.clicommon as clicommon
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
 from act.client.errors import TargetDirExistsError
 from act.client.errors import InvalidJobRangeError
 from act.client.errors import InvalidJobIDError
@@ -65,7 +65,7 @@ def main():
     parser.add_argument('-D', '--dir', default='',
             help='directory where job result directoires should be copied to')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -93,7 +93,7 @@ def main():
         sys.exit(10)
 
     # get proxy ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # get job info
     manager = jobmgr.JobManager()
