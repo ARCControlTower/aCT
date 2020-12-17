@@ -11,8 +11,8 @@ import arc
 import act.arc.aCTDBArc as aCTDBArc
 import act.common.aCTConfig as aCTConfig
 import act.client.clientdb as clientdb
-import act.client.config as config
 import act.client.errors as errors
+from act.client.common import readSites
 
 
 logger = logging.getLogger(__name__)
@@ -669,7 +669,7 @@ def checkSite(siteName, confpath='/etc/act/sites.json'):
         NoSuchSiteError: Site is not in configuration.
     """
     try:
-        sites = config.readSites()
+        sites = readSites()
         for site in sites:
             if site == siteName:
                 return

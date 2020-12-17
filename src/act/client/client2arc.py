@@ -15,8 +15,8 @@ import act.arc.aCTDBArc as aCTDBArc
 import act.common.aCTConfig as aCTConfig
 import act.common.aCTLogger as aCTLogger
 import act.common.aCTSignal as aCTSignal
-import act.client.config as config
 import act.client.clientdb as clientdb
+from act.client.common import readSites
 
 
 class Client2Arc(object):
@@ -155,7 +155,7 @@ class Client2Arc(object):
         for job in jobs:
             # get cluster list from config
             clusterlist = ""
-            sites = config.readSites()
+            sites = readSites()
             clusterlist = ''
             for cluster in sites[job['siteName']]:
                 clusterlist += cluster + ','
