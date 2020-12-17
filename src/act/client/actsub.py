@@ -18,7 +18,7 @@ import logging
 
 import act.client.jobmgr as jobmgr
 import act.client.clientdb as clientdb
-import act.client.clicommon as clicommon
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
 import act.common.aCTConfig as aCTConfig
 import act.client.errors as errors
 
@@ -40,7 +40,7 @@ def main():
             help='show more information')
     parser.add_argument('xRSL', help='path to xRSL file')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -52,7 +52,7 @@ def main():
         logging.basicConfig(format=logFormat, level=logging.DEBUG, filename=os.devnull)
 
     # get ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # check site
     try:

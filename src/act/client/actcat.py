@@ -17,7 +17,7 @@ import os
 import subprocess
 
 import act.client.jobmgr as jobmgr
-import act.client.clicommon as clicommon
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
 from act.client.errors import InvalidJobRangeError
 from act.client.errors import InvalidJobIDError
 
@@ -52,7 +52,7 @@ def main():
     #parser.add_argument('-t', '--timeout', type=int, nargs=1,
     #        help='timeout in seconds (default 20)', default=20)
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -82,7 +82,7 @@ def main():
         print("error: no jobs specified (use -a or -j)")
         sys.exit(10)
 
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # get ARC job IDs of jobs that match filters
     try:

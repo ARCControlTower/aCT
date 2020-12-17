@@ -40,7 +40,7 @@ def readProxyFile(filename):
         print('error: read proxy: {}'.format(str(e)))
 
 
-# duplicated from act.client.clicommon
+# duplicated from act.client.common
 def showHelpOnCommandOnly(argparser):
     if len(sys.argv) == 1:
         argparser.print_help()

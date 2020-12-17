@@ -16,7 +16,7 @@ import logging
 import os
 
 import act.client.jobmgr as jobmgr
-import act.client.clicommon as clicommon
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
 from act.client.errors import InvalidJobRangeError
 from act.client.errors import InvalidJobIDError
 
@@ -37,7 +37,7 @@ def main():
     parser.add_argument('-p', '--proxy', default=None,
             help='custom path to proxy certificate')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -65,7 +65,7 @@ def main():
         sys.exit(10)
 
     # get proxy ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # kill jobs
     manager = jobmgr.JobManager()
