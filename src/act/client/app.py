@@ -11,14 +11,16 @@ There are also some utility functions which are common to all response
 functions.
 """
 
-from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
-from act.client.proxymgr import ProxyManager
-from act.client.errors import NoSuchProxyError, InvalidJobDescriptionError, NoSuchSiteError
-
 import json
 import os
 import shutil
 import io
+
+import arc
+
+from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
+from act.client.proxymgr import ProxyManager
+from act.client.errors import NoSuchProxyError, InvalidJobDescriptionError, NoSuchSiteError
 
 ## TODO: switch to cryptography library
 #from OpenSSL.crypto import load_certificate
@@ -188,10 +190,10 @@ def submit():
 
     jmgr = JobManager()
 
-    site = request.form.get('site', None)
+    site = request.form.get('site', '')
     if not site:
         return 'No site given', 400
-    jobdesc = request.form.get('xrsl', "")
+    jobdesc = request.form.get('xrsl', '')
     if not jobdesc:
         return 'No job description file given', 400
     try:
@@ -208,6 +210,55 @@ def submit():
             return 'Server error', 500
         else:
             return str(jobid)
+
+
+@app.route('/jobs', methods=['PUT'])
+def submitWithData():
+    """
+    End point for submitting jobs that use data management.
+    """
+    try:
+        proxyid = getProxyId()
+    except NoSuchProxyError:
+        return 'Wrong or no client certificate', 401
+
+    try:
+        jobids = getIDs()
+    except Exception:
+        return 'Invalid id parameter', 400
+
+    if len(jobids) > 1:
+        return 'Can only submit one job at a time', 400
+
+    jobdesc = request.form.get('xrsl', '')
+    if not jobdesc:
+        return 'No job description file given', 400
+    try:
+        checkJobDesc(jobdesc)
+    except InvalidJobDescriptionError:
+        return 'Invalid job description', 400
+
+    elif len(jobids) < 1: # create job and submit its name and site, return id
+        site = request.form.get('site', '')
+        if not site:
+            return 'No site given', 400
+        try:
+            checkSite(site)
+        except NoSuchSiteError:
+            return 'Invalid site', 400
+
+        try:
+            jobid = jmgr.clidb.insertJob(jobdesc, proxyid, site)
+        except Exception:
+            return 'Server error', 500
+        else:
+            return str(jobid)
+
+    else: # modify job description
+        jobid = jobids[0]
+        jobdescs = arc.JobDescriptionList()
+        if not arc.JobDescription_Parse(jobdesc, jobdescs):
+            return 'Error while parsing job description', 400
 
 
 @app.route('/results', methods=['GET'])
