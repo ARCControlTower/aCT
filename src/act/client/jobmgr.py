@@ -54,7 +54,6 @@ class JobManager(object):
         logger: An object for logging.
         arcdb: An object that is interface to ARC engine's table.
         clidb: An object that is interface to client engine's table.
-        tmpdir: A string with path to tmp directory.
     """
 
     def __init__(self):
@@ -65,8 +64,7 @@ class JobManager(object):
 
         # TODO: if and when sites from arc config are used, move everything
         # that uses arc config to this class
-        arcconf = aCTConfigARC()
-        self.tmpdir = arcconf.get(['tmp', 'dir'])
+        self.arcconf = aCTConfigARC()
 
     def checkProxy(self, proxyid):
         """
@@ -95,6 +93,7 @@ class JobManager(object):
         # TODO: hardcoded
         return self.clidb.getColumns('arcjobs')
 
+    # TODO: return a list of IDs rather than number
     def cleanJobs(self, proxyid, jobids=[], state_filter='', name_filter=''):
         """
         Clean given jobs that match optional filters.
@@ -147,7 +146,8 @@ class JobManager(object):
         # create where clauses for removal and remove tmp dirs
         arc_where = ''
         client_params = []
-        numDeleted = 0
+        #numDeleted = 0
+        deletedIDs = []
         for job in jobs:
             # remove results folder; if none, just log and don't notify user
             if job['a_arcstate'] in ('done', 'donefailed'):
@@ -167,10 +167,12 @@ class JobManager(object):
             arc_where += '{}, '.format(job['a_id'])
             client_params.append(int(job['c_id']))
 
-            numDeleted += 1
+            #numDeleted += 1
+            deletedIDs.append(job['c_id'])
 
         # delete jobs from tables
-        if numDeleted:
+        #if numDeleted:
+        if deletedIDs:
             arc_where = arc_where.rstrip(', ')
             arc_where = ' id IN ({})'.format(arc_where)
             client_where = ' id IN ({})'.format(createMysqlEscapeList(len(client_params)))
@@ -178,7 +180,8 @@ class JobManager(object):
             self.arcdb.updateArcJobs(patch, arc_where)
             self.clidb.deleteJobs(client_where, client_params)
 
-        return numDeleted
+        #return numDeleted
+        return deletedIDs
 
     def forceCleanJobs(self, results):
         """
@@ -566,17 +569,20 @@ class JobManager(object):
             TmpConfigurationError: tmp directory is not configured in aCT.
             NoJobDirectoryError: Job directory does not exist in aCT.
         """
-        if self.tmpdir:
-            jobdir = arcid.rsplit('/', 1)[-1]
-            actJobDir = os.path.join(self.tmpdir, jobdir)
-            if os.path.isdir(actJobDir):
-                return actJobDir
-            else:
-                self.logger.error('Could not find job directory: {}'.format(actJobDir))
-                raise NoJobDirectoryError(actJobDir)
-        else:
+        tmpdir = self.arcconf.get(['tmp', 'dir'])
+        if not tmpdir:
             self.logger.error('tmp directory is not in config')
             raise TmpConfigurationError()
+        jobdir = arcid.rsplit('/', 1)[-1]
+        actJobDir = os.path.join(tmpdir, jobdir)
+        if os.path.isdir(actJobDir):
+            return actJobDir
+        else:
+            self.logger.error('Could not find job directory: {}'.format(actJobDir))
+            raise NoJobDirectoryError(actJobDir)
+
+    def getJobDataDir(self, jobid):
+        return os.path.join(self.arcconf.get(["actlocation", "datman"]), str(jobid))
 
     def _createMysqlIntList(self, integers):
         """
@@ -606,6 +612,12 @@ class JobManager(object):
 
     def _addIDFilter(self, ids=[], where='', where_params=[]):
         if ids:
+            #if len(ids) == 1:
+            #    where += ' c.id = %s '
+            #    where_params.append(ids[0])
+            #else:
+            #    where += ' c.id IN ({}) AND '.format(createMysqlEscapeList(len(ids)))
+            #    where_params.extend(ids)
             where += ' c.id IN ({}) AND '.format(createMysqlEscapeList(len(ids)))
             where_params.extend(ids)
         return where, where_params

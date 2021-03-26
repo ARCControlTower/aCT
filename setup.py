@@ -19,7 +19,6 @@ setup(name='aCT',
         'selinux',                  # SELinux context handling
         'psutil',                   # Reports of process kills
 
-        'pyopenssl',
         'flask',
         'gunicorn',
         'sqlalchemy'

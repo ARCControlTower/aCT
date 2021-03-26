@@ -71,8 +71,8 @@ def main():
 
     # clean jobs
     manager = JobManager()
-    numDeleted = manager.cleanJobs(proxyid, jobs, args.state, args.find)
-    print('Jobs deleted: {}'.format(numDeleted))
+    deleted = manager.cleanJobs(proxyid, jobs, args.state, args.find)
+    print('Jobs deleted: {}'.format(len(deleted)))
 
 
 if __name__ == '__main__':

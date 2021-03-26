@@ -11,20 +11,19 @@ There are also some utility functions which are common to all response
 functions.
 """
 
-from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
-from act.client.proxymgr import ProxyManager
-from act.client.errors import NoSuchProxyError, InvalidJobDescriptionError, NoSuchSiteError
-
 import json
 import os
 import shutil
 import io
 
-## TODO: switch to cryptography library
-#from OpenSSL.crypto import load_certificate
-#from OpenSSL.crypto import X509Store, X509StoreContext
-#from OpenSSL.crypto import FILETYPE_PEM
+import arc
 
+from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
+from act.client.proxymgr import ProxyManager
+from act.client.errors import NoSuchProxyError, InvalidJobDescriptionError, NoSuchSiteError
+
+# TODO: see if checkJobExists should be used anywhere else
+# TODO: use logging instead of returning server error details to client
 
 from flask import Flask, request, send_file
 app = Flask(__name__)
@@ -114,8 +113,13 @@ def clean():
     state_filter = request.args.get('state', default='')
 
     jmgr = JobManager()
-    numDeleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
-    return json.dumps(numDeleted)
+    deleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
+
+    # TODO: remove job data directories
+    for jobid in deleted:
+        shutil.rmtree(jmgr.getJobDataDir(jobid))
+
+    return json.dumps(len(deleted))
 
 
 @app.route('/jobs', methods=['PATCH'])
@@ -188,10 +192,10 @@ def submit():
 
     jmgr = JobManager()
 
-    site = request.form.get('site', None)
+    site = request.form.get('site', '')
     if not site:
         return 'No site given', 400
-    jobdesc = request.form.get('xrsl', "")
+    jobdesc = request.form.get('xrsl', '')
     if not jobdesc:
         return 'No job description file given', 400
     try:
@@ -204,10 +208,101 @@ def submit():
     else:
         try:
             jobid = jmgr.clidb.insertJobAndDescription(jobdesc, proxyid, site)
-        except Exception:
+        except Exception as e:
             return 'Server error', 500
         else:
             return str(jobid)
+
+
+@app.route('/jobs', methods=['PUT'])
+def submitWithData():
+    """
+    End point for submitting jobs that use data management.
+    """
+    try:
+        proxyid = getProxyId()
+    except NoSuchProxyError:
+        return 'Wrong or no client certificate', 401
+
+    try:
+        jobids = getIDs()
+    except Exception:
+        return 'Invalid id parameter', 400
+
+    if len(jobids) > 1:
+        return 'Can only submit one job at a time', 400
+
+    jobdesc = request.form.get('xrsl', '')
+    if not jobdesc:
+        return 'No job description file given', 400
+    try:
+        checkJobDesc(jobdesc)
+    except InvalidJobDescriptionError:
+        return 'Invalid job description', 400
+
+    jmgr = JobManager()
+
+    if len(jobids) < 1: # create job and submit its name and site, return id
+        site = request.form.get('site', '')
+        if not site:
+            return 'No site given', 400
+        try:
+            checkSite(site)
+        except NoSuchSiteError:
+            return 'Invalid site', 400
+        try:
+            jobid = jmgr.clidb.insertJob(jobdesc, proxyid, site)
+        except Exception as e:
+            return 'Server error: {}'.format(str(e)), 500
+
+        # create job data directory
+        jobDataDir = jmgr.getJobDataDir(jobid)
+        # TODO: handle all possible error conditions
+        os.mkdir(jobDataDir)
+
+        return str(jobid)
+
+    else: # modify job description
+        jobdescs = arc.JobDescriptionList()
+        if not arc.JobDescription_Parse(jobdesc, jobdescs):
+            return 'Error while parsing job description', 400
+
+        # this is run to check if jobid even exists
+        jobid = checkJobExists(proxyid, jobids[0])
+        if not jobid:
+            return "Client job ID {} does not exist".format(jobid), 400
+
+        jobDataDir = jmgr.getJobDataDir(jobid)
+        filenames = []
+        # InputFiles need to be accessed through index otherwise
+        # the changes do not survive outside of for loop.
+        for i in range(len(jobdescs[0].DataStaging.InputFiles)):
+            filename = jobdescs[0].DataStaging.InputFiles[i].Name
+            filepath = os.path.join(jobDataDir, filename)
+            # TODO: handle the situation where file that should be
+            #       present is not present (right now we asume all
+            #       files are present and those who fail on this call
+            #       are remote resources
+            if not os.path.isfile(filepath):
+                #return "Input file {} is not uploaded".format(filename), 400
+                continue
+            jobdescs[0].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(os.path.abspath(filepath))
+
+        robot = ""
+        xrsl = jobdescs[0].UnParse(robot, "")[1]
+        jobdescs = arc.JobDescriptionList()
+        if not arc.JobDescription_Parse(xrsl, jobdescs):
+            return "Error while parsing generated job description", 400
+
+        try:
+            descid = jmgr.clidb.insertDescription(xrsl)
+            # inserting job description ID makes job eligible for
+            # pickup by client2arc
+            jmgr.clidb.updateJob(jobid, {"jobdesc": descid})
+        except Exception as e:
+            return "Server error: {}".format(str(e)), 500
+
+        return str(jobid)
 
 
 @app.route('/results', methods=['GET'])
@@ -242,11 +337,11 @@ def getResults():
         return 'No job ID given', 400
     elif len(jobids) > 1:
         return 'Cannot fetch results of more than one job', 400
-    jobid = jobids[:1] # only take first job
+    jobids = jobids[:1] # only take first job
 
     # get job results
     jmgr = JobManager()
-    results = jmgr.getJobs(proxyid, jobid)
+    results = jmgr.getJobs(proxyid, jobids)
     if not results.jobdicts:
         return 'Results for job not found', 404
     resultDir = results.jobdicts[0]['dir']
@@ -382,6 +477,39 @@ def deleteProxies():
                 numDeleted += 1
     return json.dumps(numDeleted)
 
+@app.route("/data", methods=["PUT"])
+def uploadFile():
+    try:
+        proxyid = getProxyId()
+    except NoSuchProxyError:
+        return 'Wrong or no client certificate', 401
+
+    try:
+        jobids = getIDs()
+    except Exception:
+        return 'Invalid id parameter', 400
+    if not jobids:
+        return 'No job ID given', 400
+    elif len(jobids) > 1:
+        return 'Cannot fetch results of more than one job', 400
+    # TODO: is there any duplication with submitWithData?
+    jobid = checkJobExists(proxyid, jobids[0])
+    if not jobid:
+        return "Client Job ID {} does not exist".format(jobid), 400
+
+    if not "file" in request.files:
+        return "No file sent", 400
+
+    datafile = request.files["file"]
+
+    jmgr = JobManager()
+    # TODO: check for error or use current exceptions?
+    jobDataDir = jmgr.getJobDataDir(jobid)
+    # TODO: werkzeug.safe_filename does not work because we need relative
+    #       path that can go deep
+    datafile.save(os.path.join(jobDataDir, datafile.filename))
+    return "OK", 200
+
 
 def getProxyId():
     """Get proxy id from proxy info in current request context."""
@@ -420,5 +548,18 @@ def getIDs():
         return getIDsFromList(ids)
     else:
         return []
+
+
+# TODO: JobManager is created all over the place, see if there is a better
+#       alternative (if it is needed everywhere then it should exist in
+#       "global context"?)
+def checkJobExists(proxyid, jobid):
+    """Returns given jobid if job exists or None if not."""
+    jmgr = JobManager()
+    jobdicts = jmgr.getJobStats(proxyid, [jobid], "", "", ["id"], [], "")
+    if not jobdicts:
+        return None
+    else:
+        return jobdicts[0]["c_id"]
 
 
