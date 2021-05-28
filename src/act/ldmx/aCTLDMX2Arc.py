@@ -1,4 +1,5 @@
 import os
+from collections import Counter
 
 from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
 
@@ -27,7 +28,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
                 continue
 
             # Send to cluster with the data if possible
-            clusterlist = self.rses.get(config.get('InputDataLocationLocalRSE'), ','.join(self.endpoints))
+            clusterlist = self.chooseEndpoints(config)
             self.log.info(f'Inserting job {job["id"]} to CEs {clusterlist}\n with xrsl {xrsl}')
             arcid = self.dbarc.insertArcJobDescription(xrsl,
                                                        proxyid=job['proxyid'],
@@ -78,15 +79,24 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         wrapper = self.conf.get(['executable', 'wrapper'])
         xrsl['executable'] = f"(executable = ldmxsim.sh)"
 
-        inputfiles = f'(ldmxsim.sh {wrapper}) \
-                       (ldmxproduction.config {descriptionfile}) \
-                       (ldmxjob.py {templatefile}) \
-                       (ldmx-simprod-rte-helper.py {self.conf.get(["executable", "ruciohelper"])})'
-        if 'InputFile' in config and 'InputDataLocationLocalRSE' not in config:
-            # No local copy so get ARC to download it
-            inputfiles += f'({config["InputFile"].split(":")[1]} \"{config["InputDataLocationRemote"]}\" "cache=no")'
+        inputfiles = f'(ldmxsim.sh {wrapper})\n \
+                       (ldmxproduction.config {descriptionfile})\n \
+                       (ldmxjob.py {templatefile})\n \
+                       (ldmx-simprod-rte-helper.py {self.conf.get(["executable", "ruciohelper"])})\n'
+
+        if 'InputDataset' in config:
+            for inputfile, inputlocal, inputremote in zip(config['InputFile'].split(','),
+                                                          config['InputDataLocationLocalRSE'].split(','),
+                                                          config['InputDataLocationRemote'].split(',')):
+                if inputlocal == 'None':
+                    # No local copy so get ARC to download it
+                    inputfiles += f'({inputfile.split(":")[1]} \"{inputremote}\" "cache=no")\n'
+
         if 'PileupLocation' in config:
-            inputfiles += f'({config["PileupLocation"].split("/")[-1]} \"{config["PileupLocation"]}\" "cache=copy")'
+            for pup in config.get('PileupLocation').split(','):
+                if pup != 'None':
+                    inputfiles += f'({pup.split("/")[-1]} \"{pup}\" "cache=copy")\n'
+
         xrsl['inputfiles'] = f'(inputfiles = {inputfiles})'
 
         xrsl['stdout'] = '(stdout = stdout)'
@@ -97,6 +107,19 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         xrsl['jobName'] = '(jobname = "LDMX Prod Simulation")'
 
         return '&' + '\n'.join(xrsl.values())
+
+    def chooseEndpoints(self, config):
+
+        localrses = config.get('InputDataLocationLocalRSE', 'None').split(',')
+        localrses = [r for r in localrses if r != 'None']
+        if not localrses:
+            # use all endpoints
+            return ','.join(self.endpoints)
+
+        # Choose the site where most of the files are
+        c = Counter(localrses)
+        mostlocal = c.most_common(1)[0][0]
+        return self.rses.get(mostlocal)
 
     def process(self):
 
