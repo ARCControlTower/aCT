@@ -165,6 +165,9 @@ class aCTPanda2ClassAd:
         elif self.prodsourcelabel.startswith('rc_test'):
             pargs += ' -i RC'
 
+        if self.siteinfo['python_version'].startswith('3'):
+            pargs += ' --pythonversion 3'
+
         if self.piloturl:
             pargs += ' --piloturl %s' % (self.piloturl)
         else:
