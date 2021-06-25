@@ -105,8 +105,9 @@ class aCTPanda2Xrsl:
         else:
             disk = 500
         # Add input file sizes
-        if 'fsize' in self.jobdesc:
-            disk += sum([int(f) for f in self.jobdesc['fsize'][0].split(',')]) // 1000000
+        # Skip since files are read from cache
+        #if 'fsize' in self.jobdesc:
+        #    disk += sum([int(f) for f in self.jobdesc['fsize'][0].split(',')]) // 1000000
         # Add safety factor
         disk += 2000
         self.log.debug('%s: disk space %d' % (self.pandaid, disk))
