@@ -110,16 +110,13 @@ class aCTLDMX2Arc(aCTLDMXProcess):
 
     def chooseEndpoints(self, config):
 
-        localrses = config.get('InputDataLocationLocalRSE', 'None').split(',')
-        localrses = [r for r in localrses if r != 'None']
-        if not localrses:
+        # Now all local RSEs should be the same within a job
+        localrse = config.get('InputDataLocationLocalRSE', 'None').split(',')[0]
+        if localrse == 'None':
             # use all endpoints
             return ','.join(self.endpoints)
 
-        # Choose the site where most of the files are
-        c = Counter(localrses)
-        mostlocal = c.most_common(1)[0][0]
-        return self.rses.get(mostlocal)
+        return self.rses.get(localrse)
 
     def process(self):
 
