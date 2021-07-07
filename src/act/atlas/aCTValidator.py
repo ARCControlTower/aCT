@@ -11,6 +11,7 @@ import time
 import arc
 from xml.dom import minidom
 import json
+import re
 
 class aCTValidator(aCTATLASProcess):
     '''
@@ -174,6 +175,10 @@ class aCTValidator(aCTATLASProcess):
                 size = attrs['fsize']
                 adler32 = attrs['adler32']
                 surl = attrs['surl']
+                # davs -> srm for ndgf
+                res=re.match('davs://dav.ndgf.org:443/(.+)',surl)
+                if res is not None:
+                    surl = 'srm://srm.ndgf.org:8443/'+res.group(1)
                 se = arc.URL(str(surl)).Host()
             except Exception as x:
                 self.log.error('%s: %s' % (aj['appjobid'], x))
@@ -210,7 +215,7 @@ class aCTValidator(aCTATLASProcess):
                     result[surl['arcjobid']] = self.failed
                     continue
                 dp = aCTUtils.DataPoint(str(surl['surl']), self.uc)
-                if not dp or not dp.h:
+                if not dp or not dp.h or surl['surl'].startswith('davs://srmdav.ific.uv.es:8443'):
                     self.log.warning("URL %s not supported, skipping validation" % str(surl['surl']))
                     result[surl['arcjobid']] = self.ok
                     continue
@@ -308,7 +313,7 @@ class aCTValidator(aCTATLASProcess):
                 continue
             status = dp.h.Remove()
             if not status:
-                if status.Retryable():
+                if status.Retryable() and not surl['surl'].startswith('davs://srmdav.ific.uv.es:8443'):
                     self.log.warning("Failed to delete %s for %s, will retry later: %s" %
                                      (surl['surl'], surl['arcjobid'], str(status)))
                     result[surl['arcjobid']] = self.retry
