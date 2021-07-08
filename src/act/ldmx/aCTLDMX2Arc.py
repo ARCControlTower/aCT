@@ -1,5 +1,4 @@
 import os
-from collections import Counter
 
 from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
 
