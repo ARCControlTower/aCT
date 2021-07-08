@@ -44,6 +44,14 @@ def submit(args):
         logger.error(f"Error: template not found at {template_file}")
         return 1
 
+    # only if we explicitly ask to keep logs, we'll submit with the keepsuccessful option set to 1
+    if str(actconf.get(['joblog', 'keepsuccessful'])) == '1' and not args.keepLogs :
+        logger.info(f"Successful job logs will be kept! This could fill up the disk, for large batches. \n-->Continue submission now with this log setting? [y/N]")
+        response=str(input())
+        if response != "y" :
+            logger.info(f"Interrupting submission on request by user. Modify log keeping settings in aCTConfigAPP.xml.")
+            return 1
+
     # Everything looks ok, so submit the job
     try:
         shutil.copy(args.conffile, os.path.join(bufferdir, 'configs'))
@@ -147,7 +155,8 @@ def get_parser():
 
     submit_parser = subparsers.add_parser('submit', help='Submit jobs')
     submit_parser.set_defaults(function=submit)
-    submit_parser.add_argument(dest='conffile', action='store', help='Job configuration file')
+    submit_parser.add_argument('-c', '--config', dest='conffile', action='store', help='Job configuration file')
+    submit_parser.add_argument('-k', '--keepLogs', dest='keepLogs', default=False, action='store_true', help='Assertion that we want to keep succesful job logs')
 
     cancel_parser = subparsers.add_parser('cancel', help='Cancel jobs')
     cancel_parser.set_defaults(function=cancel)
