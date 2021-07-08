@@ -451,10 +451,27 @@ class aCTSubmitter(aCTProcess):
 
     def checkFailedSubmissions(self):
 
-        jobs = self.db.getArcJobsInfo("arcstate='submitting' and cluster='"+self.cluster+"'", ["id"])
+        jobs = self.db.getArcJobsInfo("arcstate='submitting' and cluster='"+self.cluster+"'", ["id", "appjobid", "jobdesc"])
 
         for j in jobs:
-            self.db.updateArcJob(j['id'], {"arcstate": "tosubmit",
+            arcstate = 'tosubmit'
+            # 
+            # jobdescs[0].DataStaging.InputFiles[1].Sources[0].str() -> file:/cephfs
+            # check for removed local inputs
+            jobdescstr = str(self.db.getArcJobDescription(str(j['jobdesc'])))
+            jobdescs = arc.JobDescriptionList()
+            if not jobdescstr or not arc.JobDescription_Parse(jobdescstr, jobdescs):
+                arcstate='tocancel'
+            else:
+                for f in  jobdescs[0].DataStaging.InputFiles :
+                    ifile = f.Sources[0].str()
+                    if ifile.find('file:/') < 0:
+                        continue
+                    ifile = ifile.replace('file:','')
+                    if not os.path.exists(ifile):
+                        arcstate='tocancel'
+                        self.log.info("Cancel - inputFiles missing: %s %s %s" % (j['id'], j['appjobid'], arcstate) )
+            self.db.updateArcJob(j['id'], {"arcstate": arcstate,
                                            "tarcstate": self.db.getTimeStamp(),
                                            "cluster": None})
 
@@ -604,10 +621,10 @@ class aCTSubmitter(aCTProcess):
         self.processToResubmit()
         # process jobs which have to be rerun
         self.processToRerun()
-        # submit new jobs
-        self.submit()
         # check jobs which failed to submit
         self.checkFailedSubmissions()
+        # submit new jobs
+        self.submit()
 
 
 # Main
