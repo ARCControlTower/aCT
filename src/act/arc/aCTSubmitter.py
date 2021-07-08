@@ -353,8 +353,8 @@ class aCTSubmitter(aCTProcess):
                     self.log.debug("running %d, queued %d, queue limit %d" % (len(rjobs), len(qjobs), jlimit))
                     if str(self.cluster).find('arc-boinc-0') != -1:
                         jlimit = len(rjobs)*0.15 + 400
-                    if str(self.cluster).find('XXXpikolit') != -1:
-                        jlimit = len(rjobs)*0.15 + 100
+                    if str(self.cluster).find('vega') != -1:
+                        jlimit = len(rjobs)*0.15 + 2000
                     if str(self.cluster).find('arc05.lcg') != -1:
                         jlimit = len(rjobs)*0.15 + 400
                     target.ComputingShare.PreLRMSWaitingJobs=len(qjobs)
