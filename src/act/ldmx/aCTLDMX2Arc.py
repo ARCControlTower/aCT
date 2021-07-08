@@ -76,8 +76,12 @@ class aCTLDMX2Arc(aCTLDMXProcess):
             xrsl['outputfiles'] = '(outputfiles = ("rucio.metadata" ""))'
 
         wrapper = self.conf.get(['executable', 'wrapper'])
+        if 'SimExecutable' in config :
+            wpath, wname = os.path.split(wrapper)
+            wrapper = os.path.join(wpath, config.get('SimExecutable'))
+ 
+        #keep executable naming as is but point to actual wrapper script
         xrsl['executable'] = f"(executable = ldmxsim.sh)"
-
         inputfiles = f'(ldmxsim.sh {wrapper})\n \
                        (ldmxproduction.config {descriptionfile})\n \
                        (ldmxjob.py {templatefile})\n \
