@@ -78,6 +78,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                             if not newconfig.get('PileupLocation'):
                                 raise Exception(f'No suitable locations found for pileup file {pfile["scope"]}:{pfile["name"]}')
                             newconfig['PileupLocationLocal'] = f'./{pfile["name"]}'
+                            newconfig['PileupFile'] = f'{pfile["scope"]}:{pfile["name"]}'
 
                         yield newconfig
                         newconfig = config.copy()
@@ -221,10 +222,16 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                         for l in template:
                             if l.startswith('sim.runNumber'):
                                 ntf.write(f'sim.runNumber = {jobconfig["runNumber"]}\n')
-                            elif l.startswith('p.run'):
+                            elif l.startswith('p.run = RUNNUMBER'):
                                 ntf.write(f'p.run = {jobconfig["runNumber"]}\n')
                             elif l.startswith('p.inputFiles'):
                                 ntf.write(f'p.inputFiles = [ "{jobconfig["InputFile"].split(":")[1]}" ]\n')
+                            elif l.startswith('p.maxEvents') and 'NumberOfEvents' in jobconfig :
+                                ntf.write(f'p.maxEvents = {jobconfig["NumberOfEvents"]}\n')                           
+                            elif l.startswith('lheLib=INPUTFILE'):
+                                ntf.write(f'lheLib="{jobconfig["InputFile"].split(":")[1]}"\n')
+                            elif l.startswith('pileupFileName'):
+                                ntf.write(f'pileupFileName = "{jobconfig["PileupFile"].split(":")[1]}" \n')
                             elif l.startswith('sim.randomSeeds'):
                                 ntf.write(f'sim.randomSeeds = [ {jobconfig.get("RandomSeed1", 0)}, {jobconfig.get("RandomSeed2", 0)} ]\n')
                             else:
