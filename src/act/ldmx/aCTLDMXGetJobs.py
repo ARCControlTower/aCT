@@ -1,5 +1,7 @@
 from collections import defaultdict
+from itertools import groupby
 import json
+import math
 import os
 import random
 import tempfile
@@ -45,53 +47,41 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                     pileup *= len(files) // len(pileup) + 1
                 random.shuffle(pileup)
 
-            # List dataset replicas and set filename and RSE in the config
-            files = list(self.rucio.list_replicas([{'scope': scope, 'name': name}]))
-            for i, f in enumerate(files):
-                if not f:
-                    raise Exception(f'No such dataset {config["InputDataset"]}')
-                newconfig = config.copy()
-                fname = f'{f["scope"]}:{f["name"]}'
-                newconfig['InputFile'] = fname
+            # List dataset replicas and group based on local replicas
+            inputfilegrouping = self.groupInputFiles(files, config)
+            inputfilesperjob = int(config.get('InputFilesPerJob', 1))
+            newconfig = config.copy()
+            for files in inputfilegrouping.values():
+                for i, f in enumerate(files, start=1):
 
-                for rse, rep in f['rses'].items():
-                    if rse in self.rses:
-                        self.log.debug(f'Found local replica of {fname} in {rse}')
-                        newconfig['InputDataLocationLocal'] = rep[0].replace('file://', '')
-                        newconfig['InputDataLocationLocalRSE'] = rse
-                    if not rep[0].startswith('file://'):
-                        self.log.debug(f'Found remote replica of {fname} in {rse}')
-                        newconfig['InputDataLocationRemote'] = rep[0]
-                        newconfig['InputDataLocationRemoteRSE'] = rse
+                    for k, v in f.items():
+                        newconfig[k] = f'{newconfig[k]},{v}' if k in newconfig else v
 
-                # Check at least one replica is accessible
-                if 'InputDataLocationLocalRSE' not in newconfig and 'InputDataLocationRemoteRSE' not in newconfig:
-                    raise Exception(f'No usable locations for file {fname} in dataset {newconfig["InputDataset"]}')
+                    if i % inputfilesperjob == 0 or i == len(files):
+                        newconfig['runNumber'] = math.ceil(i / inputfilesperjob)
+                        # Set metadata of just the last file
+                        try:
+                            meta = self.rucio.get_did_meta(f["InputFile"].split(':')[0],
+                                                           f["InputFile"].split(':')[1])
+                        except RucioException as e:
+                            raise Exception(f'Rucio exception while looking up metadata for {f["InputFile"]}: {e}')
 
-                if 'InputDataLocationLocal' not in newconfig:
-                    # File will be downloaded by ARC and placed in session dir
-                    newconfig['InputDataLocationLocal'] = f'./{f["name"]}'
+                        newconfig['InputMetadata'] = json.dumps({ "inputMeta" : meta})
 
-                # Add pileup if needed
-                if 'PileupDataset' in config:
-                    pfile = pileup[i]
-                    # Always use remote copy so that it is cached
-                    for rse, rep in pfile['rses'].items():
-                        if not rep[0].startswith('file://'):
-                            newconfig['PileupLocation'] = rep[0]
-                    if 'PileupLocation' not in newconfig:
-                        raise Exception(f'No suitable locations found for pileup file {pfile["scope"]}:{pfile["name"]}')
-                    newconfig['PileupLocationLocal'] = f'./{pfile["name"]}'
+                        # Add pileup if needed
+                        if 'PileupDataset' in config:
+                            pfile = pileup[i-1]
+                            # Always use remote copy so that it is cached
+                            for rep in pfile['rses'].values():
+                                if not rep[0].startswith('file://'):
+                                    newconfig['PileupLocation'] = rep[0]
+                            if not newconfig.get('PileupLocation'):
+                                raise Exception(f'No suitable locations found for pileup file {pfile["scope"]}:{pfile["name"]}')
+                            newconfig['PileupLocationLocal'] = f'./{pfile["name"]}'
 
-                # Get metadata to pass to the job
-                try:
-                    meta = self.rucio.get_did_meta(f['scope'], f['name'])
-                except RucioException as e:
-                    raise Exception(f'Rucio exception while looking up metadata for {fname}: {e}')
+                        yield newconfig
+                        newconfig = config.copy()
 
-                newconfig['InputMetadata'] = json.dumps({ "inputMeta" : meta}) 
-                newconfig['runNumber'] = i+1
-                yield newconfig
         else:
             # Jobs with no input: generate jobs based on specified number of jobs
             randomseed1 = int(config['RandomSeed1SequenceStart'])
@@ -117,6 +107,50 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             raise f"Empty info returned by Rucio for RSE {output_rse}"
 
         return '{scheme}://{hostname}:{port}{prefix}'.format(**rse_info[0])
+
+    def groupInputFiles(self, files, config):
+        inputfileinfo = []
+        for f in files:
+            if not f:
+                raise Exception(f'No such dataset {config["InputDataset"]}')
+            fname = f'{f["scope"]}:{f["name"]}'
+            # Info for each input file - some will be filled later
+            inputfileconfig = {'InputFile': fname,
+                               'InputDataLocationLocal': None,
+                               'InputDataLocationLocalRSE': None,
+                               'InputDataLocationRemote': None,
+                               'InputDataLocationRemoteRSE': None,
+                               'InputMetadata': None,
+                               'PileupLocation': None,
+                               'PileupLocationLocal': None}
+
+            for rse, rep in f['rses'].items():
+                if rse in self.rses:
+                    self.log.debug(f'Found local replica of {fname} in {rse}')
+                    inputfileconfig['InputDataLocationLocal'] = rep[0].replace('file://', '')
+                    inputfileconfig['InputDataLocationLocalRSE'] = rse
+                if not rep[0].startswith('file://'):
+                    self.log.debug(f'Found remote replica of {fname} in {rse}')
+                    inputfileconfig['InputDataLocationRemote'] = rep[0]
+                    inputfileconfig['InputDataLocationRemoteRSE'] = rse
+
+            # Check at least one replica is accessible
+            if not inputfileconfig['InputDataLocationLocalRSE'] and not inputfileconfig['InputDataLocationRemoteRSE']:
+                raise Exception(f'No usable locations for file {fname} in dataset {config["InputDataset"]}')
+
+            if 'InputDataLocationLocal' not in inputfileconfig:
+                # File will be downloaded by ARC and placed in session dir
+                inputfileconfig['InputDataLocationLocal'] = f'./{f["name"]}'
+
+            inputfileinfo.append(inputfileconfig)
+
+        # Group by local RSE or "None"
+        filegrouping = defaultdict(list)
+        keyfunc = lambda x: str(x['InputDataLocationLocalRSE'])
+        for k, g in groupby(sorted(inputfileinfo, key=keyfunc), keyfunc):
+            filegrouping[k] = list(g)
+
+        return filegrouping
 
     def getNewJobs(self):
         '''
