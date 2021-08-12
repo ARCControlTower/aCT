@@ -308,10 +308,15 @@ class aCTDBArc(aCTDB):
         '''
         c=self.db.getCursor()
         if lock:
-            res = self.db.getMutexLock('arcjobs', timeout=2)
+            res = self.db.getMutexLock('arcjobs', timeout=20)
             if not res:
                 self.log.debug("Could not get lock: %s"%str(res))
                 return []
+            if str(res) == "0":
+                self.log.debug("Could not get lock: %s"%str(res))
+                return []
+            else:
+                self.log.debug("Got lock: %s"%str(res))
         c.execute("SELECT "+self._column_list2str(columns)+" FROM "+tables+" WHERE "+select)
         rows=c.fetchall()
         return rows
