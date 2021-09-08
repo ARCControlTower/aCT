@@ -239,8 +239,8 @@ class aCTLDMXRegister(aCTLDMXProcess):
                                'containerscope', 'containername', 'remote_output',
                                'local_replica']
             # Metadata values must be strings to be searchable
-            self.rucio.add_did_meta(scope, name,
-                                    {x: str(y) for x, y in metadata.items() if x not in native_metadata})
+            self.rucio.set_metadata_bulk(scope, name,
+                                         {x: str(y) for x, y in metadata.items() if x not in native_metadata})
         except KeyError as e:
             self.log.info(f'key missing in metadata json: {e}')
             return False

@@ -61,8 +61,9 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                         newconfig['runNumber'] = math.ceil(i / inputfilesperjob)
                         # Set metadata of just the last file
                         try:
-                            meta = self.rucio.get_did_meta(f["InputFile"].split(':')[0],
-                                                           f["InputFile"].split(':')[1])
+                            meta = self.rucio.get_metadata(f["InputFile"].split(':')[0],
+                                                           f["InputFile"].split(':')[1],
+                                                           plugin='JSON')
                         except RucioException as e:
                             raise Exception(f'Rucio exception while looking up metadata for {f["InputFile"]}: {e}')
 
