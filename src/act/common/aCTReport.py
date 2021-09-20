@@ -245,7 +245,7 @@ class aCTReport:
                 try:
                     host = re.search('.+//([^:]+)', job['cluster']).group(1)
                 except:
-                    pass
+                    host = None
                 if host in clustercount:
                     clustercount[host] += 1
                 else:
