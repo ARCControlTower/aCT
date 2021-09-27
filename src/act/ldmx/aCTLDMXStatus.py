@@ -209,6 +209,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
          - arcstate=tocancel or cancelling when cluster is empty
          - arcstate=done or cancelled or lost or donefailed when id not in ldmxjobs
          - arcstate=done and ldmxstate=cancelling (job finished before it got cancel request)
+         - ldmxstate=cancelling and no arc jobs (job was cancelled before being submitted)
         """
         select = "arcstate in ('tocancel', 'cancelling', 'toclean') and (cluster='' or cluster is NULL)"
         jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid'])
@@ -239,6 +240,12 @@ class aCTLDMXStatus(aCTLDMXProcess):
         for job in jobs:
             self.log.info(f"{job['appjobid']}: Cleaning finished job which was already cancelled")
             self.dbarc.updateArcJob(job['id'], {'arcstate': 'cancelled'})
+
+        select = "ldmxstatus='cancelling' and arcjobid not in (select id from arcjobs)"
+        jobs = self.dbldmx.getJobs(select, ['id'])
+        for job in jobs:
+            self.log.info(f"{job['id']}: Cleaning cancelling job which was never submitted")
+            self.dbldmx.updateJobs(f"id={job['id']}", {'ldmxstatus': 'cancelled'})
 
     def checkForResubmission(self, arcjob):
         '''
