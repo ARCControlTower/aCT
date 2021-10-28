@@ -217,18 +217,18 @@ def submitWithData():
     """
     End point for submitting jobs that use data management.
     """
-    try:
-        proxyid = getProxyId()
-    except NoSuchProxyError:
-        return 'Wrong or no client certificate', 401
+    #try:
+    #    proxyid = getProxyId()
+    #except NoSuchProxyError:
+    #    return 'Wrong or no client certificate', 401
 
-    try:
-        jobids = getIDs()
-    except Exception:
-        return 'Invalid id parameter', 400
+    #try:
+    #    jobids = getIDs()
+    #except Exception:
+    #    return 'Invalid id parameter', 400
 
-    if len(jobids) > 1:
-        return 'Can only submit one job at a time', 400
+    #if len(jobids) > 1:
+    #    return 'Can only submit one job at a time', 400
 
     jobdesc = request.form.get('xrsl', '')
     if not jobdesc:
@@ -238,27 +238,62 @@ def submitWithData():
     except InvalidJobDescriptionError:
         return 'Invalid job description', 400
 
-    elif len(jobids) < 1: # create job and submit its name and site, return id
-        site = request.form.get('site', '')
-        if not site:
-            return 'No site given', 400
-        try:
-            checkSite(site)
-        except NoSuchSiteError:
-            return 'Invalid site', 400
+    #if len(jobids) < 1: # create job and submit its name and site, return id
+    #    site = request.form.get('site', '')
+    #    if not site:
+    #        return 'No site given', 400
+    #    try:
+    #        checkSite(site)
+    #    except NoSuchSiteError:
+    #        return 'Invalid site', 400
 
-        try:
-            jobid = jmgr.clidb.insertJob(jobdesc, proxyid, site)
-        except Exception:
-            return 'Server error', 500
-        else:
-            return str(jobid)
+    #    try:
+    #        jobid = jmgr.clidb.insertJob(jobdesc, proxyid, site)
+    #    except Exception:
+    #        return 'Server error', 500
+    #    else:
+    #        return str(jobid)
 
-    else: # modify job description
-        jobid = jobids[0]
-        jobdescs = arc.JobDescriptionList()
-        if not arc.JobDescription_Parse(jobdesc, jobdescs):
-            return 'Error while parsing job description', 400
+    #else: # modify job description
+    #    jobid = jobids[0]
+    #    jobdescs = arc.JobDescriptionList()
+    #    if not arc.JobDescription_Parse(jobdesc, jobdescs):
+    #        return 'Error while parsing job description', 400
+    #    print(dir(jobdescs[0].DataStaging))
+    #    print(dir(jobdescs[0].DataStaging.InputFiles))
+    #    print(dir(jobdescs[0].DataStaging.InputFiles[0]))
+    jobdescs = arc.JobDescriptionList()
+    if not arc.JobDescription_Parse(jobdesc, jobdescs):
+        return 'Error while parsing job description', 400
+    text = ""
+    jobdescs[0].DataStaging.InputFiles.clear()
+    infile = arc.compute.InputFileType()
+    infile.Name = "arctest1.xrsl"
+    jobdescs[0].DataStaging.InputFiles.append(infile)
+    #for inputFile in jobdescs[0].DataStaging.InputFiles:
+    #inputFile = jobdescs[0].DataStaging.InputFiles[0]
+    #text += "InputFiles[0]:\n"
+        #text += "Name: {}\n".format(inputFile.Name)
+        #text += "Checksum: {}\n".format(inputFile.Checksum)
+        #text += "Size: {}\n".format(inputFile.FileSize)
+        #text += "IsExecutable: {}\n".format(inputFile.IsExecutable)
+        #text += "Sources: {}\n".format(inputFile.Sources)
+        #text += "dir(Sources[0]): {}\n".format(str(dir(inputFile.Sources[0])))
+        #text += "Sources[0].Locations: {}\n".format(inputFile.Sources[0].Locations)
+    #return text
+    #return str(dir(jobdescs[0].DataStaging)) + str(dir(jobdescs[0].DataStaging.InputFiles)) + str(dir(jobdescs[0].DataStaging.InputFiles[0]))
+
+    robot = ""
+    xrsl = jobdescs[0].UnParse(robot, "")[1]
+    text += "{}\n".format(xrsl)
+    #text += "{}\n".format(robot)
+
+    jobdesc = xrsl
+    jobdescs = arc.JobDescriptionList()
+    if not arc.JobDescription_Parse(jobdesc, jobdescs):
+        return "Error while parsing generated job description", 400
+
+    return text
 
 
 @app.route('/results', methods=['GET'])

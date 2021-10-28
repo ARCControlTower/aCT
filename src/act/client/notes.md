@@ -16,3 +16,15 @@ If PUT request includes id parameter then the operation
 of job description is going to happen. Without id parameter
 only the job is created with jobname, site and id is returned
 (jobdesc stays null in DB)
+
+`curl -X PUT -F "xrsl=<arctest1.xrsl" http://localhost:8000/jobs?id=1`
+
+help(arc.compute.SourceType)
+`desclist[0].DataStaging.InputFiles[0].Sources[0].str()`
+`desclist[0].DataStaging.InputFiles[0].Sources[0].plainstr()`
+`desclist[0].DataStaging.InputFiles[0].Sources[0].fullstr()`
+
+for local paths:
+`desclist[0].DataStaging.InputFiles[0].Sources[0].FullPath()`
+`desclist[0].DataStaging.InputFiles[0].Sources[0].ChangeFullPath()`
+`desclist[0].DataStaging.InputFiles[0].Sources[0].Path()`
