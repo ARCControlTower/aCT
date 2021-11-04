@@ -28,3 +28,15 @@ for local paths:
 `desclist[0].DataStaging.InputFiles[0].Sources[0].FullPath()`
 `desclist[0].DataStaging.InputFiles[0].Sources[0].ChangeFullPath()`
 `desclist[0].DataStaging.InputFiles[0].Sources[0].Path()`
+
+We shall use Sources[i].Name which is filename in xRSL, local to computing
+element. The input file hierarchy on aCT will be the same as on the
+computing node.
+
+executables attribute is also important but it does not have to changed
+since it works on filenames from input files.
+
+PROBLEM WITH PROXIES: CLI programs do not necessarily have permissions to
+open proxies in aCT proxies directory.
+
+flask-socketio or rawer eventlet library for file transfer?

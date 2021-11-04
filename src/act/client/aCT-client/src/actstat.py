@@ -16,7 +16,7 @@ def main():
     addCommonJobFilterArgs(parser)
     parser.add_argument('--state', default=None,
             help='the state that jobs should be in')
-    parser.add_argument('--arc', default='arcstate',
+    parser.add_argument('--arc', default='JobID,State,arcstate',
             help='a list of columns from ARC table')
     parser.add_argument('--client', default='id,jobname',
             help='a list of columns from client table')

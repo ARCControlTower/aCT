@@ -7,19 +7,34 @@ setup(
     author = 'aCT team',
     author_email = 'act-dev@cern.ch',
     package_dir = {'': 'src'},
-    py_modules = ['config', 'common'],
-    scripts = [
-        'src/actproxy.py',
-        'src/actlistproxies.py',
-        'src/actdeleteproxy.py',
-        'src/actstat.py',
-        'src/actclean.py',
-        'src/actfetch.py',
-        'src/actkill.py',
-        'src/actresub.py',
-        'src/actsub.py',
-        'src/actget.py',
+    py_modules = [
+        'actproxy',
+        'actlistproxies',
+        'actdeleteproxy',
+        'actstat',
+        'actclean',
+        'actfetch',
+        'actkill',
+        'actresub',
+        'actsub',
+        'actget',
+        'config',
+        'common'
     ],
+    entry_points={
+        'console_scripts': [
+            'actproxy       = actproxy:main',
+            'actlistproxies = actlistproxies:main',
+            'actdeleteproxy = actdeleteproxy:main',
+            'actstat        = actstat:main',
+            'actclean       = actclean:main',
+            'actfetch       = actfetch:main',
+            'actkill        = actkill:main',
+            'actresub       = actresub:main',
+            'actsub         = actsub:main',
+            'actget         = actget:main',
+        ]
+    },
     install_requires = [
         'requests',
     ]

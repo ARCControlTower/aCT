@@ -127,6 +127,22 @@ class ClientDB(aCTDB):
                 self.Commit()
             return jobid
 
+    def insertDescription(self, jobdesc, lazy=False):
+        c = self.db.getCursor()
+
+        # first, insert job description and retreive the job ID
+        try:
+            query = 'INSERT INTO jobdescriptions (jobdescription) VALUES (%s)'
+            c.execute(query, [jobdesc])
+            c.execute('SELECT LAST_INSERT_ID()')
+            jobdescid = c.fetchone()['LAST_INSERT_ID()']
+        except:
+            self.log.exception('Error inserting job description')
+            raise
+        else:
+            return jobdescid
+
+
     def insertJobAndDescription(self, jobdesc, proxyid, siteName, lazy=False):
         """
         Insert job into clientjobs and job description into jobdescriptions.
