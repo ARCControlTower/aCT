@@ -7,6 +7,7 @@ from act.common.aCTSignal import ExceptInterrupt
 import multiprocessing, logging
 import signal
 import os
+from act.common.aCTLogger import aCTLogger
 
 def KillPool(pool):
     # stop repopulating new child
@@ -115,23 +116,120 @@ class JobConv:
                 d[attr] = ''.join([i for i in d[attr] if ord(i) < 128])
         return d
 
-def Submit(id, appjobid, jobdescstr, ucproxy, timeout):
+def Submit(id, appjobid, jobdescstr, ucproxy, cluster, fairshare, fairshares, nqjobs, nrjobs, maxpriowaiting, maxprioqueued, qfraction, qoffset, timeout):
 
     global queuelist
     global usercred
 
+    clusterurl = arc.URL(cluster)
+    clusterhost = clusterurl.Host()
+    clusterqueue = clusterurl.Path()[1:] # strip off leading slash
+
     # get the submission logger
-    #log = logger()
-    log = logging.getLogger()
+    ###AF logging.basicConfig(filename='aCTSubmitter-%s' % clusterhost, level=logging.DEBUG)
+    #log = logging.getLogger()
+    log = logging
+
+    # retriever moved here
+    if len(queuelist) == 0:
+            # Query infosys - either local or index
+            if cluster:
+                if cluster.find('://') != -1:
+                    aris = arc.URL(cluster)
+                else:
+                    aris = arc.URL('gsiftp://%s' % cluster)
+                if aris.Protocol() == 'https':
+                    aris.ChangePath('/arex')
+                    # tmp filter for REST, to remove when EMI-ES no longer necessary
+                    if fairshare in ['ARC-TEST']:
+                        infoendpoints = [arc.Endpoint(aris.str(), arc.Endpoint.COMPUTINGINFO, 'org.nordugrid.arcrest')]
+                    else:
+                        infoendpoints = [arc.Endpoint(aris.str(), arc.Endpoint.COMPUTINGINFO, 'org.ogf.glue.emies.resourceinfo')]
+                elif aris.Protocol() == 'local':
+                    infoendpoints = [arc.Endpoint(aris.str(), arc.Endpoint.COMPUTINGINFO, 'org.nordugrid.local')]
+                else:
+                    aris = 'ldap://'+aris.Host()+'/mds-vo-name=local,o=grid'
+                    infoendpoints = [arc.Endpoint(aris, arc.Endpoint.COMPUTINGINFO, 'org.nordugrid.ldapng')]
+
+            # retriever contains a list of CE endpoints
+            uc=usercred
+            uc.CredentialString(ucproxy)
+            retriever = arc.ComputingServiceRetriever(uc, infoendpoints)
+            retriever.wait()
+            # targets is the list of queues
+            # parse target.ComputingService.ID for the CE hostname
+            # target.ComputingShare.Name is the queue name
+            targets = retriever.GetExecutionTargets()
+
+
+            # Filter only sites for this process
+            for target in targets:
+                if not target.ComputingService.ID:
+                    log.info("Target %s does not have ComputingService ID defined, skipping" % target.ComputingService.Name)
+                    continue
+                # If EMI-ES infoendpoint, force EMI-ES submission
+                if infoendpoints[0].InterfaceName == 'org.ogf.glue.emies.resourceinfo' and target.ComputingEndpoint.InterfaceName != 'org.ogf.glue.emies.activitycreation':
+                    log.debug("Rejecting target interface %s because not EMI-ES" % target.ComputingEndpoint.InterfaceName)
+                    continue
+                # If REST infoendpoint, force REST submission
+                if infoendpoints[0].InterfaceName == 'org.nordugrid.arcrest' and target.ComputingEndpoint.InterfaceName != 'org.nordugrid.arcrest':
+                    log.debug("Rejecting target interface %s because not REST" % target.ComputingEndpoint.InterfaceName)
+                    continue
+                # Check for matching host and queue
+                targethost = re.sub(':arex$', '', re.sub('urn:ogf:ComputingService:', '', target.ComputingService.ID))
+                targetqueue = target.ComputingShare.Name
+                if clusterhost and targethost != clusterhost:
+                    log.debug('Rejecting target host %s as it does not match %s' % (targethost, clusterhost))
+                    continue
+                if clusterqueue and targetqueue != clusterqueue:
+                    log.debug('Rejecting target queue %s as it does not match %s' % (targetqueue, clusterqueue))
+                    continue
+                #if targetqueue in self.conf.getList(['queuesreject','item']):
+                #    #self.log.debug('Rejecting target queue %s in queuesreject list' % targetqueue)
+                #    continue
+                #elif targethost in self.conf.getList(['clustersreject','item']):
+                #    log.debug('Rejecting target host %s in clustersreject list' % targethost)
+                #    continue
+                if False:
+                    pass
+                else:
+                    # tmp hack
+                    target.ComputingShare.LocalWaitingJobs = 0
+                    target.ComputingShare.PreLRMSWaitingJobs = 0
+                    target.ExecutionEnvironment.CPUClockSpeed = 2000
+
+                    # Limit number of submitted jobs using configuration or default (0.15 + 100/num of shares)
+                    # Note: assumes only a few shares are used
+                    jlimit = nrjobs * qfraction + qoffset/len(fairshares)
+                    log.debug("running %d, queued %d, queue limit %d" % (nrjobs, nqjobs, jlimit))
+                    if str(cluster).find('arc-boinc-0') != -1:
+                        jlimit = nrjobs*0.15 + 400
+                    if str(cluster).find('vega') != -1:
+                        jlimit = nrjobs*0.15 + 2000
+                    if str(cluster).find('arc05.lcg') != -1:
+                        jlimit = nrjobs*0.15 + 400
+                    target.ComputingShare.PreLRMSWaitingJobs=nqjobs
+                    if nqjobs < jlimit or ( ( maxpriowaiting > maxprioqueued ) and ( maxpriowaiting > 10 ) ) :
+                        if maxpriowaiting > maxprioqueued :
+                            log.info("Overriding limit, maxpriowaiting: %d > maxprioqueued: %d" % (maxpriowaiting, maxprioqueued))
+                        queuelist.append(target)
+                        log.debug("Adding target %s:%s" % (targethost, targetqueue))
+                    else:
+                        log.info("%s/%s already at limit of submitted jobs for fairshare %s" % (targethost, targetqueue, fairshare))
+
+            # check if any queues are available, if not leave and try again next time
+            #if not queuelist:
+            #    self.log.info("No free queues available")
+            #    self.db.Commit()
+            #    continue
+
+
 
     if len(queuelist) == 0  :
         log.error("%s: no cluster free for submission" % appjobid)
         return None
 
-    #cred_type=arc.initializeCredentialsType(arc.initializeCredentialsType.SkipCredentials)
-    #uc=arc.UserConfig(cred_type)
     uc=usercred
-
     uc.CredentialString(ucproxy)
 
     jobdescs = arc.JobDescriptionList()
@@ -256,6 +354,17 @@ class aCTSubmitter(aCTProcess):
                 continue
             self.log.info("Submitting %d jobs for fairshare %s and proxyid %d" % (len(jobs), fairshare, proxyid))
 
+            # Set UserConfig credential for querying infosys
+            proxystring = str(self.db.getProxy(proxyid))
+            self.uc.CredentialString(proxystring)
+            global usercred
+            usercred = self.uc
+
+            # Filter only sites for this process
+            queuelist=[]
+            qjobs=self.db.getArcJobsInfo("cluster='" +str(self.cluster)+ "' and  arcstate='submitted' and fairshare='%s'" % fairshare, ['id','priority'])
+            rjobs=self.db.getArcJobsInfo("cluster='" +str(self.cluster)+ "' and  arcstate='running' and fairshare='%s'" % fairshare, ['id'])
+
             # max waiting priority
             try:
                 maxpriowaiting = max(jobs,key = lambda x : x['priority'])['priority']
@@ -263,114 +372,16 @@ class aCTSubmitter(aCTProcess):
                 maxpriowaiting = 0
             self.log.info("Maximum priority of waiting jobs: %d" % maxpriowaiting)
 
-            # Query infosys - either local or index
-            if self.cluster:
-                if self.cluster.find('://') != -1:
-                    aris = arc.URL(self.cluster)
-                else:
-                    aris = arc.URL('gsiftp://%s' % self.cluster)
-                if aris.Protocol() == 'https':
-                    aris.ChangePath('/arex')
-                    # tmp filter for REST, to remove when EMI-ES no longer necessary
-                    if fairshare in ['ARC-TEST']:
-                        infoendpoints = [arc.Endpoint(aris.str(), arc.Endpoint.COMPUTINGINFO, 'org.nordugrid.arcrest')]
-                    else:
-                        infoendpoints = [arc.Endpoint(aris.str(), arc.Endpoint.COMPUTINGINFO, 'org.ogf.glue.emies.resourceinfo')]
-                elif aris.Protocol() == 'local':
-                    infoendpoints = [arc.Endpoint(aris.str(), arc.Endpoint.COMPUTINGINFO, 'org.nordugrid.local')]
-                else:
-                    aris = 'ldap://'+aris.Host()+'/mds-vo-name=local,o=grid'
-                    infoendpoints = [arc.Endpoint(aris, arc.Endpoint.COMPUTINGINFO, 'org.nordugrid.ldapng')]
-            else:
-                giises = self.conf.getList(['atlasgiis','item'])
-                infoendpoints = []
-                for g in giises:
-                    # Specify explicitly EGIIS
-                    infoendpoints.append(arc.Endpoint(str(g), arc.Endpoint.REGISTRY, "org.nordugrid.ldapegiis"))
 
-            # Set UserConfig credential for querying infosys
-            proxystring = str(self.db.getProxy(proxyid))
-            self.uc.CredentialString(proxystring)
-            global usercred
-            usercred = self.uc
-            # retriever contains a list of CE endpoints
-            retriever = arc.ComputingServiceRetriever(self.uc, infoendpoints)
-            retriever.wait()
-            # targets is the list of queues
-            # parse target.ComputingService.ID for the CE hostname
-            # target.ComputingShare.Name is the queue name
-            targets = retriever.GetExecutionTargets()
+            # max queued priority
+            try:
+                maxprioqueued = max(qjobs,key = lambda x : x['priority'])['priority']
+            except:
+                maxprioqueued = 0
+            self.log.info("Max priority queued: %d" % maxprioqueued)
 
-            # Filter only sites for this process
-            queuelist=[]
-            for target in targets:
-                if not target.ComputingService.ID:
-                    self.log.info("Target %s does not have ComputingService ID defined, skipping" % target.ComputingService.Name)
-                    continue
-                # If EMI-ES infoendpoint, force EMI-ES submission
-                if infoendpoints[0].InterfaceName == 'org.ogf.glue.emies.resourceinfo' and target.ComputingEndpoint.InterfaceName != 'org.ogf.glue.emies.activitycreation':
-                    self.log.debug("Rejecting target interface %s because not EMI-ES" % target.ComputingEndpoint.InterfaceName)
-                    continue
-                # If REST infoendpoint, force REST submission
-                if infoendpoints[0].InterfaceName == 'org.nordugrid.arcrest' and target.ComputingEndpoint.InterfaceName != 'org.nordugrid.arcrest':
-                    self.log.debug("Rejecting target interface %s because not REST" % target.ComputingEndpoint.InterfaceName)
-                    continue
-                # Check for matching host and queue
-                targethost = re.sub(':arex$', '', re.sub('urn:ogf:ComputingService:', '', target.ComputingService.ID))
-                targetqueue = target.ComputingShare.Name
-                if clusterhost and targethost != clusterhost:
-                    self.log.debug('Rejecting target host %s as it does not match %s' % (targethost, clusterhost))
-                    continue
-                if clusterqueue and targetqueue != clusterqueue:
-                    self.log.debug('Rejecting target queue %s as it does not match %s' % (targetqueue, clusterqueue))
-                    continue
-                if targetqueue in self.conf.getList(['queuesreject','item']):
-                    self.log.debug('Rejecting target queue %s in queuesreject list' % targetqueue)
-                    continue
-                elif targethost in self.conf.getList(['clustersreject','item']):
-                    self.log.debug('Rejecting target host %s in clustersreject list' % targethost)
-                    continue
-                else:
-                    # tmp hack
-                    target.ComputingShare.LocalWaitingJobs = 0
-                    target.ComputingShare.PreLRMSWaitingJobs = 0
-                    target.ExecutionEnvironment.CPUClockSpeed = 2000
-                    qjobs=self.db.getArcJobsInfo("cluster='" +str(self.cluster)+ "' and  arcstate='submitted' and fairshare='%s'" % fairshare, ['id','priority'])
-                    rjobs=self.db.getArcJobsInfo("cluster='" +str(self.cluster)+ "' and  arcstate='running' and fairshare='%s'" % fairshare, ['id'])
-
-                    # max queued priority
-                    try:
-                        maxprioqueued = max(qjobs,key = lambda x : x['priority'])['priority']
-                    except:
-                        maxprioqueued = 0
-                    self.log.info("Max priority queued: %d" % maxprioqueued)
-
-                    # Limit number of submitted jobs using configuration or default (0.15 + 100/num of shares)
-                    # Note: assumes only a few shares are used
-                    qfraction = float(self.conf.get(['jobs', 'queuefraction'])) if self.conf.get(['jobs', 'queuefraction']) else 0.15
-                    qoffset = int(self.conf.get(['jobs', 'queueoffset'])) if self.conf.get(['jobs', 'queueoffset']) else 100
-                    jlimit = len(rjobs) * qfraction + qoffset/len(fairshares)
-                    self.log.debug("running %d, queued %d, queue limit %d" % (len(rjobs), len(qjobs), jlimit))
-                    if str(self.cluster).find('arc-boinc-0') != -1:
-                        jlimit = len(rjobs)*0.15 + 400
-                    if str(self.cluster).find('vega') != -1:
-                        jlimit = len(rjobs)*0.15 + 2000
-                    if str(self.cluster).find('arc05.lcg') != -1:
-                        jlimit = len(rjobs)*0.15 + 400
-                    target.ComputingShare.PreLRMSWaitingJobs=len(qjobs)
-                    if len(qjobs) < jlimit or ( ( maxpriowaiting > maxprioqueued ) and ( maxpriowaiting > 10 ) ) :
-                        if maxpriowaiting > maxprioqueued :
-                            self.log.info("Overriding limit, maxpriowaiting: %d > maxprioqueued: %d" % (maxpriowaiting, maxprioqueued))
-                        queuelist.append(target)
-                        self.log.debug("Adding target %s:%s" % (targethost, targetqueue))
-                    else:
-                        self.log.info("%s/%s already at limit of submitted jobs for fairshare %s" % (targethost, targetqueue, fairshare))
-
-            # check if any queues are available, if not leave and try again next time
-            if not queuelist:
-                self.log.info("No free queues available")
-                self.db.Commit()
-                continue
+            qfraction = float(self.conf.get(['jobs', 'queuefraction'])) if self.conf.get(['jobs', 'queuefraction']) else 0.15
+            qoffset = int(self.conf.get(['jobs', 'queueoffset'])) if self.conf.get(['jobs', 'queueoffset']) else 100
 
             self.log.info("start submitting")
 
@@ -384,7 +395,7 @@ class aCTSubmitter(aCTProcess):
                 if not jobdescstr or not arc.JobDescription_Parse(jobdescstr, jobdescs):
                     self.log.error("%s: Failed to prepare job description" % j['appjobid'])
                     continue
-                tasks.append((j['id'], j['appjobid'], jobdescstr, proxystring, int(self.conf.get(['atlasgiis','timeout'])) ))
+                tasks.append((j['id'], j['appjobid'], jobdescstr, proxystring, cluster, fairshare, fairshares, len(qjobs), len(rjobs), maxpriowaiting, maxprioqueued, qfraction, qoffset, int(self.conf.get(['atlasgiis','timeout'])) ))
 
             npools=1
             if any(s in self.cluster for s in self.conf.getList(['parallelsubmit','item'])):
@@ -392,10 +403,6 @@ class aCTSubmitter(aCTProcess):
             self.log.debug("Starting submitters: %s" % npools)
 
             pool = multiprocessing.Pool(npools)
-            #results = []
-            #for task in tasks:
-            #    result = pool.apply_async(Submit,(task))
-            #    results.append(result)
             # Submit in workers
             results = [pool.apply_async(Submit, (t)) for t in tasks]
 
@@ -621,10 +628,10 @@ class aCTSubmitter(aCTProcess):
         self.processToResubmit()
         # process jobs which have to be rerun
         self.processToRerun()
-        # check jobs which failed to submit
-        self.checkFailedSubmissions()
         # submit new jobs
         self.submit()
+        # check jobs which failed to submit
+        self.checkFailedSubmissions()
 
 
 # Main

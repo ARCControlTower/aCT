@@ -41,6 +41,8 @@ class aCTPanda2Xrsl:
         self.piloturl = siteinfo.get('params', {}).get('pilot_url')
         if self.prodSourceLabel.startswith('rc_test'):
             self.piloturl = atlasconf.get(["executable", "ptarurlrc"])
+            if self.siteinfo['pilot_version'].startswith('2'):
+                self.piloturl = atlasconf.get(["executable", "ptarurlrc2"])
         if not self.truepilot and not self.piloturl:
             self.piloturl = atlasconf.get(["executable", "ptarurl"])
         self.pilotversion = siteinfo.get('pilot_version', '2')
@@ -199,6 +201,9 @@ class aCTPanda2Xrsl:
         else:
             # Min 2GB for single core
             memory = max(memory, 2000)
+            if self.sitename in ['Vega', 'Vega_largemem']:
+                memory = memory / 2
+
 
         if self.sitename == 'MPPMU_MCORE' and memory < 2000:
             memory = 2000
@@ -211,13 +216,13 @@ class aCTPanda2Xrsl:
         # Non-RTE setup only requires ATLAS-SITE and possibly ENV/PROXY
         if self.truepilot:
             #self.xrsl['rtes'] = "(runtimeenvironment = ENV/PROXY)(runtimeenvironment = APPS/HEP/ATLAS-SITE-LCG)"
-            self.xrsl['rtes'] = "(runtimeenvironment = ENV/PROXY)"
+            self.xrsl['rtes'] = '(runtimeenvironment="ENV/PROXY")'
             return
         if self.prodSourceLabel in ('user', 'panda') and 'BOINC' not in self.sitename:
-            self.xrsl['rtes'] = "(runtimeenvironment = ENV/PROXY)(runtimeenvironment = APPS/HEP/ATLAS-SITE)"
+            self.xrsl['rtes'] = '(runtimeenvironment="ENV/PROXY")(runtimeenvironment="APPS/HEP/ATLAS-SITE")'
             return
         if self.sitename not in self.rtesites:
-            self.xrsl['rtes'] = "(runtimeenvironment = APPS/HEP/ATLAS-SITE)"
+            self.xrsl['rtes'] = '(runtimeenvironment="APPS/HEP/ATLAS-SITE")'
             return
 
         # Old-style RTE setup
@@ -291,19 +296,23 @@ class aCTPanda2Xrsl:
 
     def setArguments(self):
 
-        pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-d" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s"' \
+        #pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-d" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s"' \
+        pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s"' \
                 % (self.schedconfig, self.sitename, self.sitename, self.prodSourceLabel, self.getJobType(), self.getResourceType())
         if self.prodSourceLabel == 'rc_alrb':
             pargs += ' "-i" "ALRB"'
         elif self.prodSourceLabel.startswith('rc_test'):
-            pargs += ' "-i" "RC"'
+            pargs += ' "-d" "-i" "RC"'
         if self.siteinfo['python_version'].startswith('3'):
-            pargs += ' --pythonversion 3'
+            pargs += ' "--pythonversion" "3"'
         if self.truepilot:
             if self.piloturl:
                 pargs += ' "--url" "https://pandaserver.cern.ch" "-p" "25443" "--piloturl" "%s"' % (self.piloturl)
             else:
-                pargs += ' "--url" "https://pandaserver.cern.ch" "-p" "25443" "--pilotversion" "%s"' % (self.pilotversion)
+                if self.prodSourceLabel.startswith('rc_test'):
+                    pargs += ' "--url" "https://pandaserver.cern.ch" "-p" "25443" "--pilotversion" "%s"' % (self.pilotversion)
+                else:
+                    pargs += ' "--url" "https://pandaserver.cern.ch" "-p" "25443" "--pilotversion" "%s"' % ("2")
         else:
             pargs += ' "-z" "-t" "--piloturl" "local" "--mute"'
 
@@ -475,7 +484,7 @@ class aCTPanda2Xrsl:
             except:
                 pass
             #self.xrsl['priority'] = '("priority" = 60 )'
-            self.xrsl['priority'] = '("priority" = %d )' % prio
+            self.xrsl['priority'] = '(priority = %d )' % prio
             if self.sitename == 'wuppertalprod_MCORE':
                 self.xrsl['priority'] = ""
             if self.sitename == 'wuppertalprod':
@@ -485,7 +494,7 @@ class aCTPanda2Xrsl:
             if self.sitename == 'ANALY_wuppertalprod':
                 self.xrsl['priority'] = ""
             if self.sitename == 'BOINC_MCORE':
-                self.xrsl['priority'] = '("priority" = 28)'
+                self.xrsl['priority'] = '(priority = 28)'
 
     def setEnvironment(self):
 
