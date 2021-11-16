@@ -2,7 +2,7 @@
 
 ARC Control Tower (aCT) is a system for submitting and managing payloads on ARC (and other) Computing Elements. It is used as an interface between Panda and Grid sites for the ATLAS experiment at CERN.
 
-[![Build Status](https://travis-ci.com/ARCControlTower/aCT.svg?branch=master)](https://travis-ci.com/ARCControlTower/aCT)
+[![Build Status](https://app.travis-ci.com/ARCControlTower/aCT.svg?branch=master)](https://app.travis-ci.com/ARCControlTower/aCT)
 
 # Overview
 
