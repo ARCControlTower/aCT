@@ -13,8 +13,8 @@ virtualenv:
 addons:
   apt:
     sources:
-      - sourceline: 'deb https://download.nordugrid.org/repos/6/ubuntu bionic main'
-      - sourceline: 'deb https://download.nordugrid.org/repos/6/ubuntu bionic-updates main'
+      - sourceline: 'deb http://download.nordugrid.org/repos/6/ubuntu bionic main'
+      - sourceline: 'deb http://download.nordugrid.org/repos/6/ubuntu bionic-updates main'
         keyurl: https://download.nordugrid.org/DEB-GPG-KEY-nordugrid-6.asc
     packages:
       - python3-nordugrid-arc
