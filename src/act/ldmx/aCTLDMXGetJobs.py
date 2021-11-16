@@ -51,6 +51,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             inputfilegrouping = self.groupInputFiles(files, config)
             inputfilesperjob = int(config.get('InputFilesPerJob', 1))
             newconfig = config.copy()
+            runnumber = 1
             for files in inputfilegrouping.values():
                 for i, f in enumerate(files, start=1):
 
@@ -58,7 +59,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                         newconfig[k] = f'{newconfig[k]},{v}' if k in newconfig else v
 
                     if i % inputfilesperjob == 0 or i == len(files):
-                        newconfig['runNumber'] = math.ceil(i / inputfilesperjob)
+                        newconfig['runNumber'] = runnumber
                         # Set metadata of just the last file
                         try:
                             meta = self.rucio.get_did_meta(f["InputFile"].split(':')[0],
@@ -82,6 +83,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
                         yield newconfig
                         newconfig = config.copy()
+                        runnumber += 1
 
         else:
             # Jobs with no input: generate jobs based on specified number of jobs
