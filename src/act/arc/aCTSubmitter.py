@@ -314,11 +314,20 @@ class aCTSubmitter(aCTProcess):
         # For proxy bug - see below
         shuffle(fairshares)
 
+        # apply maxjobs limit (check above should make sure greater than zero)
+        limit = min(clustermaxjobs - nsubmitted, 100)
+        # Divide limit among fairshares, unless exiting after first loop due to
+        # proxy bug, but make sure at least one job is submitted
+        if len(self.db.getProxiesInfo('TRUE', ['id'])) == 1:
+            limit = max(limit // len(fairshares), 1)
+
         for fairshare, proxyid in fairshares:
 
-            # apply maxjobs limit (check above should make sure greater than zero)
-            # Note: relies on exit after first loop
-            limit = min(clustermaxjobs - nsubmitted, 100)
+            # Exit loop if above limit
+            if nsubmitted >= clustermaxjobs:
+                self.log.info("CE is at limit of %s submitted jobs, exiting" % clustermaxjobs)
+                break
+
             try:
                 # catch any exceptions here to avoid leaving lock
                 if self.cluster:
@@ -436,6 +445,7 @@ class aCTSubmitter(aCTProcess):
                 self.log.info("%s: job id %s" % (task[1], job.JobID))
                 jd['cluster']=self.cluster
                 self.db.updateArcJobLazy(task[0],jd,job)
+                nsubmitted += 1
             if not stopflag:
                 pool.terminate()
                 pool.join()
