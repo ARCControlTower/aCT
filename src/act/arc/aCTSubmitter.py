@@ -314,8 +314,13 @@ class aCTSubmitter(aCTProcess):
         # For proxy bug - see below
         shuffle(fairshares)
 
-        # apply maxjobs limit (check above should make sure greater than zero)
-        limit = min(clustermaxjobs - nsubmitted, 100)
+        # apply maxjobs limit per submitter (check above should make sure greater than zero)
+        nsubmitters = int(self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["submitters"]) or 1)
+        limit = min(clustermaxjobs - nsubmitted, 100) // nsubmitters
+        if limit == 0:
+            self.log.info(f'{clustermaxjobs} maxjobs - {nsubmitted} submitted is smaller than {nsubmitters} submitters')
+            return
+
         # Divide limit among fairshares, unless exiting after first loop due to
         # proxy bug, but make sure at least one job is submitted
         if len(self.db.getProxiesInfo('TRUE', ['id'])) == 1:
