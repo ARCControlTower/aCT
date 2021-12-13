@@ -183,7 +183,7 @@ class aCTValidator(aCTATLASProcess):
             except Exception as x:
                 self.log.error('%s: %s' % (aj['appjobid'], x))
             else:
-                checksum = "adler32:"+ adler32
+                checksum = "adler32:"+ (adler32 or '00000001')
                 if se not in surls:
                     surls[se]= []
                 surls[se] += [{"surl":surl, "fsize":size, "checksum":checksum, "arcjobid":arcjobid}]
