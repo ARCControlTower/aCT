@@ -38,14 +38,21 @@ class aCTPanda2Xrsl:
         if self.prodSourceLabel.startswith('rc_'):
             self.wrapper = atlasconf.get(["executable", "wrapperurlrc"])
 
+        self.pilotversion = siteinfo.get('pilot_version', '2')
         self.piloturl = siteinfo.get('params', {}).get('pilot_url')
         if self.prodSourceLabel.startswith('rc_test'):
             self.piloturl = atlasconf.get(["executable", "ptarurlrc"])
-            if self.siteinfo['pilot_version'].startswith('2'):
-                self.piloturl = atlasconf.get(["executable", "ptarurlrc2"])
+            if self.pilotversion == '3':
+                self.piloturl = atlasconf.get(["executable", "p3tarurlrc"])
+        if self.prodSourceLabel.startswith('ptest'):
+            self.piloturl = atlasconf.get(["executable", "ptarurldev"])
+            if self.pilotversion == '3':
+                self.piloturl = atlasconf.get(["executable", "p3tarurldev"])
+
         if not self.truepilot and not self.piloturl:
             self.piloturl = atlasconf.get(["executable", "ptarurl"])
-        self.pilotversion = siteinfo.get('pilot_version', '2')
+            if self.pilotversion == '3':
+                self.piloturl = atlasconf.get(["executable", "p3tarurl"])
 
         self.tmpdir = tmpdir
         self.inputfiledir = os.path.join(self.tmpdir, 'inputfiles')
@@ -154,6 +161,9 @@ class aCTPanda2Xrsl:
         if self.truepilot and 'CA-SFU-T2' not in self.sitename and 'WATERLOO' not in self.sitename:
             walltime = self.maxwalltime
 
+        if self.sitename.startswith('Vega'):
+            walltime = max (360, walltime)
+
         cputime = self.getNCores() * walltime
         if self.sitename.startswith('BOINC'):
             if self.sitename == 'BOINC_LONG':
@@ -203,7 +213,6 @@ class aCTPanda2Xrsl:
             memory = max(memory, 2000)
             if self.sitename in ['Vega', 'Vega_largemem']:
                 memory = memory / 2
-
 
         if self.sitename == 'MPPMU_MCORE' and memory < 2000:
             memory = 2000
@@ -297,8 +306,8 @@ class aCTPanda2Xrsl:
     def setArguments(self):
 
         #pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-d" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s"' \
-        pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s"' \
-                % (self.schedconfig, self.sitename, self.sitename, self.prodSourceLabel, self.getJobType(), self.getResourceType())
+        pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s" "--pilotversion" "%s"' \
+                % (self.schedconfig, self.sitename, self.sitename, self.prodSourceLabel, self.getJobType(), self.getResourceType(), self.pilotversion)
         if self.prodSourceLabel == 'rc_alrb':
             pargs += ' "-i" "ALRB"'
         elif self.prodSourceLabel.startswith('rc_test'):
@@ -306,13 +315,9 @@ class aCTPanda2Xrsl:
         if self.siteinfo['python_version'].startswith('3'):
             pargs += ' "--pythonversion" "3"'
         if self.truepilot:
+            pargs += ' "--url" "https://pandaserver.cern.ch" "-p" "25443"'
             if self.piloturl:
-                pargs += ' "--url" "https://pandaserver.cern.ch" "-p" "25443" "--piloturl" "%s"' % (self.piloturl)
-            else:
-                if self.prodSourceLabel.startswith('rc_test'):
-                    pargs += ' "--url" "https://pandaserver.cern.ch" "-p" "25443" "--pilotversion" "%s"' % (self.pilotversion)
-                else:
-                    pargs += ' "--url" "https://pandaserver.cern.ch" "-p" "25443" "--pilotversion" "%s"' % ("2")
+                pargs += ' "--piloturl" "%s"' % (self.piloturl)
         else:
             pargs += ' "-z" "-t" "--piloturl" "local" "--mute"'
 
