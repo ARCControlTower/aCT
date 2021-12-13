@@ -463,8 +463,8 @@ class aCTSubmitter(aCTProcess):
             self.db.Commit()
 
             # still proxy bug - exit if there are multiple proxies
-            if len(self.db.getProxiesInfo('TRUE', ['id'])) > 1:
-                raise ExceptInterrupt(15)
+            #if len(self.db.getProxiesInfo('TRUE', ['id'])) > 1:
+            #    raise ExceptInterrupt(15)
 
         self.log.info("end submitting")
 
