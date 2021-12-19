@@ -49,6 +49,7 @@ def main():
         os.makedirs(os.path.dirname(DEFAULT_TOKEN_PATH))
     with open(DEFAULT_TOKEN_PATH, 'w') as f:
         f.write(token)
+    os.chmod(DEFAULT_TOKEN_PATH, 0o600)
 
     csr = x509.load_pem_x509_csr(data['csr'].encode("utf-8"), default_backend())
     cert = x509proxy.sign_request(csr).decode('utf-8')
