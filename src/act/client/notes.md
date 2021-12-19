@@ -40,3 +40,16 @@ PROBLEM WITH PROXIES: CLI programs do not necessarily have permissions to
 open proxies in aCT proxies directory.
 
 flask-socketio or rawer eventlet library for file transfer?
+
+
+
+# proxy delegation and tokens
+private key and csr are generated, entry in proxies table is created, key
+is stored in PEM format in blob column of table entry. id from table
+entry is used to generate JWT token. First, we can just insert blob with
+private key and then when the full cert is received, fill in everything
+else.
+
+
+# stateless tokens article
+https://yos.io/2016/01/07/stateless-authentication-with-json-web-tokens/

@@ -4,8 +4,8 @@ import requests
 import os
 import arc
 
-from config import parseNonParamConf
-from common import readProxyFile, addCommonArgs
+from config import parseNonParamConf, DEFAULT_TOKEN_PATH
+from common import readTokenFile, addCommonArgs
 
 
 def main():
@@ -25,7 +25,7 @@ def main():
 
     parseNonParamConf(confDict, args.conf)
 
-    proxyStr = readProxyFile(confDict['proxy'])
+    token = readTokenFile(DEFAULT_TOKEN_PATH)
 
     try:
         with open(args.xRSL, 'r') as f:
@@ -40,7 +40,6 @@ def main():
     #if not arc.JobDescription_Parse(xrslStr, jobdescs):
     #    print('error: job description parse error')
     if not parseResult:
-        print(parseResult)
         sys.exit(1)
     files = [] # list of tuples of file name and path
     for infile in jobdescs[0].DataStaging.InputFiles:
@@ -55,39 +54,41 @@ def main():
     # submit job to receive jobid
     baseUrl= '{}:{}'.format(confDict['server'], str(confDict['port']))
     requestUrl = '{}/jobs'.format(baseUrl)
-    form = {'site': args.site, 'proxy': proxyStr, 'xrsl': xrslStr}
+    jsonDict = {'site': args.site, 'desc': xrslStr}
+    params = {'token': token}
     try:
-        r = requests.put(requestUrl, data=form)
+        r = requests.post(requestUrl, json=jsonDict, params=params)
     except Exception as e:
         print('error: request: {}'.format(str(e)))
         sys.exit(1)
+    jsonDict = r.json()
     if r.status_code != 200:
-        print('error: request response: {} - {}'.format(r.status_code, r.text))
+        print('error: request response: {} - {}'.format(r.status_code, jsonDict['msg']))
         sys.exit(1)
-    jobid = int(r.text)
+    jobid = jsonDict['id']
 
     # upload data files for given job
-    requestUrl = '{}/data?id={}'.format(baseUrl, jobid)
-    form = {'proxy': proxyStr}
+    requestUrl = '{}/data'.format(baseUrl, jobid)
+    params = {'token': token, 'id': jobid}
     for name, path in files:
         filesDict = {'file': (name, open(path, 'rb'))}
         # TODO: handle exceptions
-        r = requests.put(requestUrl, data=form, files=filesDict)
+        r = requests.put(requestUrl, files=filesDict, params=params)
         if r.status_code != 200:
-            print('error: unsuccessful upload of file {}: {} - {}'.format(path, r.status_code, r.text))
+            print('error: unsuccessful upload of file {}: {} - {}'.format(path, r.status_code, r.json()['msg']))
             # TODO: what to do in such case? Kill job, retry?
             sys.exit(1)
 
     # complete job submission
-    requestUrl = '{}/jobs?id={}'.format(baseUrl, jobid)
-    form = {'proxy': proxyStr, 'xrsl': xrslStr}
+    requestUrl = '{}/jobs'.format(baseUrl, jobid)
+    jsonDict = {'id': jobid, 'desc': xrslStr}
     # TODO: handle exceptions
-    r = requests.put(requestUrl, data=form)
+    r = requests.put(requestUrl, json=jsonDict, params=params)
     if r.status_code != 200:
-        print('error: unsuccessful completion of job submission: {} - {}'.format(r.status_code, r.text))
+        print('error: unsuccessful completion of job submission: {} - {}'.format(r.status_code, r.json()['msg']))
         sys.exit(1)
 
-    jobid = int(r.text)
+    jobid = r.json()['id']
     print('{} - succesfully submited job with id {}'.format(r.status_code, jobid))
 
 
