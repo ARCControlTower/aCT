@@ -68,7 +68,7 @@ def main():
     jobid = jsonDict['id']
 
     # upload data files for given job
-    requestUrl = '{}/data'.format(baseUrl, jobid)
+    requestUrl = '{}/data'.format(baseUrl)
     params = {'token': token, 'id': jobid}
     for name, path in files:
         filesDict = {'file': (name, open(path, 'rb'))}
