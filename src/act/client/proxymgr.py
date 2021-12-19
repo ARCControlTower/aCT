@@ -165,4 +165,45 @@ class ProxyManager(object):
         """
         return self.arcdb.getProxiesInfo(" dn = '{}' ".format(dn), columns)
 
+    def insertProxyKeyPEM(self, pem):
+        c = self.arcdb.db.getCursor()
+        query = 'INSERT INTO proxies (proxy) VALUES (%s)'
+        try:
+            c.execute(query, (pem,))
+            c.execute('SELECT LAST_INSERT_ID()')
+            proxyid = c.fetchone()['LAST_INSERT_ID()']
+        except:
+            self.logger.exception('Error inserting private key PEM into database')
+            raise
+        else:
+            self.arcdb.Commit()
+            return proxyid
+        finally:
+            c.close()
 
+    def getProxyKeyPEM(self, proxyid):
+        c = self.arcdb.db.getCursor()
+        try:
+            c.execute('SELECT proxy FROM proxies WHERE id = %s', (proxyid,))
+        except:
+            self.logger.exception('Error retrieving private key PEM from database')
+            return None
+        else:
+            row = c.fetchone()
+            return row['proxy']
+        finally:
+            c.close()
+
+    def updateProxyid(self, proxyid, pem, exptime, path, dn):
+        c = self.arcdb.db.getCursor()
+        query = 'UPDATE proxies SET proxy = %s, expirytime = %s, ' \
+            'proxypath = %s, dn = %s WHERE id = %s'
+        try:
+            c.execute(query, (pem, exptime, path, dn, proxyid))
+        except:
+            self.logger.exception('Error updating delegated proxy info')
+            raise
+        else:
+            self.arcdb.Commit()
+        finally:
+            c.close()

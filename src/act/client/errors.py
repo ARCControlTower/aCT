@@ -116,3 +116,18 @@ class ProxyDBExpiredError(Exception):
     pass
 
 
+class RESTError(Exception):
+    """
+    Base class for exceptions that have to be handled in endpoint routes.
+
+    We want them to have error msg (already from base Exception), HTTP
+    response code and potentially internal aCT error codes (which are not
+    universally defined).
+    """
+
+    def __init__(self, msg, httpCode):
+        self.msg = msg
+        self.httpCode = httpCode
+
+    def __str__(self):
+        return self.msg

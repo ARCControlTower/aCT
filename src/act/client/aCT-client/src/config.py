@@ -23,6 +23,7 @@ PATH_PARAMS = ('proxy', )
 
 # defaults that are used if no parameters or config is available
 DEFAULT_CONF = os.path.join(os.path.expanduser('~'), '.aCT-client', 'aCT-client.conf')
+DEFAULT_TOKEN_PATH = os.path.join(os.path.expanduser('~'), '.aCT-client', 'token')
 DEFAULTS = {
     'proxy':    '/tmp/x509up_u' + str(os.getuid()),
     'server':   'http://localhost',

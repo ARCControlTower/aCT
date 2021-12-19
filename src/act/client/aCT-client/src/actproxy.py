@@ -1,9 +1,15 @@
+import os
 import argparse
 import sys
 import requests
+import x509proxy
 
-from config import parseNonParamConf
+from config import parseNonParamConf, DEFAULT_TOKEN_PATH
 from common import readProxyFile, addCommonArgs
+from delegate_proxy import parse_issuer_cred
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
 
 
 def main():
@@ -22,10 +28,12 @@ def main():
 
     proxyStr = readProxyFile(confDict['proxy'])
 
+    proxyCert, _, issuerChains = parse_issuer_cred(proxyStr)
+
     requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/proxies'
 
     try:
-        r = requests.put(requestUrl, data={'proxy':proxyStr})
+        r = requests.post(requestUrl, data={'cert':proxyStr})
     except Exception as e:
         print('error: request: {}'.format(str(e)))
         sys.exit(1)
@@ -34,7 +42,31 @@ def main():
         print('error: request response: {} - {}'.format(r.status_code, r.text))
         sys.exit(1)
 
-    print('{} - successfully inserted proxy with id {}'.format(r.status_code, r.text))
+    data = r.json()
+
+    token = data['token']
+    if not os.path.exists(DEFAULT_TOKEN_PATH):
+        os.makedirs(os.path.dirname(DEFAULT_TOKEN_PATH))
+    with open(DEFAULT_TOKEN_PATH, 'w') as f:
+        f.write(token)
+
+    csr = x509.load_pem_x509_csr(data['csr'].encode("utf-8"), default_backend())
+    cert = x509proxy.sign_request(csr).decode('utf-8')
+    chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
+
+    try:
+        obj = {'cert': cert, 'chain': chain}
+        params = {'token': token}
+        r = requests.put(requestUrl, json=obj, params=params)
+    except Exception as e:
+        print('error: request: {}'.format(str(e)))
+        sys.exit(1)
+
+    if r.status_code == 200:
+        print('Successfully inserted proxy. Access token: {}'.format(token))
+    else:
+        print('error: request response: {} - {}'.format(r.status_code, r.text))
+        sys.exit(1)
 
 
 if __name__ == '__main__':

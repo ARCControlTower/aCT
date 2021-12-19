@@ -622,6 +622,14 @@ class JobManager(object):
             where_params.extend(ids)
         return where, where_params
 
+    def checkJobExists(self, proxyid, jobid):
+        """Returns given jobid if job exists or None if not."""
+        jobdicts = self.getJobStats(proxyid, [jobid], "", "", ["id"], [], "")
+        if not jobdicts:
+            return None
+        else:
+            return jobdicts[0]["c_id"]
+
 
 class JobGetResults(object):
     """

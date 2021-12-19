@@ -2,8 +2,8 @@ import argparse
 import sys
 import requests
 
-from config import parseNonParamConf
-from common import readProxyFile, addCommonArgs, showHelpOnCommandOnly
+from config import parseNonParamConf, DEFAULT_TOKEN_PATH
+from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
 from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
 
 
@@ -27,28 +27,27 @@ def main():
 
     parseNonParamConf(confDict, args.conf)
 
-    proxyStr = readProxyFile(confDict['proxy'])
+    token = readTokenFile(DEFAULT_TOKEN_PATH)
 
     requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/jobs'
 
+    params = {'token': token}
     if args.id or args.name:
-        requestUrl += '?'
         if args.id:
-            requestUrl += 'id=' + args.id + '&'
+            params['id'] = args.id
         if args.state:
-            requestUrl += 'state=' + args.state + '&'
+            params['state'] = args.state
         if args.name:
-            requestUrl += 'name=' + args.name
-        requestUrl = requestUrl.rstrip('&')
+            params['name'] = args.name
 
     try:
-        r = requests.patch(requestUrl, data={'proxy':proxyStr,'arcstate':'tocancel'})
+        r = requests.patch(requestUrl, json={'arcstate':'tocancel'}, params=params)
     except Exception as e:
         print('error: request: {}'.format(str(e)))
         sys.exit(1)
 
     if r.status_code != 200:
-        print('error: request response: {} - {}'.format(r.status_code, r.text))
+        print('error: request response: {} - {}'.format(r.status_code, r.json()['msg']))
         sys.exit(1)
 
     print('Will kill {} jobs'.format(r.text))

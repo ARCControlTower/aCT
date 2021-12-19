@@ -19,7 +19,9 @@ setup(
         'actsub',
         'actget',
         'config',
-        'common'
+        'common',
+        'x509proxy',
+        'delegate_proxy',
     ],
     entry_points={
         'console_scripts': [
@@ -37,5 +39,6 @@ setup(
     },
     install_requires = [
         'requests',
+        'cryptography',
     ]
 )

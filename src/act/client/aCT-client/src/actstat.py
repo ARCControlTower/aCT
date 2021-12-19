@@ -2,8 +2,8 @@ import argparse
 import sys
 import requests
 
-from config import parseNonParamConf
-from common import readProxyFile, addCommonArgs, showHelpOnCommandOnly
+from config import parseNonParamConf, DEFAULT_TOKEN_PATH
+from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
 from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
 
 
@@ -31,28 +31,32 @@ def main():
 
     parseNonParamConf(confDict, args.conf)
 
-    proxyStr = readProxyFile(confDict['proxy'])
+    token = readTokenFile(DEFAULT_TOKEN_PATH)
 
     requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/jobs'
 
+    params = {'token': token}
     if args.id or args.arc or args.client or args.state or args.name:
-        requestUrl += '?'
+        #requestUrl += '?'
         if args.id:
-            requestUrl += 'id=' + args.id + '&'
+            params['id'] = args.id
         if args.arc:
-            requestUrl += 'arc=' + args.arc + '&'
+            params['arc'] = args.arc
         if args.client:
-            requestUrl += 'client=' + args.client + '&'
+            params['client'] = args.client
         if args.state:
-            requestUrl += 'state=' + args.state + '&'
+            params['state'] = args.state
         if args.name:
-            requestUrl += 'name=' + args.name
-        requestUrl = requestUrl.rstrip('&')
+            params['name'] = args.name
 
     try:
-        r = requests.get(requestUrl, data={'proxy':proxyStr})
+        r = requests.get(requestUrl, params=params)
     except Exception as e:
         print('error: request: {}'.format(str(e)))
+        sys.exit(1)
+
+    if r.status_code != 200:
+        print('error: request response: {} - {}'.format(r.status_code, r.json()['msg']))
         sys.exit(1)
 
     if args.arc:
@@ -63,10 +67,6 @@ def main():
         clicols = args.client.split(',')
     else:
         clicols = []
-
-    if r.status_code != 200:
-        print('error: request response: {} - {}'.format(r.status_code, r.text))
-        sys.exit(1)
 
     try:
         jsonResp = r.json()
