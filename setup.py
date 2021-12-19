@@ -21,7 +21,8 @@ setup(name='aCT',
 
         'flask',
         'gunicorn',
-        'sqlalchemy'
+        'sqlalchemy',
+        'pyjwt'
       ],
       entry_points={
         'console_scripts': [
