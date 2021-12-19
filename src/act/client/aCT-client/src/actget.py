@@ -6,23 +6,48 @@ import requests
 
 from config import parseNonParamConf, DEFAULT_TOKEN_PATH
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
-from common import getIDParams
+from common import addCommonJobFilterArgs, checkJobParams
+
+
+def getFilteredJobIDs(jobsUrl, token, **kwargs):
+    jobids = []
+    params = {'token': token, 'client': 'id'}
+    if 'id' in kwargs:
+        params['id'] = kwargs['id']
+    if 'name' in kwargs:
+        params['name'] = kwargs['name']
+    if 'state' in kwargs:
+        params['state'] = kwargs['state']
+
+    try:
+        r = requests.get(jobsUrl, params=params)
+    except Exception as e:
+        print('error: filter request: {}'.format(str(e)))
+        sys.exit(1)
+    if r.status_code != 200:
+        print('error: filter response: {} - {}'.format(r.status_code, r.json()['msg']))
+        sys.exit(1)
+    try:
+        jsonResp = r.json()
+    except ValueError as e:
+        print('error: filter response: JSON: {}'.format(str(e)))
+        sys.exit(1)
+    jobids.extend([job['c_id'] for job in jsonResp])
+    return set(jobids)
 
 
 def main():
-
     confDict = {}
 
     parser = argparse.ArgumentParser(description='Submit proxy to aCT server')
     addCommonArgs(parser)
-    parser.add_argument('-a', '--all', action='store_true',
-            help='all jobs that match other criteria')
-    parser.add_argument('--id', default=None,
-            help='a list of IDs of jobs that should be queried')
+    addCommonJobFilterArgs(parser)
+    parser.add_argument('--state', default=None,
+            help='the state that jobs should be in')
     args = parser.parse_args()
     showHelpOnCommandOnly(parser)
 
-    jobids = getIDParams(args)
+    checkJobParams(args)
 
     confDict['proxy']  = args.proxy
     confDict['server'] = args.server
@@ -36,42 +61,15 @@ def main():
     resultsUrl = urlBase + '/results'
     jobsUrl = urlBase + '/jobs'
 
-    # if -a flag is given, then IDs of all 'done' and 'donefailed' jobs need to
-    # be fetched first
-    if not jobids:
-        # get IDs of all 'done' jobs
-        params = {'token': token, 'client': 'id', 'state': 'done'}
-        try:
-            r = requests.get(jobsUrl, params=params)
-        except Exception as e:
-            print('error: request: "done" jobs: {}'.format(str(e)))
-            sys.exit(1)
-        if r.status_code != 200:
-            print('error: response: "done" jobs: {} - {}'.format(r.status_code, r.json()['msg']))
-            sys.exit(1)
-        try:
-            jsonResp = r.json()
-        except ValueError as e:
-            print('error: response: "done" jobs: JSON: {}'.format(str(e)))
-            sys.exit(1)
-        jobids.extend([job['c_id'] for job in jsonResp])
-
-        # get IDs of all 'donefailed' jobs
-        params = {'token': token, 'client': 'id', 'state': 'donefailed'}
-        try:
-            r = requests.get(jobsUrl, params=params)
-        except Exception as e:
-            print('error: request: "donefailed" jobs: {}'.format(str(e)))
-            sys.exit(1)
-        if r.status_code != 200:
-            print('error: response: "donefailed" jobs: {} - {}'.format(r.status_code, r.json()['msg']))
-            sys.exit(1)
-        try:
-            jsonResp = r.json()
-        except ValueError as e:
-            print('error: response: "donefailed" jobs: JSON: {}'.format(str(e)))
-            sys.exit(1)
-        jobids.extend([job['c_id'] for job in jsonResp])
+    # compute all IDs to fetch
+    jobids = getFilteredJobIDs(jobsUrl, token, state='done')
+    jobids = jobids.union(getFilteredJobIDs(jobsUrl, token, state='donefailed'))
+    if args.id:
+        jobids = jobids.intersection(getFilteredJobIDs(jobsUrl, token, id=args.id))
+    if args.name:
+        jobids = jobids.intersection(getFilteredJobIDs(jobsUrl, token, name=args.name))
+    if args.state:
+        jobids = jobids.intersection(getFilteredJobIDs(jobsUrl, token, state=args.state))
 
     # fetch job result for every job
     for jobid in jobids:
@@ -118,5 +116,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-

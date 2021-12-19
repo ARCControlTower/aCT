@@ -20,16 +20,6 @@ def checkJobParams(args):
         sys.exit(1)
 
 
-def getIDParams(args):
-    if not args.all and not args.id:
-        print("error: no job IDs given (use -a/--all or --id)")
-        sys.exit(1)
-    elif args.id:
-        return getIDsFromList(args.id)
-    else:
-        return []
-
-
 def addCommonJobFilterArgs(parser):
     parser.add_argument('-a', '--all', action='store_true',
             help='all jobs that match other criteria')
@@ -92,44 +82,6 @@ def isCorrectIDString(listStr):
                 print('error: invalid ID: {}'.format(group))
                 return False
     return True
-
-
-# TODO: direct copy from jobmgr, except for exit on error
-def getIDsFromList(listStr):
-    groups = listStr.split(',')
-    ids = []
-    for group in groups:
-        try:
-            group.index('-')
-        except ValueError:
-            isRange = False
-        else:
-            isRange = True
-
-        if isRange:
-            try:
-                firstIx, lastIx = group.split('-')
-            except ValueError: # if there is more than one dash
-                print('error: invalid ID range: {}'.format(group))
-                sys.exit(1)
-            try:
-                firstIx = int(firstIx)
-            except ValueError:
-                print('error: ID range start: {}'.format(firstIx))
-                sys.exit(1)
-            try:
-                lastIx = int(lastIx)
-            except ValueError:
-                print('error: ID range end: {}'.format(firstIx))
-                sys.exit(1)
-            ids.extend(range(int(firstIx), int(lastIx) + 1))
-        else:
-            try:
-                ids.append(int(group))
-            except ValueError:
-                print('error: invalid ID: {}'.format(group))
-                sys.exit(1)
-    return ids
 
 
 def readTokenFile(tokenFile):
