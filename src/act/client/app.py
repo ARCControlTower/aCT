@@ -328,16 +328,16 @@ def getCSR():
         encryption_algorithm=serialization.NoEncryption()
     ).decode("utf-8")
     pmgr = ProxyManager()
-    proxyid = pmgr.insertProxyKeyPEM(pem)
+    dn, exptime = pmgr.readProxyString(issuer_pem)
+    proxyid = pmgr.actproxy.updateProxy(pem, dn, '', exptime)
     if proxyid is None:
         return {'msg': 'Server error'}, 500
 
-    key_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
+    csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
     # TODO: hardcoded, use the same datetimes as for proxy sign_request
     #       on client, how to go about that?
-    lifetime = datetime.now() + timedelta(hours=24)
-    token = jwt.encode({'proxyid': proxyid, 'exp': lifetime}, JWT_SECRET, algorithm='HS256')
-    return {'token': token, 'csr': key_pem}, 200
+    token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
+    return {'token': token, 'csr': csr_pem}, 200
 
 
 @app.route('/proxies', methods=['PUT'])
@@ -357,12 +357,10 @@ def uploadSignedProxy():
     pmgr = ProxyManager()
     key_pem = pmgr.getProxyKeyPEM(proxyid)
     dn, exptime = pmgr.readProxyString(cert_pem)
-    conf = aCTConfigARC() # TODO: errors?
-    proxypath = os.path.join(conf.get(['voms', 'proxystoredir']), 'proxiesid'+str(proxyid))
     proxy_pem = cert_pem + key_pem.decode('utf-8') + chain_pem
-    pmgr.updateProxyid(proxyid, proxy_pem, exptime, proxypath, dn)
-
-    return 'OK', 200
+    proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, '', exptime)
+    token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
+    return {'token': token}, 200
 
 
 #@app.route('/proxies', methods=['GET'])
