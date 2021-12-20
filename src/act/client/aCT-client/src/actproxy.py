@@ -45,12 +45,6 @@ def main():
     data = r.json()
 
     token = data['token']
-    if not os.path.exists(DEFAULT_TOKEN_PATH):
-        os.makedirs(os.path.dirname(DEFAULT_TOKEN_PATH))
-    with open(DEFAULT_TOKEN_PATH, 'w') as f:
-        f.write(token)
-    os.chmod(DEFAULT_TOKEN_PATH, 0o600)
-
     csr = x509.load_pem_x509_csr(data['csr'].encode("utf-8"), default_backend())
     cert = x509proxy.sign_request(csr).decode('utf-8')
     chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
@@ -64,6 +58,13 @@ def main():
         sys.exit(1)
 
     if r.status_code == 200:
+        token = r.json()['token']
+        if not os.path.exists(DEFAULT_TOKEN_PATH):
+            os.makedirs(os.path.dirname(DEFAULT_TOKEN_PATH))
+        with open(DEFAULT_TOKEN_PATH, 'w') as f:
+            f.write(token)
+        os.chmod(DEFAULT_TOKEN_PATH, 0o600)
+
         print('Successfully inserted proxy. Access token: {}'.format(token))
     else:
         print('error: request response: {} - {}'.format(r.status_code, r.text))
