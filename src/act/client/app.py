@@ -7,7 +7,7 @@ import arc
 import act.client.x509proxy as x509proxy
 
 from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
-from act.client.proxymgr import ProxyManager
+from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
 from act.client.errors import NoSuchProxyError, InvalidJobDescriptionError
 from act.client.errors import NoSuchSiteError, RESTError
 from act.client.errors import InvalidJobRangeError, InvalidJobIDError
@@ -326,16 +326,15 @@ def getCSR():
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
         encryption_algorithm=serialization.NoEncryption()
-    ).decode("utf-8")
+    ).decode('utf-8')
     pmgr = ProxyManager()
     dn, exptime = pmgr.readProxyString(issuer_pem)
-    proxyid = pmgr.actproxy.updateProxy(pem, dn, '', exptime)
+    attr = getVOMSProxyAttributes(issuer_pem)
+    proxyid = pmgr.actproxy.updateProxy(pem, dn, attr, exptime)
     if proxyid is None:
         return {'msg': 'Server error'}, 500
 
     csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
-    # TODO: hardcoded, use the same datetimes as for proxy sign_request
-    #       on client, how to go about that?
     token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
     return {'token': token, 'csr': csr_pem}, 200
 
@@ -357,8 +356,9 @@ def uploadSignedProxy():
     pmgr = ProxyManager()
     key_pem = pmgr.getProxyKeyPEM(proxyid)
     dn, exptime = pmgr.readProxyString(cert_pem)
+    attr = getVOMSProxyAttributes(cert_pem)
     proxy_pem = cert_pem + key_pem.decode('utf-8') + chain_pem
-    proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, '', exptime)
+    proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, attr, exptime)
     token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
     return {'token': token}, 200
 

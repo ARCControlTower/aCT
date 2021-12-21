@@ -179,3 +179,25 @@ class ProxyManager(object):
             c.close()
 
 
+# We basically want to get the value of the first 'attribute:' line from
+# 'arcproxy -I' output.
+#
+# We achieve this by replicating what arcproxy does. The relevant part is:
+# https://source.coderefinery.org/nordugrid/arc/-/blob/master/src/clients/credentials/arcproxy.cpp#L606-744
+def getVOMSProxyAttributes(proxystr):
+    uc = arc.UserConfig()
+    uc.CredentialString(proxystr)
+    cr = arc.Credential(uc)
+    if not cr.GetCert():
+        return None
+    trustList = arc.VOMSTrustList()
+    trustList.AddRegex(".*")
+    acList = arc.VOMSACInfoVector()
+    if not arc.parseVOMSAC(cr, uc.CACertificatesDirectory(), "", "/etc/grid-security/vomsdir", trustList, acList):
+        return None
+    # These loops go over values of interest. They mimic this code snippet:
+    # https://source.coderefinery.org/nordugrid/arc/-/blob/master/src/clients/credentials/arcproxy.cpp#L684-724
+    for ac in acList:
+        for attr in ac.attributes:
+            if 'hostname=' not in attr:
+                return attr
