@@ -40,5 +40,6 @@ setup(
     install_requires = [
         'requests',
         'cryptography',
+        'pyyaml',
     ]
 )
