@@ -53,3 +53,12 @@ else.
 
 # stateless tokens article
 https://yos.io/2016/01/07/stateless-authentication-with-json-web-tokens/
+
+# cleanup of possible resources
+- jobs that were never put to "tosubmit"
+- proxids (how old?)
+
+# dcache
+
+## dev location
+https://dcache.ijs.si:2880/pnfs/ijs.si/gen
