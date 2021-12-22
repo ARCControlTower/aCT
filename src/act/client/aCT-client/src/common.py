@@ -2,22 +2,12 @@ import sys
 
 
 def addCommonArgs(parser):
-    parser.add_argument('--proxy', default=None, type=str,
-            help='path to proxy file')
     parser.add_argument('--server', default=None, type=str,
             help='URL to aCT server')
     parser.add_argument('--port', default=None, type=int,
             help='port on aCT server')
     parser.add_argument('--conf', default=None, type=str,
             help='path to configuration file')
-
-
-def checkJobParams(args):
-    if not args.all and not args.id:
-        print("error: no job IDs given (use -a/--all or --id)")
-        sys.exit(1)
-    elif args.id and not isCorrectIDString(args.id):
-        sys.exit(1)
 
 
 def addCommonJobFilterArgs(parser):
@@ -27,6 +17,14 @@ def addCommonJobFilterArgs(parser):
             help='a list of IDs of jobs that should be queried')
     parser.add_argument('--name', default=None,
             help='substring that jobs should have in name')
+
+
+def checkJobParams(args):
+    if not args.all and not args.id:
+        print("error: no job IDs given (use -a/--all or --id)")
+        sys.exit(1)
+    elif args.id and not isCorrectIDString(args.id):
+        sys.exit(1)
 
 
 # duplicated from act.client.proxymgr

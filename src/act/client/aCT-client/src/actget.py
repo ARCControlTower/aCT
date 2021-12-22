@@ -4,7 +4,7 @@ import os
 import zipfile
 import requests
 
-from config import parseNonParamConf, DEFAULT_TOKEN_PATH
+from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
 from common import addCommonJobFilterArgs, checkJobParams
 
@@ -37,9 +37,7 @@ def getFilteredJobIDs(jobsUrl, token, **kwargs):
 
 
 def main():
-    confDict = {}
-
-    parser = argparse.ArgumentParser(description='Submit proxy to aCT server')
+    parser = argparse.ArgumentParser(description='Download job results')
     addCommonArgs(parser)
     addCommonJobFilterArgs(parser)
     parser.add_argument('--state', default=None,
@@ -48,16 +46,20 @@ def main():
     showHelpOnCommandOnly(parser)
 
     checkJobParams(args)
+    conf = loadConf(path=args.conf)
 
-    confDict['proxy']  = args.proxy
-    confDict['server'] = args.server
-    confDict['port']   = args.port
+    # override values from configuration
+    if args.server:
+        conf['server'] = args.server
+    if args.port:
+        conf['port']   = args.port
 
-    parseNonParamConf(confDict, args.conf)
+    expandPaths(conf)
+    checkConf(conf, ['server', 'port', 'token'])
 
-    token = readTokenFile(DEFAULT_TOKEN_PATH)
+    token = readTokenFile(conf['token'])
 
-    urlBase = confDict['server'] + ':' + str(confDict['port'])
+    urlBase = conf['server'] + ':' + str(conf['port'])
     resultsUrl = urlBase + '/results'
     jobsUrl = urlBase + '/jobs'
 

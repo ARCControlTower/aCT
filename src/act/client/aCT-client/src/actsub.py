@@ -4,14 +4,11 @@ import requests
 import os
 import arc
 
-from config import parseNonParamConf, DEFAULT_TOKEN_PATH
+from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs
 
 
 def main():
-
-    confDict = {}
-
     parser = argparse.ArgumentParser(description='Submit job to aCT server')
     addCommonArgs(parser)
     parser.add_argument('--site', default='default',
@@ -19,13 +16,18 @@ def main():
     parser.add_argument('xRSL', nargs='+', help='path to job description file')
     args = parser.parse_args()
 
-    confDict['proxy']  = args.proxy
-    confDict['server'] = args.server
-    confDict['port']   = args.port
+    conf = loadConf(path=args.conf)
 
-    parseNonParamConf(confDict, args.conf)
+    # override values from configuration
+    if args.server:
+        conf['server'] = args.server
+    if args.port:
+        conf['port']   = args.port
 
-    token = readTokenFile(DEFAULT_TOKEN_PATH)
+    expandPaths(conf)
+    checkConf(conf, ['server', 'port', 'token'])
+
+    token = readTokenFile(conf['token'])
 
     for desc in args.xRSL:
         try:
@@ -53,7 +55,7 @@ def main():
             files.append((infile.Name, path))
 
         # submit job to receive jobid
-        baseUrl= '{}:{}'.format(confDict['server'], str(confDict['port']))
+        baseUrl= '{}:{}'.format(conf['server'], str(conf['port']))
         requestUrl = '{}/jobs'.format(baseUrl)
         jsonDict = {'site': args.site, 'desc': xrslStr}
         params = {'token': token}

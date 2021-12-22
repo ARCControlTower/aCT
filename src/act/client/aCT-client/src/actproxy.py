@@ -4,7 +4,7 @@ import sys
 import requests
 import x509proxy
 
-from config import parseNonParamConf, DEFAULT_TOKEN_PATH
+from config import loadConf, checkConf, expandPaths
 from common import readProxyFile, addCommonArgs
 from delegate_proxy import parse_issuer_cred
 from cryptography import x509
@@ -13,27 +13,29 @@ from cryptography.hazmat.primitives import serialization
 
 
 def main():
-
-    confDict = {}
-
     parser = argparse.ArgumentParser(description='Submit proxy to aCT server')
     addCommonArgs(parser)
     args = parser.parse_args()
 
-    confDict['proxy']  = args.proxy
-    confDict['server'] = args.server
-    confDict['port']   = args.port
+    conf = loadConf(path=args.conf)
 
-    parseNonParamConf(confDict, args.conf)
+    # override values from configuration
+    if args.server:
+        conf['server'] = args.server
+    if args.port:
+        conf['port']   = args.port
 
-    proxyStr = readProxyFile(confDict['proxy'])
+    expandPaths(conf)
+    checkConf(conf, ['server', 'port', 'token', 'proxy'])
+
+    proxyStr = readProxyFile(conf['proxy'])
 
     proxyCert, _, issuerChains = parse_issuer_cred(proxyStr)
 
-    requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/proxies'
+    requestUrl = conf['server'] + ':' + str(conf['port']) + '/proxies'
 
     try:
-        r = requests.post(requestUrl, data={'cert':proxyStr})
+        r = requests.post(requestUrl, data={'cert': proxyStr})
     except Exception as e:
         print('error: request: {}'.format(str(e)))
         sys.exit(1)
@@ -45,7 +47,7 @@ def main():
     data = r.json()
 
     token = data['token']
-    csr = x509.load_pem_x509_csr(data['csr'].encode("utf-8"), default_backend())
+    csr = x509.load_pem_x509_csr(data['csr'].encode('utf-8'), default_backend())
     cert = x509proxy.sign_request(csr).decode('utf-8')
     chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
 
@@ -59,11 +61,12 @@ def main():
 
     if r.status_code == 200:
         token = r.json()['token']
-        if not os.path.exists(DEFAULT_TOKEN_PATH):
-            os.makedirs(os.path.dirname(DEFAULT_TOKEN_PATH))
-        with open(DEFAULT_TOKEN_PATH, 'w') as f:
+        # TODO: exceptions
+        if not os.path.exists(conf['token']):
+            os.makedirs(os.path.dirname(conf['token']))
+        with open(conf['token'], 'w') as f:
             f.write(token)
-        os.chmod(DEFAULT_TOKEN_PATH, 0o600)
+        os.chmod(conf['token'], 0o600)
 
         print('Successfully inserted proxy. Access token: {}'.format(token))
     else:
@@ -73,5 +76,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-

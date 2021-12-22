@@ -2,15 +2,12 @@ import argparse
 import sys
 import requests
 
-from config import parseNonParamConf, DEFAULT_TOKEN_PATH
+from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
 from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
 
 
 def main():
-
-    confDict = {}
-
     parser = argparse.ArgumentParser(description="Get jobs' status")
     addCommonArgs(parser)
     addCommonJobFilterArgs(parser)
@@ -20,16 +17,20 @@ def main():
     showHelpOnCommandOnly(parser)
 
     checkJobParams(args)
+    conf = loadConf(path=args.conf)
 
-    confDict['proxy']  = args.proxy
-    confDict['server'] = args.server
-    confDict['port']   = args.port
+    # override values from configuration
+    if args.server:
+        conf['server'] = args.server
+    if args.port:
+        conf['port']   = args.port
 
-    parseNonParamConf(confDict, args.conf)
+    expandPaths(conf)
+    checkConf(conf, ['server', 'port', 'token'])
 
-    token = readTokenFile(DEFAULT_TOKEN_PATH)
+    token = readTokenFile(conf['token'])
 
-    requestUrl = confDict['server'] + ':' + str(confDict['port']) + '/jobs'
+    requestUrl = conf['server'] + ':' + str(conf['port']) + '/jobs'
 
     params = {'token': token}
     if args.id or args.state or args.name:
