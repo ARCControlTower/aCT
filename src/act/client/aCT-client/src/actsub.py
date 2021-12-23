@@ -1,7 +1,8 @@
 import argparse
 import sys
-import requests
 import os
+import subprocess
+import requests
 import arc
 
 from config import loadConf, checkConf, expandPaths
@@ -14,6 +15,9 @@ def main():
     parser.add_argument('--site', default='default',
             help='site that jobs should be submitted to')
     parser.add_argument('xRSL', nargs='+', help='path to job description file')
+    parser.add_argument('--dcache', nargs='?', const='dcache', default='',
+            help='whether files should be uploaded to dcache with optional \
+                  location parameter')
     args = parser.parse_args()
 
     conf = loadConf(path=args.conf)
@@ -27,9 +31,22 @@ def main():
     expandPaths(conf)
     checkConf(conf, ['server', 'port', 'token'])
 
+    # if dcache should be used get the location
+    if args.dcache:
+        if args.dcache == 'dcache':
+            dcacheBase = conf.get('dcache', '')
+            if not dcacheBase:
+                print('error: dcache location not configured')
+                sys.exit(1)
+        else:
+            dcacheBase = args.dcache
+    else:
+        dcacheBase = ''
+
     token = readTokenFile(conf['token'])
 
     for desc in args.xRSL:
+        # read job description from file
         try:
             with open(desc, 'r') as f:
                 xrslStr = f.read()
@@ -37,26 +54,15 @@ def main():
             print('error: xRSL file open: {}'.format(str(e)))
             continue
 
-        # parse job description and input files first before doing anything else
+        # parse job description
         jobdescs = arc.JobDescriptionList()
-        parseResult = arc.JobDescription_Parse(xrslStr, jobdescs)
-        #if not arc.JobDescription_Parse(xrslStr, jobdescs):
-        #    print('error: job description parse error')
-        if not parseResult:
+        if not arc.JobDescription_Parse(xrslStr, jobdescs):
+            print('error: parse error in job description {}'.format(desc))
             continue
-        files = [] # list of tuples of file name and path
-        for infile in jobdescs[0].DataStaging.InputFiles:
-            # TODO: add validation for different types of URLs
-            path = infile.Sources[0].FullPath()
-            if not path:
-                path = infile.Name
-            if not os.path.isfile(path):
-                continue
-            files.append((infile.Name, path))
 
         # submit job to receive jobid
-        baseUrl= '{}:{}'.format(conf['server'], str(conf['port']))
-        requestUrl = '{}/jobs'.format(baseUrl)
+        baseUrl= conf['server'] + ':' + str(conf['port'])
+        requestUrl = baseUrl + '/jobs'
         jsonDict = {'site': args.site, 'desc': xrslStr}
         params = {'token': token}
         try:
@@ -70,20 +76,49 @@ def main():
             continue
         jobid = jsonDict['id']
 
-        # upload data files for given job
-        requestUrl = '{}/data'.format(baseUrl)
+        # upload local input files
+        #
+        # used for upload to internal data management
+        requestUrl = baseUrl + '/data'
         params = {'token': token, 'id': jobid}
-        for name, path in files:
-            filesDict = {'file': (name, open(path, 'rb'))}
-            # TODO: handle exceptions
-            r = requests.put(requestUrl, files=filesDict, params=params)
-            if r.status_code != 200:
-                print('error: unsuccessful upload of file {}: {} - {}'.format(path, r.status_code, r.json()['msg']))
-                # TODO: what to do in such case? Kill job, retry?
+        for i in range(len(jobdescs[0].DataStaging.InputFiles)):
+            # we use index for access to InputFiles because changes
+            # (for dcache) are not preserved otherwise?
+            infile = jobdescs[0].DataStaging.InputFiles[i]
+            # TODO: add validation for different types of URLs
+            path = infile.Sources[0].FullPath()
+            if not path:
+                path = infile.Name
+            if not os.path.isfile(path):
                 continue
+            if not dcacheBase:
+                # upload to internal data management
+                filesDict = {'file': (infile.Name, open(path, 'rb'))}
+                # TODO: handle exceptions
+                r = requests.put(requestUrl, files=filesDict, params=params)
+                if r.status_code != 200:
+                    print('error: unsuccessful upload of file {}: {} - {}'.format(path, r.status_code, r.json()['msg']))
+                    # TODO: what to do in such case? Kill job, retry?
+                    continue
+            else:
+                # upload to dcache
+                dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
+                jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
+                result = subprocess.run(
+                        ['/usr/bin/arccp', path, dst],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT
+                )
+                if result.returncode != 0:
+                    print('error: transfer {} to {} failed: {}'.format(path, dst, result.stdout))
+
+        # job description was modified and has to be unparsed
+        if dcacheBase:
+            # TODO: check for errors
+            xrslStr = jobdescs[0].UnParse('', '')[1]
 
         # complete job submission
-        requestUrl = '{}/jobs'.format(baseUrl, jobid)
+        requestUrl = baseUrl + '/jobs'
         jsonDict = {'id': jobid, 'desc': xrslStr}
         # TODO: handle exceptions
         r = requests.put(requestUrl, json=jsonDict, params=params)
