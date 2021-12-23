@@ -62,3 +62,4 @@ https://yos.io/2016/01/07/stateless-authentication-with-json-web-tokens/
 
 ## dev location
 https://dcache.ijs.si:2880/pnfs/ijs.si/gen
+https://dcache.sling.si:2880/gen.vo.sling.si
