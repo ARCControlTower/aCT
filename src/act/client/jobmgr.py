@@ -119,7 +119,7 @@ class JobManager(object):
         """
         # wrong state filter, return immediately
         if state_filter not in ('', 'done', 'donefailed', 'cancelled', 'failed'):
-            return 0 # zero jobs cleaned
+            return []
 
         # create filters in query
         where = ' c.proxyid = %s AND '
@@ -141,12 +141,11 @@ class JobManager(object):
                 where_params=where_params)
 
         if not jobs:
-            return 0 # zero jobs cleaned
+            return []
 
         # create where clauses for removal and remove tmp dirs
         arc_where = ''
         client_params = []
-        #numDeleted = 0
         deletedIDs = []
         for job in jobs:
             # remove results folder; if none, just log and don't notify user
@@ -167,11 +166,9 @@ class JobManager(object):
             arc_where += '{}, '.format(job['a_id'])
             client_params.append(int(job['c_id']))
 
-            #numDeleted += 1
             deletedIDs.append(job['c_id'])
 
         # delete jobs from tables
-        #if numDeleted:
         if deletedIDs:
             arc_where = arc_where.rstrip(', ')
             arc_where = ' id IN ({})'.format(arc_where)
@@ -180,7 +177,6 @@ class JobManager(object):
             self.arcdb.updateArcJobs(patch, arc_where)
             self.clidb.deleteJobs(client_where, client_params)
 
-        #return numDeleted
         return deletedIDs
 
     def forceCleanJobs(self, results):
@@ -235,13 +231,13 @@ class JobManager(object):
         where = where.rstrip('AND ')
 
         jobs = self.clidb.getJoinJobsInfo(
-                clicols=[],
+                clicols=['id'],
                 arccols=['id'],
                 where=where,
                 where_params=where_params)
 
         if not jobs:
-            return 0 # 0 jobs to fetch
+            return []
 
         # update jobs' state for fetching
         where = ' id IN ({})'.format(
@@ -249,7 +245,7 @@ class JobManager(object):
         patch = {'arcstate': 'tofetch', 'tarcstate': self.arcdb.getTimeStamp()}
         self.arcdb.updateArcJobs(patch, where)
 
-        return len(jobs)
+        return [job['c_id'] for job in jobs] # TODO: performance issue?
 
     def refetchJobs(self, proxyid, jobids=[], name_filter=''):
         """
@@ -279,13 +275,13 @@ class JobManager(object):
         where = where.rstrip('AND ')
 
         jobs = self.clidb.getJoinJobsInfo(
-                clicols=[],
+                clicols=['id'],
                 arccols=['arcstate', 'JobID', 'id'],
                 where=where,
                 where_params=where_params)
 
         if not jobs:
-            return 0
+            return []
 
         for job in jobs:
             if job['a_arcstate'] == 'failed':
@@ -314,7 +310,7 @@ class JobManager(object):
             patch['tarcstate'] = self.arcdb.getTimeStamp()
             self.arcdb.updateArcJobs(patch, where)
 
-        return len(jobs)
+        return [job['c_id'] for job in jobs] # TODO: performance issue?
 
     def getJobs(self, proxyid, jobids=[], state_filter='', name_filter=''):
         """
@@ -400,7 +396,7 @@ class JobManager(object):
         """
         # wrong state filter, return immediately
         if state_filter not in ('', 'submitted', 'running', 'tosubmit', 'submitting'):
-            return 0 # zero killed jobs
+            return []
         where = ' c.proxyid = %s AND '
         where_params = [proxyid]
         if state_filter:
@@ -424,7 +420,7 @@ class JobManager(object):
                 where_params=where_params)
 
         if not jobs:
-            return 0 # 0 jobs killed
+            return []
 
         arc_ids = []
         client_ids = []
@@ -456,7 +452,7 @@ class JobManager(object):
         if not res:
             raise Exception("Could not release lock after killing jobs")
 
-        return len(jobs)
+        return [job['c_id'] for job in jobs] # TODO: performance issue?
 
     def resubmitJobs(self, proxyid, jobids=[], name_filter=''):
         """
@@ -482,13 +478,13 @@ class JobManager(object):
 
         if where:
             jobs = self.clidb.getJoinJobsInfo(
-                    clicols=[],
+                    clicols=['id'],
                     arccols=['id'],
                     where=where,
                     where_params=where_params)
 
         if not jobs:
-            return 0 # 0 jobs to resubmit
+            return []
 
         # set job state for resubmittion
         where = ' id IN ({})'.format(
@@ -496,7 +492,7 @@ class JobManager(object):
         patch = {'arcstate': 'toresubmit', 'tarcstate': self.arcdb.getTimeStamp()}
         self.arcdb.updateArcJobs(patch, where)
 
-        return len(jobs)
+        return [job['c_id'] for job in jobs] # TODO: performance issue?
 
     # TODO: refactor to **kwargs
     # TODO: should filters be used together or separately?

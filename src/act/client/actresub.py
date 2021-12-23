@@ -66,7 +66,7 @@ def main():
 
     # resubmit jobs
     manager = JobManager()
-    numResubmitted = manager.resubmitJobs(proxyid, jobs, args.find)
+    numResubmitted = len(manager.resubmitJobs(proxyid, jobs, args.find))
     print('Jobs resubmitted: {}'.format(numResubmitted))
 
 

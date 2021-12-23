@@ -68,7 +68,7 @@ def main():
 
     # kill jobs
     manager = JobManager()
-    numKilled = manager.killJobs(proxyid, jobs, args.state, args.find)
+    numKilled = len(manager.killJobs(proxyid, jobs, args.state, args.find))
     print('Jobs killed: {}'.format(numKilled))
 
 

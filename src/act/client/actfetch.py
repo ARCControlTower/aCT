@@ -71,10 +71,10 @@ def main():
     # fetch jobs
     manager = JobManager()
     if args.refetch:
-        numFetching = manager.refetchJobs(proxyid, jobs, args.find)
+        numFetching = len(manager.refetchJobs(proxyid, jobs, args.find))
         print('Will refetch {} jobs'.format(numFetching))
     else:
-        numFetching = manager.fetchJobs(proxyid, jobs, args.find)
+        numFetching = len(manager.fetchJobs(proxyid, jobs, args.find))
         print('Will fetch {} jobs'.format(numFetching))
 
 

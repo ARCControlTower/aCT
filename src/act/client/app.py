@@ -152,14 +152,14 @@ def patch():
     jmgr = JobManager()
 
     if arcstate == 'tofetch':
-        num = jmgr.fetchJobs(proxyid, jobids, name_filter)
+        jobids = jmgr.fetchJobs(proxyid, jobids, name_filter)
     elif arcstate == 'tocancel':
-        num = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
+        jobids = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
     elif arcstate == 'toresubmit':
-        num = jmgr.resubmitJobs(proxyid, jobids, name_filter)
+        jobids = jmgr.resubmitJobs(proxyid, jobids, name_filter)
     else:
         return {'msg': '"arcstate" should be either "tofetch" or "tocancel" or "toresubmit"'}, 400
-    return json.dumps(num)
+    return json.dumps(jobids)
 
 
 # TODO: figure out if this can be done for multiple jobs
