@@ -1,4 +1,5 @@
 import sys
+import subprocess
 
 
 def addCommonArgs(parser):
@@ -85,3 +86,34 @@ def isCorrectIDString(listStr):
 def readTokenFile(tokenFile):
     with open(tokenFile, 'r') as f:
         return f.read()
+
+
+def cleandCache(conf, args, jobid):
+    if args.dcache and args.dcache != 'dcache':
+        dcacheBase = args.dcache
+    else:
+        dcacheBase = conf.get('dcache', None)
+        if dcacheBase is None:
+            return
+    result = subprocess.run(
+            ['/usr/bin/arcls', dcacheBase],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT
+    )
+    if result.returncode == 0:
+        for line in result.stdout.decode('utf-8').splitlines():
+            jobDir = str(jobid) + '/'
+            if line == jobDir:
+                url = dcacheBase + '/' + jobDir
+                print('deleting job folder {} in dCache'.format(url))
+                result = subprocess.run(
+                        ['/usr/bin/arcrm', url],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT
+                )
+                if result.returncode != 0:
+                    print('error: deleting job folder {}: {}'.format(url, result.stdout))
+    else:
+        print('error: listing user\'s dCache directory {}: {}'.format(dcacheBase, result.stdout))
+
+
