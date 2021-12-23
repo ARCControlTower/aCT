@@ -6,7 +6,7 @@ import requests
 
 from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
-from common import addCommonJobFilterArgs, checkJobParams
+from common import addCommonJobFilterArgs, checkJobParams, cleandCache
 
 
 def getFilteredJobIDs(jobsUrl, token, **kwargs):
@@ -42,6 +42,9 @@ def main():
     addCommonJobFilterArgs(parser)
     parser.add_argument('--state', default=None,
             help='the state that jobs should be in')
+    parser.add_argument('--dcache', nargs='?', const='dcache', default='',
+            help='whether files should be uploaded to dcache with optional \
+                  location parameter')
     args = parser.parse_args()
     showHelpOnCommandOnly(parser)
 
@@ -114,6 +117,8 @@ def main():
         if r.status_code != 200:
             print('error cleaning job: {}'.format(r.json()['msg']))
             continue
+
+        cleandCache(conf, args, jobid)
 
 
 if __name__ == '__main__':

@@ -111,7 +111,7 @@ def clean():
     for jobid in deleted:
         shutil.rmtree(jmgr.getJobDataDir(jobid))
 
-    return json.dumps(len(deleted))
+    return json.dumps(deleted)
 
 
 # expects JSON object with 'state' attribute:

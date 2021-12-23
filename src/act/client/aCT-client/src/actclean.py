@@ -3,7 +3,7 @@ import sys
 import requests
 
 from config import loadConf, checkConf, expandPaths
-from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
+from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly, cleandCache
 from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
 
 
@@ -13,6 +13,9 @@ def main():
     addCommonJobFilterArgs(parser)
     parser.add_argument('--state', default=None,
             help='the state that jobs should be in')
+    parser.add_argument('--dcache', nargs='?', const='dcache', default='',
+            help='whether files should be uploaded to dcache with optional \
+                  location parameter')
     args = parser.parse_args()
     showHelpOnCommandOnly(parser)
 
@@ -51,7 +54,12 @@ def main():
         print('error: request response: {} - {}'.format(r.status_code, r.json()['msg']))
         sys.exit(1)
 
-    print('Cleaned {} jobs'.format(r.text))
+    # TODO: error handling for malformed JSON
+    jobs = r.json()
+    print('Cleaned {} jobs'.format(len(jobs)))
+
+    for jobid in jobs:
+        cleandCache(conf, args, jobid)
 
 
 if __name__ == '__main__':
