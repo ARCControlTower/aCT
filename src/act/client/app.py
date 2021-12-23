@@ -8,9 +8,8 @@ import act.client.x509proxy as x509proxy
 
 from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
-from act.client.errors import NoSuchProxyError, InvalidJobDescriptionError
-from act.client.errors import NoSuchSiteError, RESTError
-from act.client.errors import InvalidJobRangeError, InvalidJobIDError
+from act.client.errors import InvalidJobDescriptionError, InvalidJobIDError
+from act.client.errors import NoSuchSiteError, RESTError, InvalidJobRangeError
 from act.common.aCTConfig import aCTConfigARC
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -363,64 +362,6 @@ def uploadSignedProxy():
     return {'token': token}, 200
 
 
-#@app.route('/proxies', methods=['GET'])
-#def getProxies():
-#    """
-#    Return information on proxies.
-#
-#    Currently there are no parameters that would allow users to select which
-#    columns should be fetched from table.
-#
-#    Returns:
-#        JSON list of JSON objects with proxy information (status 200).
-#    """
-#    dn, _ = getProxyDNAndAttr()
-#    pmgr = ProxyManager()
-#    proxies = pmgr.getProxiesWithDN(dn, columns=['id', 'attribute'])
-#    return json.dumps(proxies)
-#
-#
-## TODO: not most efficiently done if user has a lot of proxies: could
-## turn around the loops
-#@app.route('/proxies', methods=['DELETE'])
-#def deleteProxies():
-#    """
-#    Delete proxies from database.
-#
-#    Parameter has to be given in url: 'id' which is a list of proxy IDs that
-#    should be deleted.
-#
-#    Function first fetches all proxies that match the DN of a certificate
-#    from request. Then it deletes those whose IDs are in 'id' parameter.
-#    This is done so that user cannot delete any proxies but his own.
-#
-#    Returns:
-#        status 200: A string with a number of deleted proxies.
-#        status 401: A string with error message.
-#    """
-#    dn, _ = getProxyDNAndAttr()
-#    pmgr = ProxyManager()
-#    jmgr = JobManager()
-#    proxies = pmgr.getProxiesWithDN(dn, columns=['id'])
-#
-#    try:
-#        proxyids = getIDs()
-#    except Exception:
-#        return 'Invalid id parameter', 400
-#    if not proxyids:
-#        return 'Wrong or no client certificate', 401
-#
-#    numDeleted = 0
-#    for proxy in proxies:
-#        if proxy['id'] in proxyids:
-#            # do not remove a proxy on which jobs depend
-#            if not jmgr.getJobStats(proxy['id'], [], '', '', clicols=['id']):
-#                pmgr.arcdb.deleteProxy(proxy['id'])
-#                proxyids.remove(proxy['id']) # optimize a little bit
-#                numDeleted += 1
-#    return json.dumps(numDeleted)
-
-
 @app.route('/data', methods=['PUT'])
 def uploadFile():
     try:
@@ -454,31 +395,6 @@ def uploadFile():
     #       path that can go deep
     datafile.save(os.path.join(jobDataDir, datafile.filename))
     return 'OK', 200
-
-
-def getProxyId():
-    '''Get proxy id from proxy info in current request context.'''
-    dn, _ = getProxyDNAndAttr()
-    pmgr = ProxyManager()
-    proxyid = pmgr.getProxyInfo(dn, '', ['id'])['id']
-    return proxyid
-
-
-def getProxyDNAndAttr():
-    '''Get cert DN from cert in current request context.'''
-    proxy = getProxyString()
-    pmgr = ProxyManager()
-    dn, attr =  pmgr.readProxyString(proxy)
-    return dn, attr
-
-
-def getProxyString():
-    '''Get cert string from current request context.'''
-    proxy = request.form.get('proxy', None)
-    if not proxy:
-        raise NoSuchProxyError()
-    proxyStr = str(proxy)
-    return proxyStr
 
 
 def getIDs():
