@@ -72,6 +72,5 @@ https://dcache.sling.si:2880/gen.vo.sling.si
 for reference:
 https://github.com/synodriver/aiowebdav
 
-
 # VOMS
 voms extensions can expire faster than cert
