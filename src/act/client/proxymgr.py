@@ -178,6 +178,18 @@ class ProxyManager(object):
         finally:
             c.close()
 
+    def checkProxyExists(self, proxyid):
+        try:
+            c = self.arcdb.db.getCursor()
+            c.execute('SELECT id FROM proxies WHERE id = %s LIMIT 1', (proxyid,))
+        except Exception as e:
+            self.logger.exception('Error checking existence of proxy')
+            return None
+        else:
+            return c.fetchone() is not None
+        finally:
+            c.close()
+
 
 # We basically want to get the value of the first 'attribute:' line from
 # 'arcproxy -I' output.
