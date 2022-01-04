@@ -41,5 +41,7 @@ setup(
         'requests',
         'cryptography',
         'pyyaml',
+        'aiohttp',
+        'aiofiles',
     ]
 )
