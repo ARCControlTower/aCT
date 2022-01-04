@@ -1,15 +1,77 @@
 import argparse
 import sys
 import os
-import subprocess
-import requests
+import ssl
 import arc
+import asyncio
+import aiohttp
+import aiofiles
 
 from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs
 
 
+TRANSFER_BLOCK_SIZE = 2**16
+
+
+# TODO: exceptions for aiohttp and aiofiles
+# TODO: response from dcache when removing directory is 204. Should we
+#       fix on this or on less than 300?
+
+
+async def webdav_mkdir(session, url):
+    headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
+    async with session.request('MKCOL', url, headers=headers) as resp:
+        if resp.status != 201:
+            print('error: cannot create dCache directory {}: {} - {}'.format(url, resp.status, await resp.text()))
+            return False
+        else:
+            return True
+
+
+async def webdav_rmdir(session, url):
+    print('Deleting resource: {}'.format(url))
+    headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
+    async with session.delete(url, headers=headers) as resp:
+        if resp.status >= 300:
+            print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, await resp.text()))
+
+
+# https://docs.aiohttp.org/en/stable/client_quickstart.html?highlight=upload#streaming-uploads
+async def file_sender(filename):
+    async with aiofiles.open(filename, "rb") as f:
+        chunk = await f.read(TRANSFER_BLOCK_SIZE)
+        while chunk:
+            yield chunk
+            chunk = await f.read(TRANSFER_BLOCK_SIZE)
+
+
+async def webdav_put(session, url, path):
+    timeout = aiohttp.ClientTimeout(total=900)
+    async with session.put(url, data=file_sender(path), timeout=timeout) as resp:
+        if resp.status != 201:
+            print('error: cannot upload file {} to dCache URL {}: {} - {}'.format(path, url, resp.status, await resp.text()))
+            return False
+        else:
+            return True
+
+
+async def kill_jobs(session, url, jobids, token):
+    ids = ','.join(map(str, jobids))
+    params = {'token': token, 'id': ids}
+    jsonDict = {'arcstate': 'tocancel'}
+    async with session.patch(url, json=jsonDict, params=params) as resp:
+        jsonDict = await resp.json()
+        if resp.status != 200:
+            print('error: killing jobs with failed input files: {} - {}'.format(resp.status, jsonDict['msg']))
+
+
 def main():
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(program())
+
+
+async def program():
     parser = argparse.ArgumentParser(description='Submit job to aCT server')
     addCommonArgs(parser)
     parser.add_argument('--site', default='default',
@@ -31,8 +93,9 @@ def main():
     expandPaths(conf)
     checkConf(conf, ['server', 'port', 'token'])
 
-    # if dcache should be used get the location
+    # get dcache location, create ssl and aio context
     if args.dcache:
+        checkConf(conf, ['proxy'])
         if args.dcache == 'dcache':
             dcacheBase = conf.get('dcache', '')
             if not dcacheBase:
@@ -40,97 +103,129 @@ def main():
                 sys.exit(1)
         else:
             dcacheBase = args.dcache
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+        context.load_cert_chain(conf['proxy'], keyfile=conf['proxy'])
+        _DEFAULT_CIPHERS = (
+            'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
+            'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
+            '!eNULL:!MD5'
+        )
+        context.set_ciphers(_DEFAULT_CIPHERS)
+
+        connector = aiohttp.TCPConnector(ssl=context)
+        dcsession = aiohttp.ClientSession(connector=connector)
+
+        useDcache = True
     else:
-        dcacheBase = ''
+        useDcache = False
 
     token = readTokenFile(conf['token'])
 
-    for desc in args.xRSL:
-        # read job description from file
-        try:
-            with open(desc, 'r') as f:
-                xrslStr = f.read()
-        except Exception as e:
-            print('error: xRSL file open: {}'.format(str(e)))
-            continue
+    async with aiohttp.ClientSession() as session:
+        # list of jobs whose input transfers failed and need to be killed
+        tokill = []
 
-        # parse job description
-        jobdescs = arc.JobDescriptionList()
-        if not arc.JobDescription_Parse(xrslStr, jobdescs):
-            print('error: parse error in job description {}'.format(desc))
-            continue
-
-        # submit job to receive jobid
-        baseUrl= conf['server'] + ':' + str(conf['port'])
-        requestUrl = baseUrl + '/jobs'
-        jsonDict = {'site': args.site, 'desc': xrslStr}
-        params = {'token': token}
-        try:
-            r = requests.post(requestUrl, json=jsonDict, params=params)
-        except Exception as e:
-            print('error: request: {}'.format(str(e)))
-            continue
-        jsonDict = r.json()
-        if r.status_code != 200:
-            print('error: request response: {} - {}'.format(r.status_code, jsonDict['msg']))
-            continue
-        jobid = jsonDict['id']
-
-        # upload local input files
-        #
-        # used for upload to internal data management
-        requestUrl = baseUrl + '/data'
-        params = {'token': token, 'id': jobid}
-        for i in range(len(jobdescs[0].DataStaging.InputFiles)):
-            # we use index for access to InputFiles because changes
-            # (for dcache) are not preserved otherwise?
-            infile = jobdescs[0].DataStaging.InputFiles[i]
-            # TODO: add validation for different types of URLs
-            path = infile.Sources[0].FullPath()
-            if not path:
-                path = infile.Name
-            if not os.path.isfile(path):
+        for desc in args.xRSL:
+            # read job description from
+            try:
+                with open(desc, 'r') as f:
+                    xrslStr = f.read()
+            except Exception as e:
+                print('error: xRSL file open: {}'.format(str(e)))
                 continue
-            if not dcacheBase:
-                # upload to internal data management
-                filesDict = {'file': (infile.Name, open(path, 'rb'))}
-                # TODO: handle exceptions
-                r = requests.put(requestUrl, files=filesDict, params=params)
-                if r.status_code != 200:
-                    print('error: unsuccessful upload of file {}: {} - {}'.format(path, r.status_code, r.json()['msg']))
-                    # TODO: what to do in such case? Kill job, retry?
+
+            # parse job description
+            jobdescs = arc.JobDescriptionList()
+            if not arc.JobDescription_Parse(xrslStr, jobdescs):
+                print('error: parse error in job description {}'.format(desc))
+                continue
+
+            # submit job to receive jobid
+            baseUrl= conf['server'] + ':' + str(conf['port'])
+            requestUrl = baseUrl + '/jobs'
+            jsonDict = {'site': args.site, 'desc': xrslStr}
+            params = {'token': token}
+            # TODO: exceptions
+            async with session.post(requestUrl, json=jsonDict, params=params) as resp:
+                jsonDict = await resp.json()
+                if resp.status != 200:
+                    print('error: POST /jobs: {} - {}'.format(resp.status, jsonDict['msg']))
                     continue
-            else:
-                # upload to dcache
-                dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
-                jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
-                result = subprocess.run(
-                        ['/usr/bin/arccp', path, dst],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT
-                )
-                if result.returncode != 0:
-                    print('error: transfer {} to {} failed: {}'.format(path, dst, result.stdout))
+                jsonDict = await resp.json()
+                jobid = jsonDict['id']
 
-        # job description was modified and has to be unparsed
-        if dcacheBase:
-            # TODO: check for errors
-            xrslStr = jobdescs[0].UnParse('', '')[1]
+            # create directory for job's local input files if using dcache
+            if useDcache:
+                if not await webdav_mkdir(dcsession, dcacheBase + '/' + str(jobid)):
+                    tokill.append(jobid)
+                    continue
 
-        # complete job submission
-        requestUrl = baseUrl + '/jobs'
-        jsonDict = {'id': jobid, 'desc': xrslStr}
-        # TODO: handle exceptions
-        r = requests.put(requestUrl, json=jsonDict, params=params)
-        if r.status_code != 200:
-            print('error: unsuccessful completion of job submission: {} - {}'.format(r.status_code, r.json()['msg']))
-            continue
+            requestUrl = baseUrl + '/data'
+            params = {'token': token, 'id': jobid}
 
-        jobid = r.json()['id']
-        print('{} - succesfully submited job with id {}'.format(r.status_code, jobid))
+            # upload local input files
+            transferFail = False
+            for i in range(len(jobdescs[0].DataStaging.InputFiles)):
+                # we use index for access to InputFiles because changes
+                # (for dcache) are not preserved otherwise?
+                infile = jobdescs[0].DataStaging.InputFiles[i]
+                # TODO: add validation for different types of URLs
+                path = infile.Sources[0].FullPath()
+                if not path:
+                    path = infile.Name
+                if not os.path.isfile(path):
+                    continue
+                if useDcache: # TODO: exceptions
+                    # upload to dcache
+                    dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
+                    jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
+                    if not await webdav_put(dcsession, dst, path):
+                        transferFail = True
+                        break
+                else: # TODO: exceptions
+                    # upload to internal data management
+                    data = aiohttp.FormData()
+                    data.add_field('file', file_sender(path), filename=infile.Name)
+                    async with session.put(requestUrl, data=data, params=params) as resp:
+                        jsonDict = await resp.json()
+                        if resp.status != 200:
+                            print('error: PUT /data: {} - {}'.format(resp.status, jsonDict['msg']))
+                            transferFail = True
+                            break
+
+            if transferFail:
+                tokill.append(jobid)
+                continue
+
+            # job description was modified and has to be unparsed
+            if useDcache:
+                # TODO: errors
+                xrslStr = jobdescs[0].UnParse('', '')[1]
+
+            # complete job submission
+            requestUrl = baseUrl + '/jobs'
+            jsonDict = {'id': jobid, 'desc': xrslStr}
+            # TODO: exceptions
+            async with session.put(requestUrl, json=jsonDict, params=params) as resp:
+                jsonDict = await resp.json()
+                if resp.status != 200:
+                    print('error: PUT /jobs: {} - {}'.format(resp.status, jsonDict['msg']))
+                    tokill.append(jobid)
+                else:
+                    print('{} - succesfully submited job with id {}'.format(resp.status, jsonDict['id']))
+
+            jobdescs = None # Weird error with JobDescriptionList destructor?
 
 
-if __name__ == '__main__':
-    main()
+        if tokill:
+            print('killing jobs: {}'.format(tokill))
+            await kill_jobs(session, baseUrl + '/jobs', tokill, token)
+
+        if useDcache:
+            for jobid in tokill:
+                print('deleting dCache job directory for job {}'.format(jobid))
+                await webdav_rmdir(dcsession, dcacheBase + '/' + str(jobid))
+            await dcsession.close() # close dCache context that is not handled in with statement
 
 

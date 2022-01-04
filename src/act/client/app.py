@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 JWT_SECRET = "aCT JWT secret"
 
 
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, jsonify
 app = Flask(__name__)
 
 
@@ -76,6 +76,7 @@ def stat():
         return {'msg': str(e)}, e.httpCode
     except Exception:
         # TODO: log properly
+        print(e)
         return {'msg': 'Server error'}, 500
     else:
         return json.dumps(jobdicts)
@@ -159,7 +160,7 @@ def patch():
         jobids = jmgr.resubmitJobs(proxyid, jobids, name_filter)
     else:
         return {'msg': '"arcstate" should be either "tofetch" or "tocancel" or "toresubmit"'}, 400
-    return json.dumps(jobids)
+    return jsonify(jobids)
 
 
 # TODO: figure out if this can be done for multiple jobs
@@ -193,6 +194,7 @@ def submit():
         return {'msg': 'Invalid site'}, 400
     except Exception as e:
         # TODO: log error
+        print(e)
         return {'msg': 'Server error'}, 500
 
     return {'id': jobid}, 200
@@ -258,6 +260,7 @@ def submitWithData():
         jmgr.clidb.updateJob(jobid, {'jobdesc': descid})
     except Exception as e:
         # TODO: log error
+        print(e)
         return {'msg': 'Server error'}, 500
 
     return {'id': jobid}, 200
@@ -301,6 +304,7 @@ def getResults():
         path = os.path.join(jobDataDir, os.path.basename(resultDir))
         archivePath = shutil.make_archive(path, 'zip', resultDir)
     except Exception as e:
+        print(e)
         return 'Server error', 500
 
     return send_file(archivePath)
@@ -395,7 +399,7 @@ def uploadFile():
     # TODO: werkzeug.safe_filename does not work because we need relative
     #       path that can go deep
     datafile.save(os.path.join(jobDataDir, datafile.filename))
-    return 'OK', 200
+    return {'msg': 'OK'}, 200
 
 
 def getIDs():
