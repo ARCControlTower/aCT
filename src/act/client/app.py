@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from datetime import datetime, timedelta
 
+
 # TODO: see if checkJobExists should be used anywhere else
 # TODO: implement proper logging
 # TODO: HTTP return codes
@@ -425,6 +426,12 @@ def getToken():
     if tokstr is None: raise RESTError('Auth token is missing', 401)
     try:
         token = jwt.decode(tokstr, JWT_SECRET, algorithms=['HS256'])
+        pmgr = ProxyManager()
+        result = pmgr.checkProxyExists(token['proxyid'])
+        if result is None:
+            raise RESTError('Server error', 500)
+        if result is False:
+            raise RESTError('Proxy from token does not exist in database', 401)
     except jwt.ExpiredSignatureError:
         raise RESTError('Auth token is expired', 401)
     else:
