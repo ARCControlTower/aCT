@@ -1,6 +1,7 @@
 import argparse
 import sys
-import requests
+import asyncio
+import aiohttp
 
 from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly, cleandCache
@@ -8,6 +9,11 @@ from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
 
 
 def main():
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(program())
+
+
+async def program():
     parser = argparse.ArgumentParser(description="Get jobs' status")
     addCommonArgs(parser)
     addCommonJobFilterArgs(parser)
@@ -44,25 +50,12 @@ def main():
         if args.name:
             params['name'] = args.name
 
-    try:
-        r = requests.delete(requestUrl, params=params)
-    except Exception as e:
-        print('error: request: {}'.format(str(e)))
-        sys.exit(1)
+    async with aiohttp.ClientSession() as session:
+        async with session.delete(requestUrl, params=params) as resp:
+            jsonDict = await resp.json()
+            if resp.status != 200:
+                print('error: request response: {} - {}'.format(resp.status, jsonDict['msg']))
+            else:
+                print('Cleaned {} jobs'.format(len(jsonDict)))
 
-    if r.status_code != 200:
-        print('error: request response: {} - {}'.format(r.status_code, r.json()['msg']))
-        sys.exit(1)
-
-    # TODO: error handling for malformed JSON
-    jobs = r.json()
-    print('Cleaned {} jobs'.format(len(jobs)))
-
-    for jobid in jobs:
-        cleandCache(conf, args, jobid)
-
-
-if __name__ == '__main__':
-    main()
-
-
+    cleandCache(conf, args, jsonDict)
