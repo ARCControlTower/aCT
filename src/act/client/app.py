@@ -1,4 +1,3 @@
-import json
 import os
 import shutil
 import io
@@ -79,7 +78,7 @@ def stat():
         print(e)
         return {'msg': 'Server error'}, 500
     else:
-        return json.dumps(jobdicts)
+        return jsonify(jobdicts)
 
 
 @app.route('/jobs', methods=['DELETE'])
@@ -112,7 +111,7 @@ def clean():
     for jobid in deleted:
         shutil.rmtree(jmgr.getJobDataDir(jobid))
 
-    return json.dumps(deleted)
+    return jsonify(deleted)
 
 
 # expects JSON object with 'state' attribute:
@@ -305,7 +304,7 @@ def getResults():
         archivePath = shutil.make_archive(path, 'zip', resultDir)
     except Exception as e:
         print(e)
-        return 'Server error', 500
+        return {'msg': 'Server error'}, 500
 
     return send_file(archivePath)
 
@@ -440,5 +439,3 @@ def getToken():
         raise RESTError('Auth token is expired', 401)
     else:
         return token
-
-
