@@ -2,14 +2,16 @@ import argparse
 import sys
 import os
 import zipfile
-import requests
+import asyncio
+import aiohttp
+import aiofiles
 
 from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
 from common import addCommonJobFilterArgs, checkJobParams, cleandCache
 
 
-def getFilteredJobIDs(jobsUrl, token, **kwargs):
+async def getFilteredJobIDs(session, jobsUrl, token, **kwargs):
     jobids = []
     params = {'token': token, 'client': 'id'}
     if 'id' in kwargs:
@@ -19,24 +21,22 @@ def getFilteredJobIDs(jobsUrl, token, **kwargs):
     if 'state' in kwargs:
         params['state'] = kwargs['state']
 
-    try:
-        r = requests.get(jobsUrl, params=params)
-    except Exception as e:
-        print('error: filter request: {}'.format(str(e)))
-        sys.exit(1)
-    if r.status_code != 200:
-        print('error: filter response: {} - {}'.format(r.status_code, r.json()['msg']))
-        sys.exit(1)
-    try:
-        jsonResp = r.json()
-    except ValueError as e:
-        print('error: filter response: JSON: {}'.format(str(e)))
-        sys.exit(1)
-    jobids.extend([job['c_id'] for job in jsonResp])
+    async with session.get(jobsUrl, params=params) as resp:
+        jsonDict = await resp.json()
+        if resp.status != 200:
+            print('error: filter response: {} - {}'.format(resp.status, jsonDict['msg']))
+            sys.exit(1)
+
+    jobids.extend([job['c_id'] for job in jsonDict])
     return set(jobids)
 
 
 def main():
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(program())
+
+
+async def program():
     parser = argparse.ArgumentParser(description='Download job results')
     addCommonArgs(parser)
     addCommonJobFilterArgs(parser)
@@ -66,60 +66,49 @@ def main():
     resultsUrl = urlBase + '/results'
     jobsUrl = urlBase + '/jobs'
 
-    # compute all IDs to fetch
-    jobids = getFilteredJobIDs(jobsUrl, token, state='done')
-    jobids = jobids.union(getFilteredJobIDs(jobsUrl, token, state='donefailed'))
-    if args.id:
-        jobids = jobids.intersection(getFilteredJobIDs(jobsUrl, token, id=args.id))
-    if args.name:
-        jobids = jobids.intersection(getFilteredJobIDs(jobsUrl, token, name=args.name))
-    if args.state:
-        jobids = jobids.intersection(getFilteredJobIDs(jobsUrl, token, state=args.state))
+    async with aiohttp.ClientSession() as session:
 
-    # fetch job result for every job
-    for jobid in jobids:
-        params = {'token': token, 'id': jobid}
-        try:
-            r = requests.get(resultsUrl, params=params, stream=True)
-        except Exception as e:
-            print('error: result request: {}'.format(str(e)))
-            continue
+        # compute all IDs to fetch
+        jobids = await getFilteredJobIDs(session, jobsUrl, token, state='done')
+        jobids = jobids.union(await getFilteredJobIDs(session, jobsUrl, token, state='donefailed'))
+        if args.id:
+            jobids = jobids.intersection(await getFilteredJobIDs(session, jobsUrl, token, id=args.id))
+        if args.name:
+            jobids = jobids.intersection(await getFilteredJobIDs(session, jobsUrl, token, name=args.name))
+        if args.state:
+            jobids = jobids.intersection(await getFilteredJobIDs(session, jobsUrl, token, state=args.state))
 
-        if r.status_code != 200:
-            #print('error: request response: {} - {}'.format(r.status_code, r.json()['msg']))
-            print('error: request response: {} - {}'.format(r.status_code, r.text))
-            continue
+        # fetch job result for every job
+        for jobid in jobids:
+            # download result zip
+            params = {'token': token, 'id': jobid}
+            async with session.get(resultsUrl, params=params) as resp:
+                if resp.status != 200:
+                    print('error: request response: {} - {}'.format(resp.status, await resp.json()['msg']))
+                    continue
 
-        # 'Content-Disposition': 'attachment; filename=ZrcMDm3nK4rneiavIpohlF4nABFKDmABFKDmggFKDmEBFKDm2cmmzn.zip'
-        filename = r.headers['Content-Disposition'].split()[1].split('=')[1]
-        try:
-            with open(filename, 'wb') as resultFile:
-                for chunk in r.iter_content():
-                    if chunk: # filter out keep-alive new chunks
-                        resultFile.write(chunk)
-            dirname = os.path.splitext(filename)[0]
-            with zipfile.ZipFile(filename, 'r') as zip_ref:
-                zip_ref.extractall(dirname)
-            os.remove(filename)
-        except Exception as e:
-            print('error: results fetch: {}'.format(str(e)))
-            continue
+                # 'Content-Disposition': 'attachment; filename=ZrcMDm3nK4rneiavIpohlF4nABFKDmABFKDmggFKDmEBFKDm2cmmzn.zip'
+                filename = resp.headers['Content-Disposition'].split()[1].split('=')[1]
+                async with aiofiles.open(filename, mode='wb') as f:
+                    async for chunk, _ in resp.content.iter_chunks():
+                        await f.write(chunk)
 
-        print('{} - results stored in {}'.format(r.status_code, dirname))
+            # extract and delete zip file
+            try:
+                dirname = os.path.splitext(filename)[0]
+                with zipfile.ZipFile(filename, 'r') as zip_ref:
+                    zip_ref.extractall(dirname)
+                os.remove(filename)
+            except Exception as e:
+                print('error: results unzip: {}'.format(str(e)))
+                continue
 
+            print('{} - results stored in {}'.format(resp.status, dirname))
 
-        try:
-            r = requests.delete(jobsUrl, params=params)
-        except Exception as e:
-            print('error: clean request: {}'.format(str(e)))
-            continue
+            # delete job from act
+            async with session.delete(jobsUrl, params=params) as resp:
+                jsonDict = await resp.json()
+                if resp.status != 200:
+                    print('error cleaning job: {}'.format(jsonDict['msg']))
 
-        if r.status_code != 200:
-            print('error cleaning job: {}'.format(r.json()['msg']))
-            continue
-
-        cleandCache(conf, args, jobid)
-
-
-if __name__ == '__main__':
-    main()
+    cleandCache(conf, args, jobids)

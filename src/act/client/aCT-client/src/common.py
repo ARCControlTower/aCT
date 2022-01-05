@@ -88,7 +88,7 @@ def readTokenFile(tokenFile):
         return f.read()
 
 
-def cleandCache(conf, args, jobid):
+def cleandCache(conf, args, jobids):
     if args.dcache and args.dcache != 'dcache':
         dcacheBase = args.dcache
     else:
@@ -100,20 +100,29 @@ def cleandCache(conf, args, jobid):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT
     )
+    jobDirs = [str(jobid) + '/' for jobid in jobids]
     if result.returncode == 0:
         for line in result.stdout.decode('utf-8').splitlines():
-            jobDir = str(jobid) + '/'
-            if line == jobDir:
-                url = dcacheBase + '/' + jobDir
-                print('deleting job folder {} in dCache'.format(url))
-                result = subprocess.run(
-                        ['/usr/bin/arcrm', url],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT
-                )
-                if result.returncode != 0:
-                    print('error: deleting job folder {}: {}'.format(url, result.stdout))
+            for jobDir in jobDirs:
+                if line == jobDir:
+                    url = dcacheBase + '/' + jobDir
+                    print('deleting job folder {} in dCache'.format(url))
+                    result = subprocess.run(
+                            ['/usr/bin/arcrm', url],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT
+                    )
+                    if result.returncode != 0:
+                        print('error: deleting job folder {}: {}'.format(url, result.stdout))
     else:
         print('error: listing user\'s dCache directory {}: {}'.format(dcacheBase, result.stdout))
 
 
+async def webdav_rmdir(session, url):
+    print('Deleting resource: {}'.format(url))
+    headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
+    async with session.delete(url, headers=headers) as resp:
+        #if resp.status >= 300:
+        #    print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, await resp.text()))
+        print(resp.status)
+        print(await resp.text())
