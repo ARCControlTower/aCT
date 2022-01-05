@@ -1,5 +1,6 @@
 import sys
-import subprocess
+import ssl
+import aiohttp
 
 
 def addCommonArgs(parser):
@@ -88,41 +89,34 @@ def readTokenFile(tokenFile):
         return f.read()
 
 
-def cleandCache(conf, args, jobids):
+async def cleandCache(conf, args, jobids):
     if args.dcache and args.dcache != 'dcache':
         dcacheBase = args.dcache
     else:
         dcacheBase = conf.get('dcache', None)
         if dcacheBase is None:
             return
-    result = subprocess.run(
-            ['/usr/bin/arcls', dcacheBase],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+    context.load_cert_chain(conf['proxy'], keyfile=conf['proxy'])
+    _DEFAULT_CIPHERS = (
+        'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
+        'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
+        '!eNULL:!MD5'
     )
-    jobDirs = [str(jobid) + '/' for jobid in jobids]
-    if result.returncode == 0:
-        for line in result.stdout.decode('utf-8').splitlines():
-            for jobDir in jobDirs:
-                if line == jobDir:
-                    url = dcacheBase + '/' + jobDir
-                    print('deleting job folder {} in dCache'.format(url))
-                    result = subprocess.run(
-                            ['/usr/bin/arcrm', url],
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT
-                    )
-                    if result.returncode != 0:
-                        print('error: deleting job folder {}: {}'.format(url, result.stdout))
-    else:
-        print('error: listing user\'s dCache directory {}: {}'.format(dcacheBase, result.stdout))
+    context.set_ciphers(_DEFAULT_CIPHERS)
+    connector = aiohttp.TCPConnector(ssl=context)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        for jobid in jobids:
+            await webdav_rmdir(session, dcacheBase + '/' + str(jobid))
 
 
 async def webdav_rmdir(session, url):
-    print('Deleting resource: {}'.format(url))
     headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
     async with session.delete(url, headers=headers) as resp:
-        #if resp.status >= 300:
-        #    print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, await resp.text()))
-        print(resp.status)
-        print(await resp.text())
+        text = await resp.text()
+        # TODO: should we rely on 204 and 404 being the only right answers?
+        if resp.status == 404: # ignore, because we are just trying to delete
+            return
+        if resp.status >= 300:
+            print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, text))

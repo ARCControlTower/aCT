@@ -111,4 +111,4 @@ async def program():
                 if resp.status != 200:
                     print('error cleaning job: {}'.format(jsonDict['msg']))
 
-    cleandCache(conf, args, jobids)
+    await cleandCache(conf, args, jobids)

@@ -58,4 +58,4 @@ async def program():
             else:
                 print('Cleaned {} jobs'.format(len(jsonDict)))
 
-    cleandCache(conf, args, jsonDict)
+    await cleandCache(conf, args, jsonDict)
