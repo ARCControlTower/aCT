@@ -22,12 +22,12 @@ async def getFilteredJobIDs(session, jobsUrl, token, **kwargs):
         params['state'] = kwargs['state']
 
     async with session.get(jobsUrl, params=params) as resp:
-        jsonDict = await resp.json()
+        json = await resp.json()
         if resp.status != 200:
-            print('error: filter response: {} - {}'.format(resp.status, jsonDict['msg']))
+            print('error: filter response: {} - {}'.format(resp.status, json['msg']))
             sys.exit(1)
 
-    jobids.extend([job['c_id'] for job in jsonDict])
+    jobids.extend([job['c_id'] for job in json])
     return set(jobids)
 
 
@@ -107,8 +107,8 @@ async def program():
 
             # delete job from act
             async with session.delete(jobsUrl, params=params) as resp:
-                jsonDict = await resp.json()
+                json = await resp.json()
                 if resp.status != 200:
-                    print('error cleaning job: {}'.format(jsonDict['msg']))
+                    print('error cleaning job: {}'.format(json['msg']))
 
     await cleandCache(conf, args, jobids)

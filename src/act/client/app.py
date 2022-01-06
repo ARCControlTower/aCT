@@ -321,7 +321,7 @@ def getResults():
 
 @app.route('/proxies', methods=['POST'])
 def getCSR():
-    issuer_pem = request.form.get('cert')
+    issuer_pem = request.get_json().get('cert', None)
     if not issuer_pem:
         return {'msg': 'Missing issuer certificate'}, 400
     issuer = x509.load_pem_x509_certificate(issuer_pem.encode("utf-8"), default_backend())

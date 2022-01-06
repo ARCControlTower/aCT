@@ -5,7 +5,7 @@ import aiohttp
 
 from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly, cleandCache
-from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
+from common import checkJobParams, addCommonJobFilterArgs
 
 
 def main():
@@ -52,10 +52,11 @@ async def program():
 
     async with aiohttp.ClientSession() as session:
         async with session.delete(requestUrl, params=params) as resp:
-            jsonDict = await resp.json()
+            json = await resp.json()
             if resp.status != 200:
-                print('error: request response: {} - {}'.format(resp.status, jsonDict['msg']))
+                print('error: request response: {} - {}'.format(resp.status, json['msg']))
+                sys.exit(1)
             else:
-                print('Cleaned {} jobs'.format(len(jsonDict)))
+                print('Cleaned {} jobs'.format(len(json)))
 
-    await cleandCache(conf, args, jsonDict)
+    await cleandCache(conf, args, json)

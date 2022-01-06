@@ -9,8 +9,6 @@ setup(
     package_dir = {'': 'src'},
     py_modules = [
         'actproxy',
-        'actlistproxies',
-        'actdeleteproxy',
         'actstat',
         'actclean',
         'actfetch',
@@ -26,8 +24,6 @@ setup(
     entry_points={
         'console_scripts': [
             'actproxy       = actproxy:main',
-            'actlistproxies = actlistproxies:main',
-            'actdeleteproxy = actdeleteproxy:main',
             'actstat        = actstat:main',
             'actclean       = actclean:main',
             'actfetch       = actfetch:main',
@@ -38,7 +34,6 @@ setup(
         ]
     },
     install_requires = [
-        'requests',
         'cryptography',
         'pyyaml',
         'aiohttp',

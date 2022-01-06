@@ -1,13 +1,19 @@
 import argparse
 import sys
-import requests
+import asyncio
+import aiohttp
 
 from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
-from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
+from common import checkJobParams, addCommonJobFilterArgs
 
 
 def main():
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(program())
+
+
+async def program():
     parser = argparse.ArgumentParser(description="Get jobs' status")
     addCommonArgs(parser)
     addCommonJobFilterArgs(parser)
@@ -50,15 +56,12 @@ def main():
         if args.name:
             params['name'] = args.name
 
-    try:
-        r = requests.get(requestUrl, params=params)
-    except Exception as e:
-        print('error: request: {}'.format(str(e)))
-        sys.exit(1)
-
-    if r.status_code != 200:
-        print('error: request response: {} - {}'.format(r.status_code, r.json()['msg']))
-        sys.exit(1)
+    async with aiohttp.ClientSession() as session:
+        async with session.get(requestUrl, params=params) as resp:
+            json = await resp.json()
+            if resp.status != 200:
+                print('error: request response: {} - {}'.format(resp.status, json['msg']))
+                sys.exit(1)
 
     if args.arc:
         arccols = args.arc.split(',')
@@ -69,19 +72,13 @@ def main():
     else:
         clicols = []
 
-    try:
-        jsonResp = r.json()
-    except ValueError as e:
-        print('error: response JSON: {}'.format(str(e)))
-        sys.exit(1)
-
-    if not jsonResp:
+    if not json:
         sys.exit(0)
 
     # For each column, determine biggest sized value so that output can
     # be nicely formatted.
     colsizes = {}
-    for job in jsonResp:
+    for job in json:
         for key, value in job.items():
             # All keys have a letter and underscore prepended, which is not
             # used when printing
@@ -105,7 +102,7 @@ def main():
     print(line)
 
     # Print jobs
-    for job in jsonResp:
+    for job in json:
         for col in clicols:
             fullKey = 'c_' + col
             # fix from CLI actstat
@@ -123,9 +120,3 @@ def main():
                 txt = "''"
             print('{:<{width}}'.format(txt, width=colsizes[fullKey]), end=' ')
         print()
-
-
-if __name__ == '__main__':
-    main()
-
-
