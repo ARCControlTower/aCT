@@ -1,13 +1,19 @@
 import argparse
 import sys
-import requests
+import asyncio
+import aiohttp
 
 from config import loadConf, checkConf, expandPaths
 from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
-from common import isCorrectIDString, checkJobParams, addCommonJobFilterArgs
+from common import checkJobParams, addCommonJobFilterArgs
 
 
 def main():
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(program())
+
+
+async def program():
     parser = argparse.ArgumentParser(description="Kill jobs")
     addCommonArgs(parser)
     addCommonJobFilterArgs(parser)
@@ -41,20 +47,11 @@ def main():
         if args.name:
             params['name'] = args.name
 
-    try:
-        r = requests.patch(requestUrl, json={'arcstate':'tocancel'}, params=params)
-    except Exception as e:
-        print('error: request: {}'.format(str(e)))
-        sys.exit(1)
-
-    if r.status_code != 200:
-        print('error: request response: {} - {}'.format(r.status_code, r.json()['msg']))
-        sys.exit(1)
-
-    print('Will kill {} jobs'.format(r.text))
-
-
-if __name__ == '__main__':
-    main()
-
-
+    async with aiohttp.ClientSession() as session:
+        async with session.patch(requestUrl, json={'arcstate': 'tocancel'}, params=params) as resp:
+            json = await resp.json()
+            if resp.status != 200:
+                print('error: request response: {} - {}'.format(resp.status, json['msg']))
+                sys.exit(1)
+            else:
+                print('Will kill {} jobs'.format(len(json)))

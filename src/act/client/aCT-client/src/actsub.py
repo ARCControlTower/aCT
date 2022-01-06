@@ -51,11 +51,11 @@ async def webdav_put(session, url, path):
 async def kill_jobs(session, url, jobids, token):
     ids = ','.join(map(str, jobids))
     params = {'token': token, 'id': ids}
-    jsonDict = {'arcstate': 'tocancel'}
-    async with session.patch(url, json=jsonDict, params=params) as resp:
-        jsonDict = await resp.json()
+    json = {'arcstate': 'tocancel'}
+    async with session.patch(url, json=json, params=params) as resp:
+        json = await resp.json()
         if resp.status != 200:
-            print('error: killing jobs with failed input files: {} - {}'.format(resp.status, jsonDict['msg']))
+            print('error: killing jobs with failed input files: {} - {}'.format(resp.status, json['msg']))
 
 
 def main():
@@ -136,16 +136,16 @@ async def program():
             # submit job to receive jobid
             baseUrl= conf['server'] + ':' + str(conf['port'])
             requestUrl = baseUrl + '/jobs'
-            jsonDict = {'site': args.site, 'desc': xrslStr}
+            json = {'site': args.site, 'desc': xrslStr}
             params = {'token': token}
             # TODO: exceptions
-            async with session.post(requestUrl, json=jsonDict, params=params) as resp:
-                jsonDict = await resp.json()
+            async with session.post(requestUrl, json=json, params=params) as resp:
+                json = await resp.json()
                 if resp.status != 200:
-                    print('error: POST /jobs: {} - {}'.format(resp.status, jsonDict['msg']))
+                    print('error: POST /jobs: {} - {}'.format(resp.status, json['msg']))
                     continue
-                jsonDict = await resp.json()
-                jobid = jsonDict['id']
+                json = await resp.json()
+                jobid = json['id']
 
             # create directory for job's local input files if using dcache
             if useDcache:
@@ -180,9 +180,9 @@ async def program():
                     data = aiohttp.FormData()
                     data.add_field('file', file_sender(path), filename=infile.Name)
                     async with session.put(requestUrl, data=data, params=params) as resp:
-                        jsonDict = await resp.json()
+                        json = await resp.json()
                         if resp.status != 200:
-                            print('error: PUT /data: {} - {}'.format(resp.status, jsonDict['msg']))
+                            print('error: PUT /data: {} - {}'.format(resp.status, json['msg']))
                             transferFail = True
                             break
 
@@ -197,15 +197,15 @@ async def program():
 
             # complete job submission
             requestUrl = baseUrl + '/jobs'
-            jsonDict = {'id': jobid, 'desc': xrslStr}
+            json = {'id': jobid, 'desc': xrslStr}
             # TODO: exceptions
-            async with session.put(requestUrl, json=jsonDict, params=params) as resp:
-                jsonDict = await resp.json()
+            async with session.put(requestUrl, json=json, params=params) as resp:
+                json = await resp.json()
                 if resp.status != 200:
-                    print('error: PUT /jobs: {} - {}'.format(resp.status, jsonDict['msg']))
+                    print('error: PUT /jobs: {} - {}'.format(resp.status, json['msg']))
                     tokill.append(jobid)
                 else:
-                    print('{} - succesfully submited job with id {}'.format(resp.status, jsonDict['id']))
+                    print('{} - succesfully submited job with id {}'.format(resp.status, json['id']))
 
             jobdescs = None # Weird error with JobDescriptionList destructor?
 

@@ -1,7 +1,8 @@
 import os
 import argparse
 import sys
-import requests
+import asyncio
+import aiohttp
 import x509proxy
 
 from config import loadConf, checkConf, expandPaths
@@ -13,6 +14,11 @@ from cryptography.hazmat.primitives import serialization
 
 
 def main():
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(program())
+
+
+async def program():
     parser = argparse.ArgumentParser(description='Submit proxy to aCT server')
     addCommonArgs(parser)
     args = parser.parse_args()
@@ -34,45 +40,31 @@ def main():
 
     requestUrl = conf['server'] + ':' + str(conf['port']) + '/proxies'
 
-    try:
-        r = requests.post(requestUrl, data={'cert': proxyStr})
-    except Exception as e:
-        print('error: request: {}'.format(str(e)))
-        sys.exit(1)
+    async with aiohttp.ClientSession() as session:
+        async with session.post(requestUrl, json={'cert': proxyStr}) as resp:
+            json = await resp.json()
+            if resp.status != 200:
+                print('error: request response: {} - {}'.format(resp.status, json['msg']))
+                sys.exit(1)
 
-    if r.status_code != 200:
-        print('error: request response: {} - {}'.format(r.status_code, r.text))
-        sys.exit(1)
+        token = json['token']
+        csr = x509.load_pem_x509_csr(json['csr'].encode('utf-8'), default_backend())
+        cert = x509proxy.sign_request(csr).decode('utf-8')
+        chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
 
-    data = r.json()
-
-    token = data['token']
-    csr = x509.load_pem_x509_csr(data['csr'].encode('utf-8'), default_backend())
-    cert = x509proxy.sign_request(csr).decode('utf-8')
-    chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
-
-    try:
-        obj = {'cert': cert, 'chain': chain}
+        json = {'cert': cert, 'chain': chain}
         params = {'token': token}
-        r = requests.put(requestUrl, json=obj, params=params)
-    except Exception as e:
-        print('error: request: {}'.format(str(e)))
-        sys.exit(1)
-
-    if r.status_code == 200:
-        token = r.json()['token']
-        # TODO: exceptions
-        if not os.path.exists(conf['token']):
-            os.makedirs(os.path.dirname(conf['token']))
-        with open(conf['token'], 'w') as f:
-            f.write(token)
-        os.chmod(conf['token'], 0o600)
-
-        print('Successfully inserted proxy. Access token: {}'.format(token))
-    else:
-        print('error: request response: {} - {}'.format(r.status_code, r.text))
-        sys.exit(1)
-
-
-if __name__ == '__main__':
-    main()
+        async with session.put(requestUrl, json=json, params=params) as resp:
+            json = await resp.json()
+            if resp.status == 200:
+                token = json['token']
+                # TODO: exceptions
+                if not os.path.exists(conf['token']):
+                    os.makedirs(os.path.dirname(conf['token']))
+                with open(conf['token'], 'w') as f:
+                    f.write(token)
+                os.chmod(conf['token'], 0o600)
+                print('Successfully inserted proxy. Access token: {}'.format(token))
+            else:
+                print('error: request response: {} - {}'.format(resp.status, json['msg']))
+                sys.exit(1)
