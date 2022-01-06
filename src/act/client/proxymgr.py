@@ -181,12 +181,16 @@ class ProxyManager(object):
     def checkProxyExists(self, proxyid):
         try:
             c = self.arcdb.db.getCursor()
-            c.execute('SELECT id FROM proxies WHERE id = %s LIMIT 1', (proxyid,))
+            c.execute('SELECT id,expirytime FROM proxies WHERE id = %s LIMIT 1', (proxyid,))
         except Exception as e:
             self.logger.exception('Error checking existence of proxy')
             return None
         else:
-            return c.fetchone() is not None
+            proxy = c.fetchone()
+            if proxy is not None:
+                if proxy['expirytime'] > datetime.datetime.now():
+                    return True
+            return False
         finally:
             c.close()
 
