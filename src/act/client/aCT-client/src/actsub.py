@@ -8,7 +8,7 @@ import aiohttp
 import aiofiles
 
 from config import loadConf, checkConf, expandPaths
-from common import readTokenFile, addCommonArgs
+from common import readTokenFile, addCommonArgs, cleandCache
 
 
 TRANSFER_BLOCK_SIZE = 2**16
@@ -27,14 +27,6 @@ async def webdav_mkdir(session, url):
             return False
         else:
             return True
-
-
-async def webdav_rmdir(session, url):
-    print('Deleting resource: {}'.format(url))
-    headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
-    async with session.delete(url, headers=headers) as resp:
-        if resp.status >= 300:
-            print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, await resp.text()))
 
 
 # https://docs.aiohttp.org/en/stable/client_quickstart.html?highlight=upload#streaming-uploads
@@ -223,9 +215,5 @@ async def program():
             await kill_jobs(session, baseUrl + '/jobs', tokill, token)
 
         if useDcache:
-            for jobid in tokill:
-                print('deleting dCache job directory for job {}'.format(jobid))
-                await webdav_rmdir(dcsession, dcacheBase + '/' + str(jobid))
             await dcsession.close() # close dCache context that is not handled in with statement
-
-
+            await cleandCache(conf, args, tokill) # uses its own session context
