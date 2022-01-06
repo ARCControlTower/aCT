@@ -154,6 +154,16 @@ def patch():
     if arcstate == 'tofetch':
         jobids = jmgr.fetchJobs(proxyid, jobids, name_filter)
     elif arcstate == 'tocancel':
+        # One state in which a job can be killed is before it is passed
+        # to ARC. Such jobs have None as arcid. Data dirs for jobs are
+        # otherwise cleaned by cleaning operation but this is one exception
+        # where killing destroys the job immediately and has to remove the
+        # data dir as well.
+        if not state_filter: # state_filter refers to ARC jobs only
+            jobs = jmgr.getJobStats(proxyid, jobids, state_filter='', name_filter=name_filter, clicols=['id'], arccols=['id'])
+            for job in jobs:
+                if job['a_id'] is None:
+                    shutil.rmtree(jmgr.getJobDataDir(job['c_id']))
         jobids = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
     elif arcstate == 'toresubmit':
         jobids = jmgr.resubmitJobs(proxyid, jobids, name_filter)
@@ -434,7 +444,7 @@ def getToken():
         if result is None:
             raise RESTError('Server error', 500)
         if result is False:
-            raise RESTError('Proxy from token does not exist in database', 401)
+            raise RESTError('Proxy from token does not exist in database or is expired; use actproxy', 401)
     except jwt.ExpiredSignatureError:
         raise RESTError('Auth token is expired', 401)
     else:
