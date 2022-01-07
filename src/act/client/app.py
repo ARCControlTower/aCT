@@ -326,6 +326,9 @@ def getCSR():
         return {'msg': 'Missing issuer certificate'}, 400
     issuer = x509.load_pem_x509_certificate(issuer_pem.encode("utf-8"), default_backend())
 
+    if not checkRFCProxy(issuer):
+        return {'msg': 'Issuer cert is not a valid proxy'}, 400
+
     private_key = rsa.generate_private_key(
         public_exponent=65537,
         key_size=1024,
@@ -371,6 +374,11 @@ def uploadSignedProxy():
     dn, exptime = pmgr.readProxyString(cert_pem)
     attr = getVOMSProxyAttributes(cert_pem)
     proxy_pem = cert_pem + key_pem.decode('utf-8') + chain_pem
+
+    proxy_obj = x509.load_pem_x509_certificate(proxy_pem.encode('utf-8'), backend=default_backend())
+    if not checkRFCProxy(proxy_obj):
+        return {'msg': 'cert is not a valid proxy'}, 400
+
     proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, attr, exptime)
     token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
     return {'token': token}, 200
@@ -449,3 +457,11 @@ def getToken():
         raise RESTError('Auth token is expired', 401)
     else:
         return token
+
+
+def checkRFCProxy(proxy):
+    for ext in proxy.extensions:
+        if ext.oid.dotted_string == "1.3.6.1.5.5.7.1.14":
+            return True
+    return False
+
