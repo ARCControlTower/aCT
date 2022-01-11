@@ -345,7 +345,12 @@ def getCSR():
     ).decode('utf-8')
     pmgr = ProxyManager()
     dn, exptime = pmgr.readProxyString(issuer_pem)
+    if datetime.now() >= exptime:
+        return {'msg': 'Given certificate is expired'}, 400
     attr = getVOMSProxyAttributes(issuer_pem)
+    if not attr or not dn:
+        return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
+    #print('CSR generated: DN: {}, attr: {}, expiration: {}'.format(dn, attr, exptime))
     proxyid = pmgr.actproxy.updateProxy(pem, dn, attr, exptime)
     if proxyid is None:
         return {'msg': 'Server error'}, 500
@@ -372,15 +377,20 @@ def uploadSignedProxy():
     pmgr = ProxyManager()
     key_pem = pmgr.getProxyKeyPEM(proxyid)
     dn, exptime = pmgr.readProxyString(cert_pem)
+    if datetime.now() >= exptime:
+        return {'msg': 'Given certificate is expired'}, 400
     attr = getVOMSProxyAttributes(cert_pem)
-    proxy_pem = cert_pem + key_pem.decode('utf-8') + chain_pem
+    if not attr or not dn:
+        return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
 
+    proxy_pem = cert_pem + key_pem.decode('utf-8') + chain_pem
     proxy_obj = x509.load_pem_x509_certificate(proxy_pem.encode('utf-8'), backend=default_backend())
     if not checkRFCProxy(proxy_obj):
         return {'msg': 'cert is not a valid proxy'}, 400
 
     proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, attr, exptime)
     token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
+    #print('Proxy submitted: DN: {}, attr: {}, expiration: {}'.format(dn, attr, exptime))
     return {'token': token}, 200
 
 
