@@ -59,8 +59,12 @@ async def kill_jobs(session, url, jobids, token):
 
 
 def main():
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(program())
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(program())
+    except Exception as e:
+        print('error: {}'.format(e))
+        sys.exit(1)
 
 
 async def program():
