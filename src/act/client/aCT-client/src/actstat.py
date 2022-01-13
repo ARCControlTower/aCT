@@ -61,11 +61,15 @@ async def program():
             params['name'] = args.name
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(requestUrl, params=params) as resp:
-            json = await resp.json()
-            if resp.status != 200:
-                print('error: request response: {} - {}'.format(resp.status, json['msg']))
-                sys.exit(1)
+        try:
+            async with session.get(requestUrl, params=params) as resp:
+                json = await resp.json()
+                if resp.status != 200:
+                    print('response error: {} - {}'.format(resp.status, json['msg']))
+                    sys.exit(1)
+        except aiohttp.ClientError as e:
+            print('HTTP client error: getting job stats: {}'.format(e))
+            sys.exit(1)
 
     if args.arc:
         arccols = args.arc.split(',')

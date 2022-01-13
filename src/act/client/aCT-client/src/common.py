@@ -1,5 +1,6 @@
 import sys
 import ssl
+import asyncio
 import aiohttp
 
 
@@ -38,6 +39,7 @@ def readProxyFile(filename):
             return f.read()
     except Exception as e:
         print('error: read proxy: {}'.format(str(e)))
+        sys.exit(1)
 
 
 # duplicated from act.client.common
@@ -85,8 +87,12 @@ def isCorrectIDString(listStr):
 
 
 def readTokenFile(tokenFile):
-    with open(tokenFile, 'r') as f:
-        return f.read()
+    try:
+        with open(tokenFile, 'r') as f:
+            return f.read()
+    except Exception as e:
+        print('error: read token file: {}'.format(str(e)))
+        sys.exit(1)
 
 
 async def cleandCache(conf, args, jobids):
@@ -107,16 +113,22 @@ async def cleandCache(conf, args, jobids):
     context.set_ciphers(_DEFAULT_CIPHERS)
     connector = aiohttp.TCPConnector(ssl=context)
     async with aiohttp.ClientSession(connector=connector) as session:
+        tasks = []
         for jobid in jobids:
-            await webdav_rmdir(session, dcacheBase + '/' + str(jobid))
+            #await webdav_rmdir(session, dcacheBase + '/' + str(jobid))
+            tasks.append(asyncio.ensure_future(webdav_rmdir(session, dcacheBase + '/' + str(jobid))))
+        await asyncio.gather(*tasks)
 
 
 async def webdav_rmdir(session, url):
     headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
-    async with session.delete(url, headers=headers) as resp:
-        text = await resp.text()
-        # TODO: should we rely on 204 and 404 being the only right answers?
-        if resp.status == 404: # ignore, because we are just trying to delete
-            return
-        if resp.status >= 300:
-            print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, text))
+    try:
+        async with session.delete(url, headers=headers) as resp:
+            text = await resp.text()
+            # TODO: should we rely on 204 and 404 being the only right answers?
+            if resp.status == 404: # ignore, because we are just trying to delete
+                return
+            if resp.status >= 300:
+                print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, text))
+    except aiohttp.ClientError as e:
+        print('HTTP client error: deleting directory {}: {}'.format(url, e))
