@@ -136,12 +136,11 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
             xrslStr = f.read()
     except Exception as e:
         print('error reading job description file {}: {}'.format(descpath, e))
-        #return {'jobid': None, 'tokill': False}
         return None, False
     jobdescs = arc.JobDescriptionList()
     if not arc.JobDescription_Parse(xrslStr, jobdescs):
-        print('error: parse error in job description {}'.format(desc))
-        #return {'jobid': None, 'tokill': False}
+        print('error: parse error in job description {}'.format(descpath))
+        jobdescs = None
         return None, False
 
     # submit job to receive jobid
@@ -158,27 +157,23 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
             jobid = json['id']
     except aiohttp.ClientError as e:
         print('HTTP client error: submitting job description {}: {}'.format(descpath, e))
-        #return {'jobid': None, 'tokill': False}
         return None, False
 
     # create directory for job's local input files if using dcache
     if dcacheBase:
         if not await webdav_mkdir(dcsession, dcacheBase + '/' + str(jobid)):
-            #return {'jobid': jobid, 'tokill': True}
             return jobid, True
 
     # upload input files
     requestUrl = baseUrl + '/data'
     params = {'token': token, 'id': jobid}
     if not await upload_input_files(session, jobid, jobdescs, params, requestUrl, dcacheBase, dcsession):
-        #return {'jobid': jobid, 'tokill': True}
         return jobid, True
 
     # job description was modified and has to be unparsed
     if dcacheBase:
         xrslStr = jobdescs[0].UnParse('', '')[1]
         if not xrslStr:
-            #return {'jobid': jobid, 'tokill': True}
             return jobid, True
 
     # complete job submission
@@ -189,18 +184,15 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
             json = await resp.json()
             if resp.status != 200:
                 print('error: PUT /jobs: {} - {}'.format(resp.status, json['msg']))
-                #return {'jobid': jobid, 'tokill': True}
                 return jobid, False
             else:
                 print('{} - succesfully submited job with id {}'.format(resp.status, json['id']))
     except aiohttp.ClientErrors as e:
         print('HTTP client error: submitting job {}: {}'.format(descpath, e))
-        #return {'jobid': jobid, 'tokill': True}
         return jobid, False
 
     jobdescs = None
 
-    #return {'jobid': jobid, 'tokill': False}
     return jobid, False # success
 
 
@@ -281,5 +273,5 @@ async def program():
             await kill_jobs(session, baseUrl + '/jobs', tokill, token)
 
         if dcsession:
-            await dcsession.close() # close dCache context that is not handled in with statement
-            await cleandCache(conf, args, tokill) # uses its own session context
+            # function closes session in its own async with statement
+            await cleandCache(conf, args, tokill, session=dcsession)
