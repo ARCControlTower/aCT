@@ -58,7 +58,7 @@ async def program():
         async with session.delete(requestUrl, params=params) as resp:
             json = await resp.json()
             if resp.status != 200:
-                print('error: request response: {} - {}'.format(resp.status, json['msg']))
+                print('response error: {} - {}'.format(resp.status, json['msg']))
                 sys.exit(1)
             else:
                 print('Cleaned {} jobs'.format(len(json)))

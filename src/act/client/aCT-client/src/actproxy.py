@@ -13,6 +13,63 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
 
+# TODO: delete what is remaining on backend if proxy submission fails
+
+
+async def uploadProxy(session, requestUrl, proxyStr, conf):
+    # submit proxy cert part to get CSR
+    try:
+        async with session.post(requestUrl, json={'cert': proxyStr}) as resp:
+            json = await resp.json()
+            if resp.status != 200:
+                print('response error: {} - {}'.format(resp.status, json['msg']))
+                sys.exit(1)
+    except aiohttp.ClientError as e:
+        print('HTTP client error: sending request for CSR: {}'.format(e))
+        sys.exit(1)
+    token = json['token']
+
+    # sign CSR
+    try:
+        proxyCert, _, issuerChains = parse_issuer_cred(proxyStr)
+        csr = x509.load_pem_x509_csr(json['csr'].encode('utf-8'), default_backend())
+        cert = x509proxy.sign_request(csr).decode('utf-8')
+        chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
+    except Exception as e:
+        print('error generating proxy: {}'.format(e))
+        # TODO: what kind of cleanup is necessary?
+        sys.exit(1)
+
+    # upload signed cert
+    json = {'cert': cert, 'chain': chain}
+    params = {'token': token}
+    try:
+        async with session.put(requestUrl, json=json, params=params) as resp:
+            json = await resp.json()
+            if resp.status != 200:
+                print('response error: {} - {}'.format(resp.status, json['msg']))
+                sys.exit(1)
+    except aiohttp.ClientError as e:
+        print('HTTP client error: uploading signed proxy: {}'.format(e))
+        # TODO: what kind of cleanup is necessary?
+        sys.exit(1)
+
+    # store auth token
+    token = json['token']
+    try:
+        if not os.path.exists(conf['token']):
+            os.makedirs(os.path.dirname(conf['token']))
+        with open(conf['token'], 'w') as f:
+            f.write(token)
+        os.chmod(conf['token'], 0o600)
+    except Exception as e:
+        print('error saving token: {}'.format(e))
+        #TODO: what kind of cleanup is necessary?
+        sys.exit(1)
+
+    print('Successfully inserted proxy. Access token: {}'.format(token))
+
+
 def main():
     try:
         loop = asyncio.get_event_loop()
@@ -40,35 +97,7 @@ async def program():
 
     proxyStr = readProxyFile(conf['proxy'])
 
-    proxyCert, _, issuerChains = parse_issuer_cred(proxyStr)
-
     requestUrl = conf['server'] + ':' + str(conf['port']) + '/proxies'
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(requestUrl, json={'cert': proxyStr}) as resp:
-            json = await resp.json()
-            if resp.status != 200:
-                print('error: request response: {} - {}'.format(resp.status, json['msg']))
-                sys.exit(1)
-
-        token = json['token']
-        csr = x509.load_pem_x509_csr(json['csr'].encode('utf-8'), default_backend())
-        cert = x509proxy.sign_request(csr).decode('utf-8')
-        chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
-
-        json = {'cert': cert, 'chain': chain}
-        params = {'token': token}
-        async with session.put(requestUrl, json=json, params=params) as resp:
-            json = await resp.json()
-            if resp.status == 200:
-                token = json['token']
-                # TODO: exceptions
-                if not os.path.exists(conf['token']):
-                    os.makedirs(os.path.dirname(conf['token']))
-                with open(conf['token'], 'w') as f:
-                    f.write(token)
-                os.chmod(conf['token'], 0o600)
-                print('Successfully inserted proxy. Access token: {}'.format(token))
-            else:
-                print('error: request response: {} - {}'.format(resp.status, json['msg']))
-                sys.exit(1)
+        await uploadProxy(session, requestUrl, proxyStr, conf)
