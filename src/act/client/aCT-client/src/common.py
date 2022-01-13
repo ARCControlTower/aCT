@@ -95,7 +95,11 @@ def readTokenFile(tokenFile):
         sys.exit(1)
 
 
-async def cleandCache(conf, args, jobids):
+# optionally accepts session to dcache as kwarg and closes it afterwards
+#
+# can creation of connector cause errors outside of webdav_rmdir (if it is
+# defered until first request)?
+async def cleandCache(conf, args, jobids, **kwargs):
     if args.dcache and args.dcache != 'dcache':
         dcacheBase = args.dcache
     else:
@@ -103,16 +107,20 @@ async def cleandCache(conf, args, jobids):
         if dcacheBase is None:
             return
 
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-    context.load_cert_chain(conf['proxy'], keyfile=conf['proxy'])
-    _DEFAULT_CIPHERS = (
-        'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
-        'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
-        '!eNULL:!MD5'
-    )
-    context.set_ciphers(_DEFAULT_CIPHERS)
-    connector = aiohttp.TCPConnector(ssl=context)
-    async with aiohttp.ClientSession(connector=connector) as session:
+    session = kwargs.get('session')
+    if not session:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+        context.load_cert_chain(conf['proxy'], keyfile=conf['proxy'])
+        _DEFAULT_CIPHERS = (
+            'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
+            'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
+            '!eNULL:!MD5'
+        )
+        context.set_ciphers(_DEFAULT_CIPHERS)
+        connector = aiohttp.TCPConnector(ssl=context)
+        session =  aiohttp.ClientSession(connector=connector)
+
+    async with session:
         tasks = []
         for jobid in jobids:
             #await webdav_rmdir(session, dcacheBase + '/' + str(jobid))
