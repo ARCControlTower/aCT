@@ -549,9 +549,11 @@ def getToken():
     Raises:
         RESTError: Token is not present or is expired
     '''
-    tokstr = request.args.get('token', None)
+    tokstr = request.headers.get('Authorization', None)
     if tokstr is None: raise RESTError('Auth token is missing', 401)
     try:
+        # potential errors with tokstr, token decode, proxy manager ...
+        tokstr = tokstr.split()[1]
         token = jwt.decode(tokstr, JWT_SECRET, algorithms=['HS256'])
         pmgr = ProxyManager()
         result = pmgr.checkProxyExists(token['proxyid'])

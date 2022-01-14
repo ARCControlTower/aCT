@@ -13,7 +13,8 @@ from common import addCommonJobFilterArgs, checkJobParams, cleandCache
 
 async def getFilteredJobIDs(session, jobsUrl, token, **kwargs):
     jobids = []
-    params = {'token': token, 'client': 'id'}
+    headers = {'Authorization': 'Bearer ' + token}
+    params = {'client': 'id'}
     if 'id' in kwargs:
         params['id'] = kwargs['id']
     if 'name' in kwargs:
@@ -21,7 +22,7 @@ async def getFilteredJobIDs(session, jobsUrl, token, **kwargs):
     if 'state' in kwargs:
         params['state'] = kwargs['state']
 
-    async with session.get(jobsUrl, params=params) as resp:
+    async with session.get(jobsUrl, params=params, headers=headers) as resp:
         json = await resp.json()
         if resp.status != 200:
             print('error: filter response: {} - {}'.format(resp.status, json['msg']))
@@ -60,10 +61,11 @@ async def filterJobsToFetch(session, token, jobsUrl, args):
 
 async def getJob(jobid, session, token, resultsUrl, jobsUrl):
     # download result zip; if it fails don't clean job as user should decide
-    params = {'token': token, 'id': jobid}
+    headers = {'Authorization': 'Bearer ' + token}
+    params = {'id': jobid}
     noResults = False # in case where there is no result folder
     try:
-        async with session.get(resultsUrl, params=params) as resp:
+        async with session.get(resultsUrl, params=params, headers=headers) as resp:
             if resp.status == 204:
                 await resp.json()
                 noResults = True
@@ -104,7 +106,7 @@ async def getJob(jobid, session, token, resultsUrl, jobsUrl):
 
     # delete job from act
     try:
-        async with session.delete(jobsUrl, params=params) as resp:
+        async with session.delete(jobsUrl, params=params, headers=headers) as resp:
             json = await resp.json()
             if resp.status != 200:
                 print('error cleaning job: {}'.format(json['msg']))

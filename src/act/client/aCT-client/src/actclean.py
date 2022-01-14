@@ -45,7 +45,8 @@ async def program():
 
     requestUrl = conf['server'] + ':' + str(conf['port']) + '/jobs'
 
-    params = {'token': token}
+    headers = {'Authorization': 'Bearer ' + token}
+    params = {}
     if args.id or args.state or args.name:
         if args.id:
             params['id'] = args.id
@@ -55,7 +56,7 @@ async def program():
             params['name'] = args.name
 
     async with aiohttp.ClientSession() as session:
-        async with session.delete(requestUrl, params=params) as resp:
+        async with session.delete(requestUrl, params=params, headers=headers) as resp:
             json = await resp.json()
             if resp.status != 200:
                 print('response error: {} - {}'.format(resp.status, json['msg']))

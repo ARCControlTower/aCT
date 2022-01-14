@@ -17,8 +17,9 @@ from cryptography.hazmat.primitives import serialization
 
 
 async def deleteProxy(session, requestUrl, token):
+    headers = {'Authorization': 'Bearer ' + token}
     try:
-        async with session.delete(requestUrl, params={'token': token}) as resp:
+        async with session.delete(requestUrl, headers=headers) as resp:
             json = await resp.json()
             if resp.status != 204:
                 print('response error: deleting proxy: {}'.format(json['msg']))
@@ -53,9 +54,9 @@ async def uploadProxy(session, requestUrl, proxyStr, conf):
 
     # upload signed cert
     json = {'cert': cert, 'chain': chain}
-    params = {'token': token}
+    headers = {'Authorization': 'Bearer ' + token}
     try:
-        async with session.put(requestUrl, json=json, params=params) as resp:
+        async with session.put(requestUrl, json=json, headers=headers) as resp:
             json = await resp.json()
             if resp.status != 200:
                 print('response error: {} - {}'.format(resp.status, json['msg']))
