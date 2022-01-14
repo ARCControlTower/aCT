@@ -62,11 +62,13 @@ async def webdav_put(session, url, path):
         return False
 
 
-async def http_put(session, name, path, url, params):
+async def http_put(session, name, path, url, jobid, token):
     try:
         data = aiohttp.FormData()
         data.add_field('file', file_sender(path), filename=name)
-        async with session.put(url, data=data, params=params) as resp:
+        headers = {'Authorization': 'Bearer ' + token}
+        params = {'id': jobid}
+        async with session.put(url, data=data, params=params, headers=headers) as resp:
             json = await resp.json()
             if resp.status != 200:
                 print('error: PUT /data: {} - {}'.format(resp.status, json['msg']))
@@ -79,10 +81,11 @@ async def http_put(session, name, path, url, params):
 
 async def kill_jobs(session, url, jobids, token):
     ids = ','.join(map(str, jobids))
-    params = {'token': token, 'id': ids}
+    headers = {'Authorization': 'Bearer ' + token}
+    params = {'id': ids}
     json = {'arcstate': 'tocancel'}
     try:
-        async with session.patch(url, json=json, params=params) as resp:
+        async with session.patch(url, json=json, params=params, headers=headers) as resp:
             json = await resp.json()
             if resp.status != 200:
                 print('error: killing jobs with failed input files: {} - {}'.format(resp.status, json['msg']))
@@ -90,7 +93,7 @@ async def kill_jobs(session, url, jobids, token):
         print('HTTP client error: while killing jobs: {}'.format(e))
 
 
-async def upload_input_files(session, jobid, jobdescs, params, requestUrl, dcacheBase=None, dcsession=None):
+async def upload_input_files(session, jobid, jobdescs, token, requestUrl, dcacheBase=None, dcsession=None):
     tasks = []
     for i in range(len(jobdescs[0].DataStaging.InputFiles)):
         # we use index for access to InputFiles because changes
@@ -111,10 +114,12 @@ async def upload_input_files(session, jobid, jobdescs, params, requestUrl, dcach
                 return False
         else:
             # upload to internal data management
-            #tasks.append(asyncio.ensure_future(http_put(session, infile.Name, path, requestUrl, params)))
+            #tasks.append(asyncio.ensure_future(http_put(session, infile.Name, path, requestUrl, jobid, token)))
             data = aiohttp.FormData()
             data.add_field('file', file_sender(path), filename=infile.Name)
-            async with session.put(requestUrl, data=data, params=params) as resp:
+            headers = {'Authorization': 'Bearer ' + token}
+            params = {'id': jobid}
+            async with session.put(requestUrl, data=data, params=params, headers=headers) as resp:
                 json = await resp.json()
                 if resp.status != 200:
                     print('error: PUT /data: {} - {}'.format(resp.status, json['msg']))
@@ -146,9 +151,9 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
     # submit job to receive jobid
     requestUrl = baseUrl + '/jobs'
     json = {'site': site, 'desc': xrslStr}
-    params = {'token': token}
+    headers = {'Authorization': 'Bearer ' + token}
     try:
-        async with session.post(requestUrl, json=json, params=params) as resp:
+        async with session.post(requestUrl, json=json, headers=headers) as resp:
             json = await resp.json()
             if resp.status != 200:
                 print('error: POST /jobs: {} - {}'.format(resp.status, json['msg']))
@@ -166,8 +171,7 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
 
     # upload input files
     requestUrl = baseUrl + '/data'
-    params = {'token': token, 'id': jobid}
-    if not await upload_input_files(session, jobid, jobdescs, params, requestUrl, dcacheBase, dcsession):
+    if not await upload_input_files(session, jobid, jobdescs, token, requestUrl, dcacheBase, dcsession):
         return jobid, True
 
     # job description was modified and has to be unparsed
@@ -178,9 +182,10 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
 
     # complete job submission
     requestUrl = baseUrl + '/jobs'
+    headers = {'Authorization': 'Bearer ' + token}
     json = {'id': jobid, 'desc': xrslStr}
     try:
-        async with session.put(requestUrl, json=json, params=params) as resp:
+        async with session.put(requestUrl, json=json, headers=headers) as resp:
             json = await resp.json()
             if resp.status != 200:
                 print('error: PUT /jobs: {} - {}'.format(resp.status, json['msg']))
