@@ -61,17 +61,22 @@ async def filterJobsToFetch(session, token, jobsUrl, args):
 async def getJob(jobid, session, token, resultsUrl, jobsUrl):
     # download result zip; if it fails don't clean job as user should decide
     params = {'token': token, 'id': jobid}
+    noResults = False # in case where there is no result folder
     try:
         async with session.get(resultsUrl, params=params) as resp:
-            if resp.status != 200:
-                print('response error: {} - {}'.format(resp.status, await resp.json()['msg']))
+            if resp.status == 204:
+                await resp.json()
+                noResults = True
+            elif resp.status == 200:
+                # 'Content-Disposition': 'attachment; filename=ZrcMDm3nK4...m2cmmzn.zip'
+                filename = resp.headers['Content-Disposition'].split()[1].split('=')[1]
+                async with aiofiles.open(filename, mode='wb') as f:
+                    async for chunk, _ in resp.content.iter_chunks():
+                        await f.write(chunk)
+            else:
+                json = await resp.json()
+                print('response error: {} - {}'.format(resp.status, json['msg']))
                 return
-
-            # 'Content-Disposition': 'attachment; filename=ZrcMDm3nK4...m2cmmzn.zip'
-            filename = resp.headers['Content-Disposition'].split()[1].split('=')[1]
-            async with aiofiles.open(filename, mode='wb') as f:
-                async for chunk, _ in resp.content.iter_chunks():
-                    await f.write(chunk)
     except aiohttp.ClientError as e:
         print('HTTP client error: fetching results for jobid {}: {}'.format(jobid, e))
         return
@@ -80,20 +85,22 @@ async def getJob(jobid, session, token, resultsUrl, jobsUrl):
         return
 
     # extract and delete zip file
-    try:
-        dirname = os.path.splitext(filename)[0]
-        with zipfile.ZipFile(filename, 'r') as zip_ref:
-            zip_ref.extractall(dirname)
-    except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
-        print('error extracting result zip: {}'.format(e))
-        return
-    try:
-        os.remove(filename)
-    except Exception as e:
-        print('error deleting results zip: {}'.format(e))
-        return
-
-    print('{} - results stored in {}'.format(resp.status, dirname))
+    if not noResults:
+        try:
+            dirname = os.path.splitext(filename)[0]
+            with zipfile.ZipFile(filename, 'r') as zip_ref:
+                zip_ref.extractall(dirname)
+        except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
+            print('error extracting result zip: {}'.format(e))
+            return
+        try:
+            os.remove(filename)
+        except Exception as e:
+            print('error deleting results zip: {}'.format(e))
+            return
+        print('{} - results stored in {}'.format(resp.status, dirname))
+    else:
+        print('{} - no results to fetch for jobid {}'.format(204, jobid))
 
     # delete job from act
     try:
