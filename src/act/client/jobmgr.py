@@ -155,12 +155,10 @@ class JobManager(object):
                     shutil.rmtree(jobdir)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception('Could not clean job results in {}'.format(
-                        jobdir))
+                    self.logger.error('Could not clean job results in {}'.format(jobdir))
                 except NoJobDirectoryError as e:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception('Could not clean job results in {}'.format(
-                        e.jobdir))
+                    self.logger.info('Job {} has no job results to clean'.format(job['c_id']))
 
             # add job to removal query
             arc_where += '{}, '.format(job['a_id'])
@@ -574,7 +572,6 @@ class JobManager(object):
         if os.path.isdir(actJobDir):
             return actJobDir
         else:
-            self.logger.error('Could not find job directory: {}'.format(actJobDir))
             raise NoJobDirectoryError(actJobDir)
 
     def getJobDataDir(self, jobid):
