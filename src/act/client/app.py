@@ -463,6 +463,21 @@ def uploadSignedProxy():
     return {'token': token}, 200
 
 
+@app.route('/proxies', methods=['DELETE'])
+def deleteProxy():
+    try:
+        token = getToken()
+        pmgr = ProxyManager()
+        pmgr.arcdb.deleteProxy(token['proxyid'])
+    except RESTError as e:
+        print('error: DELETE /proxies: {}'.format(e))
+        return {'msg': str(e)}, e.httpCode
+    except Exception as e:
+        print('error: DELETE /proxies: {}'.format(e))
+        return {'msg': 'Server error'}, 500
+    return jsonify({'msg': 'Proxy deletion successful'}), 204
+
+
 @app.route('/data', methods=['PUT'])
 def uploadFile():
     try:

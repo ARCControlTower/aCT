@@ -16,6 +16,17 @@ from cryptography.hazmat.primitives import serialization
 # TODO: delete what is remaining on backend if proxy submission fails
 
 
+async def deleteProxy(session, requestUrl, token):
+    try:
+        async with session.delete(requestUrl, params={'token': token}) as resp:
+            json = await resp.json()
+            if resp.status != 204:
+                print('response error: deleting proxy: {}'.format(json['msg']))
+                return
+    except aiohttp.ClientError as e:
+        print('HTTP client error: deleting proxy: {}'.format(e))
+
+
 async def uploadProxy(session, requestUrl, proxyStr, conf):
     # submit proxy cert part to get CSR
     try:
@@ -37,7 +48,7 @@ async def uploadProxy(session, requestUrl, proxyStr, conf):
         chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
     except Exception as e:
         print('error generating proxy: {}'.format(e))
-        # TODO: what kind of cleanup is necessary?
+        await deleteProxy(session, requestUrl, token)
         sys.exit(1)
 
     # upload signed cert
@@ -48,10 +59,11 @@ async def uploadProxy(session, requestUrl, proxyStr, conf):
             json = await resp.json()
             if resp.status != 200:
                 print('response error: {} - {}'.format(resp.status, json['msg']))
+                await deleteProxy(session, requestUrl, token)
                 sys.exit(1)
     except aiohttp.ClientError as e:
         print('HTTP client error: uploading signed proxy: {}'.format(e))
-        # TODO: what kind of cleanup is necessary?
+        await deleteProxy(session, requestUrl, token)
         sys.exit(1)
 
     # store auth token
@@ -64,7 +76,7 @@ async def uploadProxy(session, requestUrl, proxyStr, conf):
         os.chmod(conf['token'], 0o600)
     except Exception as e:
         print('error saving token: {}'.format(e))
-        #TODO: what kind of cleanup is necessary?
+        await deleteProxy(session, requestUrl, token)
         sys.exit(1)
 
     print('Successfully inserted proxy. Access token: {}'.format(token))
