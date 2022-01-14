@@ -109,31 +109,25 @@ async def upload_input_files(session, jobid, jobdescs, token, requestUrl, dcache
             # upload to dcache
             dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
             jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
-            #tasks.append(asyncio.ensure_future(webdav_put(dcsession, dst, path)))
-            if not await webdav_put(dcsession, dst, path):
-                return False
+            tasks.append(asyncio.ensure_future(webdav_put(dcsession, dst, path)))
         else:
             # upload to internal data management
-            #tasks.append(asyncio.ensure_future(http_put(session, infile.Name, path, requestUrl, jobid, token)))
-            data = aiohttp.FormData()
-            data.add_field('file', file_sender(path), filename=infile.Name)
-            headers = {'Authorization': 'Bearer ' + token}
-            params = {'id': jobid}
-            async with session.put(requestUrl, data=data, params=params, headers=headers) as resp:
-                json = await resp.json()
-                if resp.status != 200:
-                    print('error: PUT /data: {} - {}'.format(resp.status, json['msg']))
-                    return False
+            tasks.append(asyncio.ensure_future(http_put(session, infile.Name, path, requestUrl, jobid, token)))
     try:
         results = await asyncio.gather(*tasks)
     except Exception as e:
         print('error running concurrent input file upload: {}'.format(e))
         return False
-    return True
+
+    return all(results)
 
 
 # returns a tuple of jobid integer (can be None) and bool that specifies
 # whether given jobid has to be killed because of failure
+#
+# if jobdescs are not set to None then the following error happens:
+# <built-in function delete_JobDescriptionList> returned a result with an error set
+# StopIteration: (1709, True)
 async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, dcsession=None):
     # read and parse job description
     try:
@@ -172,6 +166,7 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
     # upload input files
     requestUrl = baseUrl + '/data'
     if not await upload_input_files(session, jobid, jobdescs, token, requestUrl, dcacheBase, dcsession):
+        jobdescs = None
         return jobid, True
 
     # job description was modified and has to be unparsed
