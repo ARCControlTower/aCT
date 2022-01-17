@@ -508,12 +508,14 @@ def uploadFile():
         print('error: PUT /data: {}'.format(e))
         return {'msg': 'Server error'}, 500
 
-    datafile = request.files.get('file', None)
-    if not datafile:
-        print('error: PUT /data: file not sent')
-        return {'msg': 'No file sent'}, 400
 
     try:
+        # this block fires exception if client doesn't complete upload
+        datafile = request.files.get('file', None)
+        if not datafile:
+            print('error: PUT /data: file not sent')
+            return {'msg': 'No file sent'}, 400
+
         jobDataDir = jmgr.getJobDataDir(jobid)
         # TODO: werkzeug.safe_filename does not work because we need relative
         #       path that can go deep
