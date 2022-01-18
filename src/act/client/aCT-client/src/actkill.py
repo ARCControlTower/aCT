@@ -1,15 +1,17 @@
 import argparse
-import sys
 import asyncio
+import sys
+
 import aiohttp
 
-from config import loadConf, checkConf, expandPaths
-from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
-from common import checkJobParams, addCommonJobFilterArgs
+from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
+                    disableSIGINT, readTokenFile, showHelpOnCommandOnly)
+from config import checkConf, expandPaths, loadConf
 
 
 def main():
     try:
+        disableSIGINT()
         loop = asyncio.get_event_loop()
         loop.run_until_complete(program())
     except Exception as e:
@@ -33,7 +35,7 @@ async def program():
     if args.server:
         conf['server'] = args.server
     if args.port:
-        conf['port']   = args.port
+        conf['port'] = args.port
 
     expandPaths(conf)
     checkConf(conf, ['server', 'port', 'token'])
@@ -55,8 +57,10 @@ async def program():
     async with aiohttp.ClientSession() as session:
         async with session.patch(requestUrl, json={'arcstate': 'tocancel'}, params=params, headers=headers) as resp:
             json = await resp.json()
-            if resp.status != 200:
-                print('response error: {} - {}'.format(resp.status, json['msg']))
-                sys.exit(1)
-            else:
-                print('Will kill {} jobs'.format(len(json)))
+            status = resp.status
+
+    if status != 200:
+        print('response error: {} - {}'.format(status, json['msg']))
+        sys.exit(1)
+    else:
+        print('Will kill {} jobs'.format(len(json)))

@@ -38,3 +38,22 @@ voms extensions can expire faster than cert
 
 # VOMS protocol wiki
 https://wiki.italiangrid.it/twiki/bin/view/VOMS/VOMSProtocol
+
+
+
+# Python 3.6 asyncio keyboard interrupts
+https://gist.github.com/harrisont/38ecc65aaad3481c9221417d7c64fef8
+
+
+
+# asyncio!!!!
+What happens when coroutine is cancelled when aiohttp reuquest is in progress???
+
+KeyboardInterrupt crash if ctrl-c is pressed too soon after program start,
+while program is loading entry point?
+
+Does asyncio.ensure_future go through event loop such that it has to be
+tryied for CancelledError?
+
+Does coroutine cancel impact async with session and async with response or
+does it kick in when awaiting response?
