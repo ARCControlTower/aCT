@@ -154,12 +154,8 @@ class Client2Arc(object):
         )
         for job in jobs:
             # get cluster list from config
-            clusterlist = ""
             sites = readSites()
-            clusterlist = ''
-            for cluster in sites[job['siteName']]:
-                clusterlist += cluster + ','
-            clusterlist = clusterlist.rstrip(',')
+            clusterlist = ','.join(sites[job['siteName']])
 
             # get job description, needed for setting priority
             jobdesc = self.arcdb.getArcJobDescription(job['jobdesc'])

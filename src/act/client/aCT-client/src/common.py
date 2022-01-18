@@ -1,6 +1,8 @@
-import sys
-import ssl
 import asyncio
+import signal
+import ssl
+import sys
+
 import aiohttp
 
 
@@ -99,6 +101,8 @@ def readTokenFile(tokenFile):
 #
 # can creation of connector cause errors outside of webdav_rmdir (if it is
 # defered until first request)?
+# TODO: response from dcache when removing directory is 204. Should we
+#       fix on this or on less than 300?
 async def cleandCache(conf, args, jobids, **kwargs):
     if args.dcache and args.dcache != 'dcache':
         dcacheBase = args.dcache
@@ -120,12 +124,14 @@ async def cleandCache(conf, args, jobids, **kwargs):
         connector = aiohttp.TCPConnector(ssl=context)
         session =  aiohttp.ClientSession(connector=connector)
 
+    print('Cleaning dCache directories ...', end='')
     async with session:
         tasks = []
         for jobid in jobids:
             #await webdav_rmdir(session, dcacheBase + '/' + str(jobid))
             tasks.append(asyncio.ensure_future(webdav_rmdir(session, dcacheBase + '/' + str(jobid))))
         await asyncio.gather(*tasks)
+    print()
 
 
 async def webdav_rmdir(session, url):
@@ -140,3 +146,21 @@ async def webdav_rmdir(session, url):
                 print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, text))
     except aiohttp.ClientError as e:
         print('HTTP client error: deleting directory {}: {}'.format(url, e))
+
+
+def run_with_exceptions(program):
+    try:
+        loop = asyncio.get_event_loop()
+        main_task = asyncio.ensure_future(program)
+        loop.run_until_complete(main_task)
+    except KeyboardInterrupt:
+        main_task.cancel()
+        loop.run_until_complete(main_task)
+        sys.exit(0)
+    except Exception as e:
+        print('error: {}'.format(e))
+        sys.exit(1)
+
+
+def disableSIGINT():
+    signal.signal(signal.SIGINT, lambda signum, frame: None)

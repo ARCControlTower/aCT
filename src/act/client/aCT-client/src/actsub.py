@@ -1,26 +1,18 @@
 import argparse
-import sys
+import asyncio
 import os
 import ssl
-import arc
-import asyncio
-import aiohttp
+import sys
+
 import aiofiles
+import aiohttp
+import arc
 
-from config import loadConf, checkConf, expandPaths
-from common import readTokenFile, addCommonArgs, cleandCache
-
-
-
-
-import traceback
+from common import addCommonArgs, cleandCache, disableSIGINT, readTokenFile
+from config import checkConf, expandPaths, loadConf
 
 
 TRANSFER_BLOCK_SIZE = 2**16
-
-
-# TODO: response from dcache when removing directory is 204. Should we
-#       fix on this or on less than 300?
 
 
 async def webdav_mkdir(session, url):
@@ -149,24 +141,36 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
     try:
         async with session.post(requestUrl, json=json, headers=headers) as resp:
             json = await resp.json()
-            if resp.status != 200:
-                print('error: POST /jobs: {} - {}'.format(resp.status, json['msg']))
-                return None, False
-            json = await resp.json()
-            jobid = json['id']
+            status = resp.status
+
+    ## It seems that there is a possibility in both error cases that the submission
+    ## could already be finished by the time exception is caught. clean just
+    ## in case, at worst we get error that job doesn't exist.
+    #except asyncio.CancelledError:
+    #    return None, True
     except aiohttp.ClientError as e:
         print('HTTP client error: submitting job description {}: {}'.format(descpath, e))
-        return None, False
+        return None, True
 
-    # create directory for job's local input files if using dcache
-    if dcacheBase:
-        if not await webdav_mkdir(dcsession, dcacheBase + '/' + str(jobid)):
+    if status != 200:
+        print('error: POST /jobs: {} - {}'.format(status, json['msg']))
+        return None, False
+    jobid = json['id']
+
+    # handle coroutine cancel, signal killing if cancelled
+    try:
+        # create directory for job's local input files if using dcache
+        if dcacheBase:
+            if not await webdav_mkdir(dcsession, dcacheBase + '/' + str(jobid)):
+                return jobid, True
+
+        # upload input files
+        requestUrl = baseUrl + '/data'
+        if not await upload_input_files(session, jobid, jobdescs, token, requestUrl, dcacheBase, dcsession):
+            jobdescs = None
             return jobid, True
 
-    # upload input files
-    requestUrl = baseUrl + '/data'
-    if not await upload_input_files(session, jobid, jobdescs, token, requestUrl, dcacheBase, dcsession):
-        jobdescs = None
+    except asyncio.CancelledError:
         return jobid, True
 
     # job description was modified and has to be unparsed
@@ -182,14 +186,18 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
     try:
         async with session.put(requestUrl, json=json, headers=headers) as resp:
             json = await resp.json()
-            if resp.status != 200:
-                print('error: PUT /jobs: {} - {}'.format(resp.status, json['msg']))
-                return jobid, False
-            else:
-                print('{} - succesfully submited job with id {}'.format(resp.status, json['id']))
-    except aiohttp.ClientErrors as e:
+            status = resp.status
+    except aiohttp.ClientError as e:
         print('HTTP client error: submitting job {}: {}'.format(descpath, e))
-        return jobid, False
+        return jobid, True
+    except asyncio.CancelledError:
+        return jobid, True
+
+    if status != 200:
+        print('error: PUT /jobs: {} - {}'.format(status, json['msg']))
+        return jobid, True
+    else:
+        print('{} - succesfully submited job with id {}'.format(status, json['id']))
 
     jobdescs = None
 
@@ -198,11 +206,11 @@ async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, d
 
 def main():
     try:
+        disableSIGINT()
         loop = asyncio.get_event_loop()
         loop.run_until_complete(program())
     except Exception as e:
         print('error: {}'.format(e))
-        traceback.print_exc()
         sys.exit(1)
 
 
@@ -223,7 +231,7 @@ async def program():
     if args.server:
         conf['server'] = args.server
     if args.port:
-        conf['port']   = args.port
+        conf['port'] = args.port
 
     expandPaths(conf)
     checkConf(conf, ['server', 'port', 'token'])
@@ -261,17 +269,36 @@ async def program():
 
     async with aiohttp.ClientSession() as session:
         # submit jobs
-        tasks = []
+        #tasks = []
+        #try:
+        #    for desc in args.xRSL:
+        #        tasks.append(asyncio.ensure_future(submit_job(session, desc, baseUrl, args.site, token, dcacheBase, dcsession)))
+        #    results = await asyncio.gather(*tasks)
+        #except asyncio.CancelledError:
+        #    for task in tasks:
+        #        task.cancel()
+        #finally:
+        #    results = await asyncio.gather(*tasks)
+        tokill = []
         for desc in args.xRSL:
-            tasks.append(asyncio.ensure_future(submit_job(session, desc, baseUrl, args.site, token, dcacheBase, dcsession)))
-        results = await asyncio.gather(*tasks)
+            jobid, kill = await submit_job(session, desc, baseUrl, args.site, token, dcacheBase, dcsession)
+            if kill:
+                tokill.append(jobid)
+
+        # !!!!!!!!!!!!!!!!!!!!
+        # https://stackoverflow.com/questions/56052748/python-asyncio-task-cancellation
+        # !!!!!!!!!!!!!!!!!!!!
+
+        # Failed or cancelled job cleanup and dCache have to be cleaned
+        # even if the coroutine is cancelled so that half submitted or
+        # improperly submitted jobs are not left behind.
 
         # kill unsuccessfully submitted jobs
-        tokill = [jobid for jobid, shouldKill in results if shouldKill]
+        #tokill = [jobid for jobid, shouldKill in results if shouldKill]
         if tokill:
-            print('killing jobs: {}'.format(tokill))
+            print('cleaning failed or cancelled jobs: {}'.format(tokill))
             await kill_jobs(session, baseUrl + '/jobs', tokill, token)
 
-        if dcsession:
+        if dcsession and tokill:
             # function closes session in its own async with statement
             await cleandCache(conf, args, tokill, session=dcsession)

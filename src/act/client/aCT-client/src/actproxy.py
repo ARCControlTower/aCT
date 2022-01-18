@@ -1,19 +1,17 @@
-import os
 import argparse
-import sys
 import asyncio
-import aiohttp
-import x509proxy
+import os
+import sys
 
-from config import loadConf, checkConf, expandPaths
-from common import readProxyFile, addCommonArgs
-from delegate_proxy import parse_issuer_cred
+import aiohttp
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
-
-# TODO: delete what is remaining on backend if proxy submission fails
+import x509proxy
+from common import addCommonArgs, disableSIGINT, readProxyFile
+from config import checkConf, expandPaths, loadConf
+from delegate_proxy import parse_issuer_cred
 
 
 async def deleteProxy(session, requestUrl, token):
@@ -85,6 +83,7 @@ async def uploadProxy(session, requestUrl, proxyStr, conf):
 
 def main():
     try:
+        disableSIGINT()
         loop = asyncio.get_event_loop()
         loop.run_until_complete(program())
     except Exception as e:

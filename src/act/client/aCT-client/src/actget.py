@@ -1,14 +1,16 @@
 import argparse
-import sys
-import os
-import zipfile
 import asyncio
-import aiohttp
-import aiofiles
+import os
+import sys
+import zipfile
 
-from config import loadConf, checkConf, expandPaths
-from common import readTokenFile, addCommonArgs, showHelpOnCommandOnly
-from common import addCommonJobFilterArgs, checkJobParams, cleandCache
+import aiofiles
+import aiohttp
+
+from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
+                    cleandCache, disableSIGINT, readTokenFile,
+                    showHelpOnCommandOnly)
+from config import checkConf, expandPaths, loadConf
 
 
 async def getFilteredJobIDs(session, jobsUrl, token, **kwargs):
@@ -87,22 +89,21 @@ async def getJob(jobid, session, token, resultsUrl, jobsUrl):
         return
 
     # extract and delete zip file
-    if not noResults:
+    if noResults:
+        print('{} - no results to fetch for jobid {}'.format(204, jobid))
+    else:
         try:
             dirname = os.path.splitext(filename)[0]
             with zipfile.ZipFile(filename, 'r') as zip_ref:
                 zip_ref.extractall(dirname)
         except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
             print('error extracting result zip: {}'.format(e))
-            return
         try:
             os.remove(filename)
         except Exception as e:
             print('error deleting results zip: {}'.format(e))
             return
         print('{} - results stored in {}'.format(resp.status, dirname))
-    else:
-        print('{} - no results to fetch for jobid {}'.format(204, jobid))
 
     # delete job from act
     try:
@@ -116,6 +117,7 @@ async def getJob(jobid, session, token, resultsUrl, jobsUrl):
 
 def main():
     try:
+        disableSIGINT()
         loop = asyncio.get_event_loop()
         loop.run_until_complete(program())
     except Exception as e:
