@@ -28,12 +28,12 @@ TOKEN_NAME = 'token'
 
 # XDG Base Directory specification use
 if CONF_HOME == '$XDG_CONFIG_HOME':
-    CONF_BASE = os.path.join(os.path.expanduser('~'), '.config', DIRNAME)
+    CONF_BASE = os.path.join(os.path.expandvars('$HOME'), '.config', DIRNAME)
 else:
     CONF_BASE = os.path.join(CONF_HOME, DIRNAME)
 
 if DATA_HOME == '$XDG_DATA_HOME':
-    DATA_BASE = os.path.join(os.path.expanduser('~'), '.local', 'share', DIRNAME)
+    DATA_BASE = os.path.join(os.path.expandvars('$HOME'), '.local', 'share', DIRNAME)
 else:
     DATA_BASE = os.path.join(DATA_HOME, DIRNAME)
 
