@@ -299,6 +299,5 @@ async def program():
             print('cleaning failed or cancelled jobs: {}'.format(tokill))
             await kill_jobs(session, baseUrl + '/jobs', tokill, token)
 
-        if dcsession and tokill:
-            # function closes session in its own async with statement
-            await cleandCache(conf, args, tokill, session=dcsession)
+        # function also closes session
+        await cleandCache(conf, args, tokill, dcsession)

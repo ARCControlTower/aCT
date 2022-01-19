@@ -103,7 +103,7 @@ def readTokenFile(tokenFile):
 # defered until first request)?
 # TODO: response from dcache when removing directory is 204. Should we
 #       fix on this or on less than 300?
-async def cleandCache(conf, args, jobids, **kwargs):
+async def cleandCache(conf, args, jobids, dcsession=None):
     if args.dcache and args.dcache != 'dcache':
         dcacheBase = args.dcache
     else:
@@ -111,8 +111,9 @@ async def cleandCache(conf, args, jobids, **kwargs):
         if dcacheBase is None:
             return
 
-    session = kwargs.get('session')
-    if not session:
+    print('Cleaning dCache directories ...', end='')
+
+    if not dcsession:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         context.load_cert_chain(conf['proxy'], keyfile=conf['proxy'])
         _DEFAULT_CIPHERS = (
@@ -122,15 +123,17 @@ async def cleandCache(conf, args, jobids, **kwargs):
         )
         context.set_ciphers(_DEFAULT_CIPHERS)
         connector = aiohttp.TCPConnector(ssl=context)
-        session =  aiohttp.ClientSession(connector=connector)
+        session = aiohttp.ClientSession(connector=connector)
+    else:
+        session = dcsession
 
-    print('Cleaning dCache directories ...', end='')
     async with session:
         tasks = []
         for jobid in jobids:
             #await webdav_rmdir(session, dcacheBase + '/' + str(jobid))
             tasks.append(asyncio.ensure_future(webdav_rmdir(session, dcacheBase + '/' + str(jobid))))
         await asyncio.gather(*tasks)
+
     print()
 
 
