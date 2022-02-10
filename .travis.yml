@@ -22,6 +22,6 @@ before_install:
   - sudo apt-get -y install python3-selinux
 install:
   - pip install -r requirements.txt
-  - pip install rucio-clients==1.22.8
+  - pip install rucio-clients
 script:
   - pylint --extension-pkg-whitelist=htcondor,classad --errors-only src/act
