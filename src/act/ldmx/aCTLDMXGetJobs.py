@@ -236,7 +236,8 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                             elif l.startswith('p.maxEvents') and 'NumberOfEvents' in jobconfig :
                                 ntf.write(f'p.maxEvents = {jobconfig["NumberOfEvents"]}\n')                           
                             elif l.startswith('lheLib=INPUTFILE'):
-                                ntf.write(f'lheLib={inFileList}\n') # {jobconfig["InputFile"].split(":")[1]}"\n')
+                                ntf.write(f'lheLib="{jobconfig["InputFile"].split(":")[1]}"\n')
+                                #ntf.write(f'lheLib={inFileList}\n') # {jobconfig["InputFile"].split(":")[1]}"\n')
                             elif l.startswith('pileupFileName'):
                                 ntf.write(f'pileupFileName = "{jobconfig["PileupFile"].split(":")[1]}" \n')
                             elif l.startswith('sim.randomSeeds'):
