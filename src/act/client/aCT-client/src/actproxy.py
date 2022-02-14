@@ -1,42 +1,47 @@
 import argparse
-import asyncio
 import os
 import sys
 
-import aiohttp
+import trio
+import httpx
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
 import x509proxy
 from common import addCommonArgs, disableSIGINT, readProxyFile
+from common import run_with_sigint_handler
 from config import checkConf, expandPaths, loadConf
 from delegate_proxy import parse_issuer_cred
 
 
-async def deleteProxy(session, requestUrl, token):
+# TODO: use exceptions instead of system exit
+
+
+async def deleteProxy(client, requestUrl, token):
     headers = {'Authorization': 'Bearer ' + token}
     try:
-        async with session.delete(requestUrl, headers=headers) as resp:
-            json = await resp.json()
-            if resp.status != 204:
-                print('response error: deleting proxy: {}'.format(json['msg']))
-                return
-    except aiohttp.ClientError as e:
-        print('HTTP client error: deleting proxy: {}'.format(e))
+        resp = await client.delete(requestUrl, headers=headers)
+        json = resp.json()
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        return
+
+    if resp.status_code != 204:
+        print('response error: deleting proxy: {} - {}'.format(resp.status_code, json['msg']))
 
 
-async def uploadProxy(session, requestUrl, proxyStr, conf):
+async def uploadProxy(client, requestUrl, proxyStr, conf):
     # submit proxy cert part to get CSR
     try:
-        async with session.post(requestUrl, json={'cert': proxyStr}) as resp:
-            json = await resp.json()
-            if resp.status != 200:
-                print('response error: {} - {}'.format(resp.status, json['msg']))
-                sys.exit(1)
-    except aiohttp.ClientError as e:
-        print('HTTP client error: sending request for CSR: {}'.format(e))
-        sys.exit(1)
+        resp = await client.post(requestUrl, json={'cert': proxyStr})
+        json = resp.json()
+    except (httpx.RequestError, trio.Cancelled) as e:
+        print('request error: {}'.format(e))
+        return
+    if resp.status_code != 200:
+        print('response error: {} - {}'.format(resp.status, json['msg']))
+        return
     token = json['token']
 
     # sign CSR
@@ -47,23 +52,23 @@ async def uploadProxy(session, requestUrl, proxyStr, conf):
         chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
     except Exception as e:
         print('error generating proxy: {}'.format(e))
-        await deleteProxy(session, requestUrl, token)
-        sys.exit(1)
+        await deleteProxy(client, requestUrl, token)
+        return
 
     # upload signed cert
     json = {'cert': cert, 'chain': chain}
     headers = {'Authorization': 'Bearer ' + token}
     try:
-        async with session.put(requestUrl, json=json, headers=headers) as resp:
-            json = await resp.json()
-            if resp.status != 200:
-                print('response error: {} - {}'.format(resp.status, json['msg']))
-                await deleteProxy(session, requestUrl, token)
-                sys.exit(1)
-    except aiohttp.ClientError as e:
-        print('HTTP client error: uploading signed proxy: {}'.format(e))
-        await deleteProxy(session, requestUrl, token)
-        sys.exit(1)
+        resp = await client.put(requestUrl, json=json, headers=headers)
+        json = resp.json()
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        await deleteProxy(client, requestUrl, token)
+        return
+    if resp.status_code != 200:
+        print('response error: {} - {}'.format(resp.status_code, json['msg']))
+        await deleteProxy(client, requestUrl, token)
+        return
 
     # store auth token
     token = json['token']
@@ -75,20 +80,14 @@ async def uploadProxy(session, requestUrl, proxyStr, conf):
         os.chmod(conf['token'], 0o600)
     except Exception as e:
         print('error saving token: {}'.format(e))
-        await deleteProxy(session, requestUrl, token)
-        sys.exit(1)
+        await deleteProxy(client, requestUrl, token)
+        return
 
     print('Successfully inserted proxy. Access token: {}'.format(token))
 
 
 def main():
-    try:
-        disableSIGINT()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(program())
-    except Exception as e:
-        print('error: {}'.format(e))
-        sys.exit(1)
+    trio.run(run_with_sigint_handler, program)
 
 
 async def program():
@@ -111,5 +110,6 @@ async def program():
 
     requestUrl = conf['server'] + ':' + str(conf['port']) + '/proxies'
 
-    async with aiohttp.ClientSession() as session:
-        await uploadProxy(session, requestUrl, proxyStr, conf)
+    with trio.CancelScope(shield=True):
+        async with httpx.AsyncClient() as client:
+            await uploadProxy(client, requestUrl, proxyStr, conf)

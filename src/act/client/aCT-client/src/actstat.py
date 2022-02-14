@@ -1,22 +1,16 @@
 import argparse
-import asyncio
 import sys
 
-import aiohttp
+import trio
+import httpx
 
 from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
-                    disableSIGINT, readTokenFile, showHelpOnCommandOnly)
+                    disableSIGINT, readTokenFile, showHelpOnCommandOnly, run_with_sigint_handler)
 from config import checkConf, expandPaths, loadConf
 
 
 def main():
-    try:
-        disableSIGINT()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(program())
-    except Exception as e:
-        print('error: {}'.format(e))
-        sys.exit(1)
+    trio.run(run_with_sigint_handler, program)
 
 
 async def program():
@@ -62,17 +56,17 @@ async def program():
         if args.name:
             params['name'] = args.name
 
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(requestUrl, params=params, headers=headers) as resp:
-                json = await resp.json()
-                status = resp.status
-        except aiohttp.ClientError as e:
-            print('HTTP client error: getting job stats: {}'.format(e))
-            sys.exit(1)
+    with trio.CancelScope(shield=True):
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(requestUrl, params=params, headers=headers)
+                json = resp.json()
+            except httpx.RequestError as e:
+                print('request error: {}'.format(e))
+                return
 
-    if status != 200:
-        print('response error: {} - {}'.format(status, json['msg']))
+    if resp.status_code != 200:
+        print('response error: {} - {}'.format(resp.status_code, json['msg']))
         sys.exit(1)
 
     if args.arc:

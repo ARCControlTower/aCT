@@ -1,23 +1,34 @@
 import argparse
-import asyncio
-import sys
 
-import aiohttp
+import httpx
+import trio
 
 from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
-                    cleandCache, disableSIGINT, readTokenFile,
-                    showHelpOnCommandOnly)
+                    readTokenFile, showHelpOnCommandOnly, run_with_sigint_handler, clean_webdav)
 from config import checkConf, expandPaths, loadConf
 
 
 def main():
-    try:
-        disableSIGINT()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(program())
-    except Exception as e:
-        print('error: {}'.format(e))
-        sys.exit(1)
+    trio.run(run_with_sigint_handler, program)
+
+
+async def clean_jobs(url, params, token, conf, args):
+    headers = {'Authorization': 'Bearer ' + token}
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.delete(url, params=params, headers=headers)
+            json = resp.json()
+        except httpx.RequestError as e:
+            print('request error: {}'.format(e))
+            return
+
+    if resp.status_code != 200:
+        print('response error: {} - {}'.format(resp.status_code, json['msg']))
+        return
+    else:
+        print('Cleaned {} jobs'.format(len(json)))
+
+    await clean_webdav(conf, args, json)
 
 
 async def program():
@@ -27,8 +38,7 @@ async def program():
     parser.add_argument('--state', default=None,
                         help='the state that jobs should be in')
     parser.add_argument('--dcache', nargs='?', const='dcache', default='',
-                        help='whether files should be uploaded to dcache with \
-                        optional location parameter')
+            help='URL of user\'s dCache directory')
     args = parser.parse_args()
     showHelpOnCommandOnly(parser)
 
@@ -48,7 +58,6 @@ async def program():
 
     requestUrl = conf['server'] + ':' + str(conf['port']) + '/jobs'
 
-    headers = {'Authorization': 'Bearer ' + token}
     params = {}
     if args.id or args.state or args.name:
         if args.id:
@@ -58,15 +67,5 @@ async def program():
         if args.name:
             params['name'] = args.name
 
-    async with aiohttp.ClientSession() as session:
-        async with session.delete(requestUrl, params=params, headers=headers) as resp:
-            json = await resp.json()
-            status = resp.status
-
-    if status != 200:
-        print('response error: {} - {}'.format(status, json['msg']))
-        sys.exit(1)
-    else:
-        print('Cleaned {} jobs'.format(len(json)))
-
-    await cleandCache(conf, args, json)
+    with trio.CancelScope(shield=True):
+        await clean_jobs(requestUrl, params, token, conf, args)
