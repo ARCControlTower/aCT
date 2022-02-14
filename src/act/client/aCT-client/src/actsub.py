@@ -91,27 +91,48 @@ async def kill_jobs(client, url, jobids, token):
         print('error: killing jobs with failed input files: {} - {}'.format(resp.status_code, json['msg']))
 
 
+# TODO: environment variables in paths!!!
 async def upload_input_files(client, jobid, jobdescs, token, requestUrl, dcacheBase=None, dcclient=None):
+    files = {}
+
+    exepath = jobdescs[0].Application.Executable.Path
+    if not os.path.isabs(exepath):
+        files[os.path.basename(exepath)] = exepath
+
+    # if a file with the same name as executable is provided in inputFiles
+    # in xRSL the value from inputFiles will be used (or file entry discarded
+    # if the executable file is remote)
+    for i in range(len(jobdescs[0].DataStaging.InputFiles)):
+        # we use index for access to InputFiles because changes
+        # (for dcache) are not preserved otherwise?
+        infile = jobdescs[0].DataStaging.InputFiles[i]
+
+        if exepath == infile.Name:
+            del files[exepath]
+
+        # TODO: add validation for different types of URLs
+        path = infile.Sources[0].FullPath()
+        if not path:
+            path = infile.Name
+        if not os.path.isfile(path):
+            continue
+        if dcacheBase:
+            dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
+            jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
+            files[dst] = path
+        else:
+            files[infile.Name] = path
+
+    if not files:
+        return True
+
     results = []
     async with trio.open_nursery() as tasks:
-        for i in range(len(jobdescs[0].DataStaging.InputFiles)):
-            # we use index for access to InputFiles because changes
-            # (for dcache) are not preserved otherwise?
-            infile = jobdescs[0].DataStaging.InputFiles[i]
-            # TODO: add validation for different types of URLs
-            path = infile.Sources[0].FullPath()
-            if not path:
-                path = infile.Name
-            if not os.path.isfile(path):
-                continue
-            if dcacheBase:
-                # upload to dcache
-                dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
-                jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
-                tasks.start_soon(webdav_put, dcclient, dst, path, results)
-            else:
-                # upload to internal data management
-                tasks.start_soon(http_put, client, infile.Name, path, requestUrl, jobid, token, results)
+        for dst, src in files.items():
+            if dcacheBase:  # upload to dcache
+                tasks.start_soon(webdav_put, dcclient, dst, src, results)
+            else:  # upload to internal data management
+                tasks.start_soon(http_put, client, dst, src, requestUrl, jobid, token, results)
 
     return all(results)
 
