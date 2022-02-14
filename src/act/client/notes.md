@@ -41,8 +41,7 @@ https://wiki.italiangrid.it/twiki/bin/view/VOMS/VOMSProtocol
 
 
 
-# Python 3.6 asyncio keyboard interrupts
-https://gist.github.com/harrisont/38ecc65aaad3481c9221417d7c64fef8
+
 
 
 
@@ -57,3 +56,31 @@ tryied for CancelledError?
 
 Does coroutine cancel impact async with session and async with response or
 does it kick in when awaiting response?
+
+## Python 3.6 asyncio keyboard interrupts
+https://gist.github.com/harrisont/38ecc65aaad3481c9221417d7c64fef8
+
+## cancel
+https://stackoverflow.com/questions/56052748/python-asyncio-task-cancellation
+
+## shield
+https://duckduckgo.com/?t=ffab&q=aiohttp+shield&atb=v121-1&ia=web
+
+
+
+
+
+
+
+# http optimization
+https://julien.danjou.info/python-and-fast-http-clients/
+
+# httpx async multipart not implemented
+https://github.com/encode/httpx/issues/1015
+https://github.com/encode/httpx/pull/1016
+
+
+# trio keyboard interrupts
+- main runs nursery with program task and sighup watcher (through
+  trio signal system); watcher raises keyboardinterrupt exception
+  which makes nursery cancel all tasks and respect shielding?

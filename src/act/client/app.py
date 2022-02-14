@@ -21,9 +21,12 @@ from werkzeug.exceptions import BadRequest
 # TODO: see if checkJobExists should be used anywhere else
 # TODO: implement proper logging
 # TODO: HTTP return codes
+# TODO: consistently change relevant jobmgr API to return jobs as dicts
+#       rather than list of IDs
 
 
 JWT_SECRET = "aCT JWT secret"
+STREAM_CHUNK_SIZE = 4096
 
 
 from flask import Flask, request, send_file, jsonify
@@ -111,7 +114,11 @@ def clean():
         jmgr = JobManager()
         deleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
         for jobid in deleted:
-            shutil.rmtree(jmgr.getJobDataDir(jobid))
+            try:
+                datadir = jmgr.getJobDataDir(jobid)
+                shutil.rmtree(jmgr.getJobDataDir(datadir))
+            except OSError as e:
+                print('error: PATCH /jobs: deleting {}: {}'.format(datadir, e))
     except Exception as e:
         print('error: DELETE /jobs: {}'.format(e))
         return {'msg': 'Server error'}, 500
@@ -168,12 +175,14 @@ def patch():
             # otherwise cleaned by cleaning operation but this is one exception
             # where killing destroys the job immediately and has to remove the
             # data dir as well.
-            if not state_filter: # state_filter refers to ARC jobs only
-                jobs = jmgr.getJobStats(proxyid, jobids, state_filter='', name_filter=name_filter, clicols=['id'], arccols=['id'])
-                for job in jobs:
-                    if job['a_id'] is None:
-                        shutil.rmtree(jmgr.getJobDataDir(job['c_id']))
             jobids = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
+            for job in jobids:
+                if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting'):
+                    try:
+                        datadir = jmgr.getJobDataDir(job['c_id'])
+                        shutil.rmtree(jmgr.getJobDataDir(datadir))
+                    except OSError as e:
+                        print('error: PATCH /jobs: deleting {}: {}'.format(datadir, e))
         elif arcstate == 'toresubmit':
             jobids = jmgr.resubmitJobs(proxyid, jobids, name_filter)
         else:
@@ -510,16 +519,30 @@ def uploadFile():
 
 
     try:
-        # this block fires exception if client doesn't complete upload
-        datafile = request.files.get('file', None)
-        if not datafile:
-            print('error: PUT /data: file not sent')
-            return {'msg': 'No file sent'}, 400
+        ## this block fires exception if client doesn't complete upload
+        #datafile = request.files.get('file', None)
+        #if not datafile:
+        #    print('error: PUT /data: file not sent')
+        #    return {'msg': 'No file sent'}, 400
+
+        #jobDataDir = jmgr.getJobDataDir(jobid)
+        ## TODO: werkzeug.safe_filename does not work because we need relative
+        ##       path that can go deep
+        #datafile.save(os.path.join(jobDataDir, datafile.filename))
+
+        filename = request.args.get('filename', None)
+        if filename is None:
+            print('error: PUT /data: file name not given')
+            return {'msg': 'File name not given'}, 400
 
         jobDataDir = jmgr.getJobDataDir(jobid)
-        # TODO: werkzeug.safe_filename does not work because we need relative
-        #       path that can go deep
-        datafile.save(os.path.join(jobDataDir, datafile.filename))
+        filepath = os.path.join(jobDataDir, filename)
+        with open(filepath, 'wb') as f:
+            while True:
+                chunk = request.stream.read(STREAM_CHUNK_SIZE)
+                if len(chunk) == 0:
+                    break
+                f.write(chunk)
     except Exception as e:
         print('error: PUT /data: {}'.format(e))
         return {'msg': 'Server error'}, 500

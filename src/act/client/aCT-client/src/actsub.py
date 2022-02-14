@@ -1,217 +1,213 @@
 import argparse
-import asyncio
 import os
 import ssl
 import sys
 
-import aiofiles
-import aiohttp
 import arc
+import trio
+import httpx
 
-from common import addCommonArgs, cleandCache, disableSIGINT, readTokenFile
+from common import addCommonArgs, clean_webdav, readTokenFile, run_with_sigint_handler
 from config import checkConf, expandPaths, loadConf
-
 
 TRANSFER_BLOCK_SIZE = 2**16
 
 
-async def webdav_mkdir(session, url):
+async def webdav_mkdir(client, url):
     headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
     try:
-        async with session.request('MKCOL', url, headers=headers) as resp:
-            if resp.status != 201:
-                print('error: cannot create dCache directory {}: {} - {}'.format(url, resp.status, await resp.text()))
-                return False
-            else:
-                return True
-    except aiohttp.ClientError as e:
-        print('HTTP client error: creating WebDAV directory {}: {}'.format(url, e))
+        resp = await client.request('MKCOL', url, headers=headers)
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        return
+
+    if resp.status_code != 201:
+        print('error: cannot create dCache directory {}: {} - {}'.format(url, resp.status_code, resp.text))
         return False
+    else:
+        return True
 
 
 # https://docs.aiohttp.org/en/stable/client_quickstart.html?highlight=upload#streaming-uploads
 #
 # Exceptions are handled in code that uses this
 async def file_sender(filename):
-    async with aiofiles.open(filename, "rb") as f:
+    async with await trio.open_file(filename, "rb") as f:
         chunk = await f.read(TRANSFER_BLOCK_SIZE)
         while chunk:
             yield chunk
             chunk = await f.read(TRANSFER_BLOCK_SIZE)
 
 
-async def webdav_put(session, url, path):
-    try:
-        timeout = aiohttp.ClientTimeout(total=900)
-        async with session.put(url, data=file_sender(path), timeout=timeout) as resp:
-            if resp.status != 201:
-                print('error: cannot upload file {} to dCache URL {}: {} - {}'.format(path, url, resp.status, await resp.text()))
-                return False
-            else:
-                return True
-    except (aiohttp.ClientError, Exception) as e:
-        print('error uploading file {} to {}: {}'.format(path, url, e))
-        return False
+async def webdav_put(client, url, path, results):
+    with trio.move_on_after(900):
+        try:
+            resp = await client.put(url, content=file_sender(path))
+        except httpx.RequestError as e:
+            print('request error: {}'.format(e))
+            results.append(False)
+            return
+
+    if resp.status_code != 201:
+        print('error: cannot upload file {} to dCache URL {}: {} - {}'.format(path, url, resp.status_code, resp.text))
+        results.append(False)
+    else:
+        results.append(True)
 
 
-async def http_put(session, name, path, url, jobid, token):
-    try:
-        data = aiohttp.FormData()
-        data.add_field('file', file_sender(path), filename=name)
-        headers = {'Authorization': 'Bearer ' + token}
-        params = {'id': jobid}
-        async with session.put(url, data=data, params=params, headers=headers) as resp:
-            json = await resp.json()
-            if resp.status != 200:
-                print('error: PUT /data: {} - {}'.format(resp.status, json['msg']))
-                return False
-    except aiohttp.ClientError as e:
-        print('error uploading input file {} stored in {}: {}'.format(name, path, e))
-        return False
-    return True
+async def http_put(client, name, path, url, jobid, token, results):
+    headers = {'Authorization': 'Bearer ' + token}
+    params = {'id': jobid, 'filename': name}
+    with trio.move_on_after(900):
+        try:
+            resp = await client.put(url, content=file_sender(path), params=params, headers=headers)
+            json = resp.json()
+        except httpx.RequestError as e:
+            print('request error: {}'.format(e))
+            results.append(False)
+            return
+
+    if resp.status_code != 200:
+        print('error: PUT /data: {} - {}'.format(resp.status_code, json['msg']))
+        results.append(False)
+    else:
+        results.append(True)
 
 
-async def kill_jobs(session, url, jobids, token):
+async def kill_jobs(client, url, jobids, token):
     ids = ','.join(map(str, jobids))
     headers = {'Authorization': 'Bearer ' + token}
     params = {'id': ids}
     json = {'arcstate': 'tocancel'}
+    print('Cleaning up failed or cancelled jobs ...')
     try:
-        async with session.patch(url, json=json, params=params, headers=headers) as resp:
-            json = await resp.json()
-            if resp.status != 200:
-                print('error: killing jobs with failed input files: {} - {}'.format(resp.status, json['msg']))
-    except aiohttp.ClientError as e:
-        print('HTTP client error: while killing jobs: {}'.format(e))
+        resp = await client.patch(url, json=json, params=params, headers=headers)
+        json = resp.json()
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        return
+
+    if resp.status_code != 200:
+        print('error: killing jobs with failed input files: {} - {}'.format(resp.status_code, json['msg']))
 
 
-async def upload_input_files(session, jobid, jobdescs, token, requestUrl, dcacheBase=None, dcsession=None):
-    tasks = []
-    for i in range(len(jobdescs[0].DataStaging.InputFiles)):
-        # we use index for access to InputFiles because changes
-        # (for dcache) are not preserved otherwise?
-        infile = jobdescs[0].DataStaging.InputFiles[i]
-        # TODO: add validation for different types of URLs
-        path = infile.Sources[0].FullPath()
-        if not path:
-            path = infile.Name
-        if not os.path.isfile(path):
-            continue
-        if dcacheBase:
-            # upload to dcache
-            dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
-            jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
-            tasks.append(asyncio.ensure_future(webdav_put(dcsession, dst, path)))
-        else:
-            # upload to internal data management
-            tasks.append(asyncio.ensure_future(http_put(session, infile.Name, path, requestUrl, jobid, token)))
-    try:
-        results = await asyncio.gather(*tasks)
-    except Exception as e:
-        print('error running concurrent input file upload: {}'.format(e))
-        return False
+async def upload_input_files(client, jobid, jobdescs, token, requestUrl, dcacheBase=None, dcclient=None):
+    results = []
+    async with trio.open_nursery() as tasks:
+        for i in range(len(jobdescs[0].DataStaging.InputFiles)):
+            # we use index for access to InputFiles because changes
+            # (for dcache) are not preserved otherwise?
+            infile = jobdescs[0].DataStaging.InputFiles[i]
+            # TODO: add validation for different types of URLs
+            path = infile.Sources[0].FullPath()
+            if not path:
+                path = infile.Name
+            if not os.path.isfile(path):
+                continue
+            if dcacheBase:
+                # upload to dcache
+                dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
+                jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
+                tasks.start_soon(webdav_put, dcclient, dst, path, results)
+            else:
+                # upload to internal data management
+                tasks.start_soon(http_put, client, infile.Name, path, requestUrl, jobid, token, results)
 
     return all(results)
 
 
-# returns a tuple of jobid integer (can be None) and bool that specifies
-# whether given jobid has to be killed because of failure
-#
 # if jobdescs are not set to None then the following error happens:
 # <built-in function delete_JobDescriptionList> returned a result with an error set
 # StopIteration: (1709, True)
-async def submit_job(session, descpath, baseUrl, site, token, dcacheBase=None, dcsession=None):
+async def submit_job(client, descpath, baseUrl, site, token, tokill, dcacheBase=None, dcclient=None):
     # read and parse job description
     try:
         with open(descpath, 'r') as f:
             xrslStr = f.read()
     except Exception as e:
         print('error reading job description file {}: {}'.format(descpath, e))
-        return None, False
+        return
     jobdescs = arc.JobDescriptionList()
     if not arc.JobDescription_Parse(xrslStr, jobdescs):
         print('error: parse error in job description {}'.format(descpath))
-        jobdescs = None
-        return None, False
+        return
 
     # submit job to receive jobid
     requestUrl = baseUrl + '/jobs'
     json = {'site': site, 'desc': xrslStr}
     headers = {'Authorization': 'Bearer ' + token}
     try:
-        async with session.post(requestUrl, json=json, headers=headers) as resp:
-            json = await resp.json()
-            status = resp.status
-
-    ## It seems that there is a possibility in both error cases that the submission
-    ## could already be finished by the time exception is caught. clean just
-    ## in case, at worst we get error that job doesn't exist.
-    #except asyncio.CancelledError:
-    #    return None, True
-    except aiohttp.ClientError as e:
-        print('HTTP client error: submitting job description {}: {}'.format(descpath, e))
-        return None, True
-
-    if status != 200:
-        print('error: POST /jobs: {} - {}'.format(status, json['msg']))
-        return None, False
+        with trio.CancelScope(shield=True):
+            resp = await client.post(requestUrl, headers=headers, json=json)
+            json = resp.json()
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        return
+    if resp.status_code != 200:
+        print('error: POST /jobs: {} - {}'.format(resp.status_code, json['msg']))
+        return
     jobid = json['id']
 
-    # handle coroutine cancel, signal killing if cancelled
     try:
         # create directory for job's local input files if using dcache
         if dcacheBase:
-            if not await webdav_mkdir(dcsession, dcacheBase + '/' + str(jobid)):
-                return jobid, True
+            url = dcacheBase + '/' + str(jobid)
+            if not await webdav_mkdir(dcclient, url):
+                print('error: could not create webdav directory {}'.format(url))
+                tokill.append(jobid)
+                return
 
         # upload input files
         requestUrl = baseUrl + '/data'
-        if not await upload_input_files(session, jobid, jobdescs, token, requestUrl, dcacheBase, dcsession):
-            jobdescs = None
-            return jobid, True
+        if not await upload_input_files(client, jobid, jobdescs, token, requestUrl, dcacheBase, dcclient):
+            print('error: uploading input files')
+            tokill.append(jobid)
+            return
 
-    except asyncio.CancelledError:
-        return jobid, True
+        # job description was modified and has to be unparsed
+        if dcacheBase:
+            xrslStr = jobdescs[0].UnParse('', '')[1]
+            if not xrslStr:
+                print('error: generating job description file')
+                tokill.append(jobid)
+                return
 
-    # job description was modified and has to be unparsed
-    if dcacheBase:
-        xrslStr = jobdescs[0].UnParse('', '')[1]
-        if not xrslStr:
-            return jobid, True
+    except trio.Cancelled:
+        tokill.append(jobid)
+        return
 
     # complete job submission
     requestUrl = baseUrl + '/jobs'
     headers = {'Authorization': 'Bearer ' + token}
     json = {'id': jobid, 'desc': xrslStr}
     try:
-        async with session.put(requestUrl, json=json, headers=headers) as resp:
-            json = await resp.json()
-            status = resp.status
-    except aiohttp.ClientError as e:
-        print('HTTP client error: submitting job {}: {}'.format(descpath, e))
-        return jobid, True
-    except asyncio.CancelledError:
-        return jobid, True
+        with trio.CancelScope(shield=True):
+            resp = await client.put(requestUrl, json=json, headers=headers)
+            json = resp.json()
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        tokill.append(jobid)
+        return
+    #except trio.Cancelled:
+    #    tokill.append(jobid)
+    #    return
 
-    if status != 200:
-        print('error: PUT /jobs: {} - {}'.format(status, json['msg']))
-        return jobid, True
-    else:
-        print('{} - succesfully submited job with id {}'.format(status, json['id']))
+    if resp.status_code != 200:
+        print('error: PUT /jobs: {} - {}'.format(resp.status_code, json['msg']))
+        tokill.append(jobid)
+        return
 
-    jobdescs = None
-
-    return jobid, False # success
+    print('{} - succesfully submited job with id {}'.format(resp.status_code, json['id']))
 
 
 def main():
-    try:
-        disableSIGINT()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(program())
-    except Exception as e:
-        print('error: {}'.format(e))
-        sys.exit(1)
+    trio.run(run_with_sigint_handler, program)
+
+
+async def cleanup(client, token, jobsURL, tokill, conf, args, dcclient):
+    await kill_jobs(client, jobsURL, tokill, token)
+    # function also closes client
+    await clean_webdav(conf, args, tokill, dcclient)
 
 
 async def program():
@@ -221,8 +217,7 @@ async def program():
             help='site that jobs should be submitted to')
     parser.add_argument('xRSL', nargs='+', help='path to job description file')
     parser.add_argument('--dcache', nargs='?', const='dcache', default='',
-            help='whether files should be uploaded to dcache with optional \
-                  location parameter')
+            help='URL of user\'s dCache directory')
     args = parser.parse_args()
 
     conf = loadConf(path=args.conf)
@@ -258,46 +253,24 @@ async def program():
         )
         context.set_ciphers(_DEFAULT_CIPHERS)
 
-        connector = aiohttp.TCPConnector(ssl=context)
-        dcsession = aiohttp.ClientSession(connector=connector)
+        dcclient = httpx.AsyncClient(verify=context)
 
     else:
         dcacheBase = None
-        dcsession = None
+        dcclient = None
 
-    baseUrl= conf['server'] + ':' + str(conf['port'])
+    baseUrl = conf['server'] + ':' + str(conf['port'])
 
-    async with aiohttp.ClientSession() as session:
-        # submit jobs
-        #tasks = []
-        #try:
-        #    for desc in args.xRSL:
-        #        tasks.append(asyncio.ensure_future(submit_job(session, desc, baseUrl, args.site, token, dcacheBase, dcsession)))
-        #    results = await asyncio.gather(*tasks)
-        #except asyncio.CancelledError:
-        #    for task in tasks:
-        #        task.cancel()
-        #finally:
-        #    results = await asyncio.gather(*tasks)
+    async with httpx.AsyncClient() as client:
+
         tokill = []
-        for desc in args.xRSL:
-            jobid, kill = await submit_job(session, desc, baseUrl, args.site, token, dcacheBase, dcsession)
-            if kill:
-                tokill.append(jobid)
+        try:
+            async with trio.open_nursery() as tasks:
+                for desc in args.xRSL:
+                    tasks.start_soon(submit_job, client, desc, baseUrl, args.site, token, tokill, dcacheBase, dcclient)
+        except trio.Cancelled:
+            pass
 
-        # !!!!!!!!!!!!!!!!!!!!
-        # https://stackoverflow.com/questions/56052748/python-asyncio-task-cancellation
-        # !!!!!!!!!!!!!!!!!!!!
-
-        # Failed or cancelled job cleanup and dCache have to be cleaned
-        # even if the coroutine is cancelled so that half submitted or
-        # improperly submitted jobs are not left behind.
-
-        # kill unsuccessfully submitted jobs
-        #tokill = [jobid for jobid, shouldKill in results if shouldKill]
         if tokill:
-            print('cleaning failed or cancelled jobs: {}'.format(tokill))
-            await kill_jobs(session, baseUrl + '/jobs', tokill, token)
-
-        # function also closes session
-        await cleandCache(conf, args, tokill, dcsession)
+            with trio.CancelScope(shield=True):
+                await cleanup(client, token, baseUrl + '/jobs', tokill, conf, args, dcclient)

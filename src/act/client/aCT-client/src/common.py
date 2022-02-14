@@ -1,9 +1,10 @@
-import asyncio
 import signal
 import ssl
 import sys
 
-import aiohttp
+import trio
+import httpx
+import threading
 
 
 def addCommonArgs(parser):
@@ -99,11 +100,11 @@ def readTokenFile(tokenFile):
 
 # optionally accepts session to dcache as kwarg and closes it afterwards
 #
-# can creation of connector cause errors outside of webdav_rmdir (if it is
-# defered until first request)?
 # TODO: response from dcache when removing directory is 204. Should we
 #       fix on this or on less than 300?
-async def cleandCache(conf, args, jobids, dcsession=None):
+async def clean_webdav(conf, args, jobids, dcclient=None):
+    if not jobids:
+        return
     if args.dcache and args.dcache != 'dcache':
         dcacheBase = args.dcache
     else:
@@ -111,59 +112,55 @@ async def cleandCache(conf, args, jobids, dcsession=None):
         if dcacheBase is None:
             return
 
-    print('Cleaning dCache directories ...', end='')
+    print('Cleaning dCache directories ...')
 
-    if not dcsession:
+    if not dcclient:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         context.load_cert_chain(conf['proxy'], keyfile=conf['proxy'])
+        # TODO: check if default ssl context is good
         _DEFAULT_CIPHERS = (
             'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
             'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
             '!eNULL:!MD5'
         )
         context.set_ciphers(_DEFAULT_CIPHERS)
-        connector = aiohttp.TCPConnector(ssl=context)
-        session = aiohttp.ClientSession(connector=connector)
+        client = httpx.AsyncClient(verify=context)
     else:
-        session = dcsession
+        client = dcclient
 
-    async with session:
-        tasks = []
+    async with trio.open_nursery() as tasks:
         for jobid in jobids:
-            #await webdav_rmdir(session, dcacheBase + '/' + str(jobid))
-            tasks.append(asyncio.ensure_future(webdav_rmdir(session, dcacheBase + '/' + str(jobid))))
-        await asyncio.gather(*tasks)
-
-    print()
+            url = dcacheBase + '/' + str(jobid)
+            tasks.start_soon(webdav_rmdir, client, url)
 
 
-async def webdav_rmdir(session, url):
+async def webdav_rmdir(client, url):
     headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
     try:
-        async with session.delete(url, headers=headers) as resp:
-            text = await resp.text()
-            # TODO: should we rely on 204 and 404 being the only right answers?
-            if resp.status == 404: # ignore, because we are just trying to delete
-                return
-            if resp.status >= 300:
-                print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status, text))
-    except aiohttp.ClientError as e:
-        print('HTTP client error: deleting directory {}: {}'.format(url, e))
+        resp = await client.delete(url, headers=headers)
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        return
+    # TODO: should we rely on 204 and 404 being the only right answers?
+    if resp.status_code == 404:  # ignore, because we are just trying to delete
+        return
+    if resp.status_code >= 300:
+        print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status_code, resp.text))
 
 
-def run_with_exceptions(program):
-    try:
-        loop = asyncio.get_event_loop()
-        main_task = asyncio.ensure_future(program)
-        loop.run_until_complete(main_task)
-    except KeyboardInterrupt:
-        main_task.cancel()
-        loop.run_until_complete(main_task)
-        sys.exit(0)
-    except Exception as e:
-        print('error: {}'.format(e))
-        sys.exit(1)
+async def run_with_sigint_handler(program):
+    cancel_scope = trio.CancelScope()
+
+    def sigint_handler(signum, sigframe):
+        disableSIGINT()
+        print('Got SIGINT, cleaning up ...')
+        cancel_scope.cancel()
+
+    signal.signal(signal.SIGINT, sigint_handler)
+
+    with cancel_scope:
+        await program()
 
 
 def disableSIGINT():
-    signal.signal(signal.SIGINT, lambda signum, frame: None)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)

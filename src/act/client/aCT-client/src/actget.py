@@ -1,19 +1,21 @@
 import argparse
-import asyncio
 import os
 import sys
 import zipfile
 
-import aiofiles
-import aiohttp
+import trio
+import httpx
 
 from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
-                    cleandCache, disableSIGINT, readTokenFile,
-                    showHelpOnCommandOnly)
+                    clean_webdav, disableSIGINT, readTokenFile,
+                    showHelpOnCommandOnly, run_with_sigint_handler)
 from config import checkConf, expandPaths, loadConf
 
 
-async def getFilteredJobIDs(session, jobsUrl, token, **kwargs):
+# TODO: signal exit with exception
+
+
+async def getFilteredJobIDs(client, jobsUrl, token, **kwargs):
     jobids = []
     headers = {'Authorization': 'Bearer ' + token}
     params = {'client': 'id'}
@@ -24,11 +26,16 @@ async def getFilteredJobIDs(session, jobsUrl, token, **kwargs):
     if 'state' in kwargs:
         params['state'] = kwargs['state']
 
-    async with session.get(jobsUrl, params=params, headers=headers) as resp:
-        json = await resp.json()
-        if resp.status != 200:
-            print('error: filter response: {} - {}'.format(resp.status, json['msg']))
-            sys.exit(1)
+    try:
+        resp = await client.get(jobsUrl, params=params, headers=headers)
+        json = resp.json()
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        sys.exit(1)
+
+    if resp.status_code != 200:
+        print('error: filter response: {} - {}'.format(resp.status_code, json['msg']))
+        sys.exit(1)
 
     jobids.extend([job['c_id'] for job in json])
     return set(jobids)
@@ -36,93 +43,110 @@ async def getFilteredJobIDs(session, jobsUrl, token, **kwargs):
 
 # Only 'done' and 'donefailed' jobs can be fetched so if no state is given,
 # we have to get union of jobs in either of those states.
-async def filterJobsToFetch(session, token, jobsUrl, args):
-    try:
-        kwargs = {}
-        if args.id:
-            kwargs['id'] = args.id
-        if args.name:
-            kwargs['name'] = args.name
+async def filterJobsToFetch(client, token, jobsUrl, args):
+    kwargs = {}
+    if args.id:
+        kwargs['id'] = args.id
+    if args.name:
+        kwargs['name'] = args.name
 
-        if args.state:
-            if args.state not in ('done', 'donefailed'):
-                print('error: wrong state parameter, should be \'done\' or \'donefailed\'')
-                sys.exit(1)
-            kwargs['state'] = args.state
-            jobids = await getFilteredJobIDs(session, jobsUrl, token, **kwargs)
-        else:
-            kwargs['state'] = 'done'
-            jobids = await getFilteredJobIDs(session, jobsUrl, token, **kwargs)
-            kwargs['state'] = 'donefailed'
-            jobids = jobids.union(await getFilteredJobIDs(session, jobsUrl, token, **kwargs))
-    except aiohttp.ClientError as e:
-        print('HTTP client error: filtering jobs to fetch: {}'.format(e))
-        sys.exit(1)
+    if args.state:
+        if args.state not in ('done', 'donefailed'):
+            print('error: wrong state parameter, should be "done" or "donefailed"')
+            sys.exit(1)
+        kwargs['state'] = args.state
+        jobids = await getFilteredJobIDs(client, jobsUrl, token, **kwargs)
+    else:
+        kwargs['state'] = 'done'
+        jobids = await getFilteredJobIDs(client, jobsUrl, token, **kwargs)
+        kwargs['state'] = 'donefailed'
+        jobids = jobids.union(await getFilteredJobIDs(client, jobsUrl, token, **kwargs))
     return jobids
 
 
-async def getJob(jobid, session, token, resultsUrl, jobsUrl):
+# possible error conditions:
+# - GET /results - must not clean the job (both aCT and webdav)
+# - zip extraction failure - must not clean job (both aCT and webdav)
+# - zip removal failure - can clean job
+#
+# Appends jobid to a given list of jobs to clean
+async def getJob(jobid, client, token, resultsUrl, jobsUrl, toclean):
     # download result zip; if it fails don't clean job as user should decide
     headers = {'Authorization': 'Bearer ' + token}
     params = {'id': jobid}
     noResults = False # in case where there is no result folder
+    filename = ''
+    cancelGet = False
     try:
-        async with session.get(resultsUrl, params=params, headers=headers) as resp:
-            if resp.status == 204:
-                await resp.json()
+        async with client.stream('GET', resultsUrl, params=params, headers=headers) as resp:
+            if resp.status_code == 204:
                 noResults = True
-            elif resp.status == 200:
+            elif resp.status_code == 200:
                 # 'Content-Disposition': 'attachment; filename=ZrcMDm3nK4...m2cmmzn.zip'
                 filename = resp.headers['Content-Disposition'].split()[1].split('=')[1]
-                async with aiofiles.open(filename, mode='wb') as f:
-                    async for chunk, _ in resp.content.iter_chunks():
+                async with await trio.open_file(filename, mode='wb') as f:
+                    async for chunk in resp.aiter_bytes():
                         await f.write(chunk)
             else:
-                json = await resp.json()
-                print('response error: {} - {}'.format(resp.status, json['msg']))
+                json = resp.json()
+                print('response error: {} - {}'.format(resp.status_code, json['msg']))
                 return
-    except aiohttp.ClientError as e:
-        print('HTTP client error: fetching results for jobid {}: {}'.format(jobid, e))
-        return
-    except Exception as e: # for aiofiles exceptions probably
-        print('error: {}'.format(e))
+    except trio.Cancelled:
+        cancelGet = True
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
         return
 
     # extract and delete zip file
     if noResults:
         print('{} - no results to fetch for jobid {}'.format(204, jobid))
     else:
+        # unzip results
+        if not cancelGet and os.path.isfile(filename):
+            try:
+                dirname = os.path.splitext(filename)[0]
+                with zipfile.ZipFile(filename, 'r') as zip_ref:
+                    zip_ref.extractall(dirname)
+            except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
+                print('error extracting result zip: {}'.format(e))
+                cancelGet = True
+
+        # delete results archive
         try:
-            dirname = os.path.splitext(filename)[0]
-            with zipfile.ZipFile(filename, 'r') as zip_ref:
-                zip_ref.extractall(dirname)
-        except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
-            print('error extracting result zip: {}'.format(e))
-        try:
-            os.remove(filename)
+            if os.path.isfile(filename):
+                os.remove(filename)
         except Exception as e:
             print('error deleting results zip: {}'.format(e))
-            return
-        print('{} - results stored in {}'.format(resp.status, dirname))
 
-    # delete job from act
+        if cancelGet:
+            return
+
+        print('{} - results stored in {}'.format(resp.status_code, dirname))
+
+    toclean.append(jobid)
+
+
+async def clean_act(client, url, jobids, token):
+    headers = {'Authorization': 'Bearer ' + token}
+    params = {'id': ','.join([str(jobid) for jobid in jobids])}
     try:
-        async with session.delete(jobsUrl, params=params, headers=headers) as resp:
-            json = await resp.json()
-            if resp.status != 200:
-                print('error cleaning job: {}'.format(json['msg']))
-    except aiohttp.ClientError as e:
-        print('error: cleaning jobid {}: {}'.format(jobid, e))
+        resp = await client.delete(url, params=params, headers=headers)
+        json = resp.json()
+    except trio.Cancelled:
+        return []
+    except httpx.RequestError as e:
+        print('request error: {}'.format(e))
+        return []
+
+    if resp.status_code != 200:
+        print('error cleaning jobs: {} - {}'.format(resp.status_code, json['msg']))
+        return []
+
+    return json
 
 
 def main():
-    try:
-        disableSIGINT()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(program())
-    except Exception as e:
-        print('error: {}'.format(e))
-        sys.exit(1)
+    trio.run(run_with_sigint_handler, program)
 
 
 async def program():
@@ -132,8 +156,7 @@ async def program():
     parser.add_argument('--state', default=None,
             help='the state that jobs should be in')
     parser.add_argument('--dcache', nargs='?', const='dcache', default='',
-            help='whether files should be uploaded to dcache with optional \
-                  location parameter')
+            help='URL of user\'s dCache directory')
     args = parser.parse_args()
     showHelpOnCommandOnly(parser)
 
@@ -155,15 +178,18 @@ async def program():
     resultsUrl = urlBase + '/results'
     jobsUrl = urlBase + '/jobs'
 
-    async with aiohttp.ClientSession() as session:
-        # compute all IDs to fetch
-        jobids = await filterJobsToFetch(session, token, jobsUrl, args)
+    async with httpx.AsyncClient() as client:
+        jobids = await filterJobsToFetch(client, token, jobsUrl, args)
 
-        # fetch job result for every job
-        tasks = []
-        for jobid in jobids:
-            #await getJob(jobid, session, token, resultsUrl, jobsUrl)
-            tasks.append(asyncio.ensure_future(getJob(jobid, session, token, resultsUrl, jobsUrl)))
-        await asyncio.gather(*tasks)
+        toclean = []
+        try:
+            async with trio.open_nursery() as tasks:
+                for jobid in jobids:
+                    tasks.start_soon(getJob, jobid, client, token, resultsUrl, jobsUrl, toclean)
+        except trio.Cancelled:
+            pass
 
-    await cleandCache(conf, args, jobids)
+        if toclean:
+            with trio.CancelScope(shield=True):
+                toclean = await clean_act(client, jobsUrl, toclean, token)
+                await clean_webdav(conf, args, toclean)

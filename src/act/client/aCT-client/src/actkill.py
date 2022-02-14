@@ -1,22 +1,35 @@
 import argparse
-import asyncio
-import sys
 
-import aiohttp
+import trio
+import httpx
 
 from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
-                    disableSIGINT, readTokenFile, showHelpOnCommandOnly)
+                    clean_webdav, readTokenFile, showHelpOnCommandOnly, run_with_sigint_handler)
 from config import checkConf, expandPaths, loadConf
 
 
 def main():
-    try:
-        disableSIGINT()
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(program())
-    except Exception as e:
-        print('error: {}'.format(e))
-        sys.exit(1)
+    trio.run(run_with_sigint_handler, program)
+
+
+async def kill_jobs(url, params, headers, conf, args):
+    async with httpx.AsyncClient() as client:
+        json = {'arcstate': 'tocancel'}
+        try:
+            resp = await client.patch(url, json=json, params=params, headers=headers)
+            json = resp.json()
+        except httpx.RequestError as e:
+            print('request error: {}'.format(e))
+            return
+
+    if resp.status_code != 200:
+        print('response error: {} - {}'.format(resp.status_code, json['msg']))
+        return
+
+    print('Will kill {} jobs'.format(len(json)))
+
+    tokill = [job['c_id'] for job in json if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting')]
+    await clean_webdav(conf, args, tokill)
 
 
 async def program():
@@ -25,6 +38,8 @@ async def program():
     addCommonJobFilterArgs(parser)
     parser.add_argument('--state', default=None,
             help='the state that jobs should be in')
+    parser.add_argument('--dcache', nargs='?', const='dcache', default='',
+            help='URL of user\'s dCache directory')
     args = parser.parse_args()
     showHelpOnCommandOnly(parser)
 
@@ -54,13 +69,5 @@ async def program():
         if args.name:
             params['name'] = args.name
 
-    async with aiohttp.ClientSession() as session:
-        async with session.patch(requestUrl, json={'arcstate': 'tocancel'}, params=params, headers=headers) as resp:
-            json = await resp.json()
-            status = resp.status
-
-    if status != 200:
-        print('response error: {} - {}'.format(status, json['msg']))
-        sys.exit(1)
-    else:
-        print('Will kill {} jobs'.format(len(json)))
+    with trio.CancelScope(shield=True):
+        await kill_jobs(requestUrl, params, headers, conf, args)

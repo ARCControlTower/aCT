@@ -450,7 +450,7 @@ class JobManager(object):
         if not res:
             raise Exception("Could not release lock after killing jobs")
 
-        return [job['c_id'] for job in jobs] # TODO: performance issue?
+        return jobs
 
     def resubmitJobs(self, proxyid, jobids=[], name_filter=''):
         """

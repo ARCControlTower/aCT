@@ -36,7 +36,7 @@ setup(
     install_requires = [
         'cryptography',
         'pyyaml',
-        'aiohttp',
-        'aiofiles',
+        'trio',
+        'httpx',
     ]
 )
