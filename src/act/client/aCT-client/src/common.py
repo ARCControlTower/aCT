@@ -112,7 +112,7 @@ async def clean_webdav(conf, args, jobids, dcclient=None):
         if dcacheBase is None:
             return
 
-    print('Cleaning dCache directories ...')
+    print('Cleaning WebDAV directories ...')
 
     if not dcclient:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
@@ -145,7 +145,7 @@ async def webdav_rmdir(client, url):
     if resp.status_code == 404:  # ignore, because we are just trying to delete
         return
     if resp.status_code >= 300:
-        print('error: cannot remove dCache directory {}: {} - {}'.format(url, resp.status_code, resp.text))
+        print('error: cannot remove WebDAV directory {}: {} - {}'.format(url, resp.status_code, resp.text))
 
 
 async def run_with_sigint_handler(program):
