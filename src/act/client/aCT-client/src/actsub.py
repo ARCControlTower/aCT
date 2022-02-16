@@ -92,22 +92,22 @@ async def kill_jobs(client, url, jobids, token):
 
 
 # TODO: environment variables in paths!!!
-async def upload_input_files(client, jobid, jobdescs, token, requestUrl, dcacheBase=None, dcclient=None):
+async def upload_input_files(client, jobid, jobdesc, token, requestUrl, dcacheBase=None, dcclient=None):
     files = {}
 
-    exepath = jobdescs[0].Application.Executable.Path
+    exepath = jobdesc.Application.Executable.Path
     if not os.path.isabs(exepath):
         files[os.path.basename(exepath)] = exepath
 
     # if a file with the same name as executable is provided in inputFiles
     # in xRSL the value from inputFiles will be used (or file entry discarded
     # if the executable file is remote)
-    for i in range(len(jobdescs[0].DataStaging.InputFiles)):
+    for i in range(len(jobdesc.DataStaging.InputFiles)):
         # we use index for access to InputFiles because changes
         # (for dcache) are not preserved otherwise?
-        infile = jobdescs[0].DataStaging.InputFiles[i]
+        infile = jobdesc.DataStaging.InputFiles[i]
 
-        if exepath == infile.Name:
+        if exepath == infile.Name and exepath in files:
             del files[exepath]
 
         # TODO: add validation for different types of URLs
@@ -118,7 +118,7 @@ async def upload_input_files(client, jobid, jobdescs, token, requestUrl, dcacheB
             continue
         if dcacheBase:
             dst = '{}/{}/{}'.format(dcacheBase, jobid, infile.Name)
-            jobdescs[0].DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
+            jobdesc.DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
             files[dst] = path
         else:
             files[infile.Name] = path
@@ -127,98 +127,139 @@ async def upload_input_files(client, jobid, jobdescs, token, requestUrl, dcacheB
         return True
 
     results = []
-    async with trio.open_nursery() as tasks:
-        for dst, src in files.items():
-            if dcacheBase:  # upload to dcache
-                tasks.start_soon(webdav_put, dcclient, dst, src, results)
-            else:  # upload to internal data management
-                tasks.start_soon(http_put, client, dst, src, requestUrl, jobid, token, results)
+    try:
+        async with trio.open_nursery() as tasks:
+            for dst, src in files.items():
+                if dcacheBase:  # upload to dcache
+                    tasks.start_soon(webdav_put, dcclient, dst, src, results)
+                else:  # upload to internal data management
+                    tasks.start_soon(http_put, client, dst, src, requestUrl, jobid, token, results)
+    except trio.Cancelled:
+        return False
 
     return all(results)
 
 
-# if jobdescs are not set to None then the following error happens:
-# <built-in function delete_JobDescriptionList> returned a result with an error set
-# StopIteration: (1709, True)
-async def submit_job(client, descpath, baseUrl, site, token, tokill, dcacheBase=None, dcclient=None):
-    # read and parse job description
-    try:
-        with open(descpath, 'r') as f:
-            xrslStr = f.read()
-    except Exception as e:
-        print('error reading job description file {}: {}'.format(descpath, e))
-        return
-    jobdescs = arc.JobDescriptionList()
-    if not arc.JobDescription_Parse(xrslStr, jobdescs):
-        print('error: parse error in job description {}'.format(descpath))
-        return
+# TODO: could add checking if jobs list is empty for earlier exit
+async def submit_jobs(client, descs, baseUrl, site, token, dcacheBase=None, dcclient=None):
+    # read job descriptions into a list of job dictionaries
+    jobs = []
+    for desc in descs:
+        job = {'site': site}
+        try:
+            with open(desc, 'r') as f:
+                job['desc'] = f.read()
+            job['descpath'] = desc
+        except Exception as e:
+            print('error: Job description file {}: {}'.format(desc, e))
+            continue
+        jobs.append(job)
 
-    # submit job to receive jobid
+    # submit jobs to aCT
     requestUrl = baseUrl + '/jobs'
-    json = {'site': site, 'desc': xrslStr}
+    json = [{k: v for k, v in job.items() if k in ('desc', 'site')} for job in jobs]
     headers = {'Authorization': 'Bearer ' + token}
     try:
         resp = await client.post(requestUrl, headers=headers, json=json)
         json = resp.json()
     except httpx.RequestError as e:
         print('request error: {}'.format(e))
-        return
+        return []
     except trio.Cancelled:
-        return
+        return []
     if resp.status_code != 200:
         print('error: POST /jobs: {} - {}'.format(resp.status_code, json['msg']))
-        return
-    jobid = json['id']
+        return []
 
+    # print errors for failed jobs and remove them
+    for job, result in zip(jobs, json):
+        if 'msg' in result:
+            if 'name' in result:
+                print('error: job {}: {}'.format(result['name'], result['msg']))
+            else:
+                print('error: job description {}: {}'.format(job['descpath'], result['msg']))
+        else:
+            job['name'] = result['name']
+            job['id'] = result['id']
+    jobs = [job for job, result in zip(jobs, json) if 'msg' not in result]
+
+    # parse job descriptions
+    tokill = []
+    jobdescs = arc.JobDescriptionList()
+    for job in jobs:
+        if not arc.JobDescription_Parse(job['desc'], jobdescs):
+            print('error: Parsing fail for job description {}'.format(job['descpath']))
+            jobs.remove(job)
+            tokill.append(job['id'])
+            continue
+
+    # upload input files
+    #
+    # A job should be killed unless data upload succeeds. Data upload function
+    # should remove jobid from kill list on successful file upload.
+    tokill.extend([job['id'] for job in jobs])
     try:
-        # create directory for job's local input files if using dcache
-        if dcacheBase:
-            url = dcacheBase + '/' + str(jobid)
-            if not await webdav_mkdir(dcclient, url):
-                print('error: could not create webdav directory {}'.format(url))
-                tokill.append(jobid)
-                return
-
-        # upload input files
-        requestUrl = baseUrl + '/data'
-        if not await upload_input_files(client, jobid, jobdescs, token, requestUrl, dcacheBase, dcclient):
-            print('error: uploading input files')
-            tokill.append(jobid)
-            return
-
-        # job description was modified and has to be unparsed
-        if dcacheBase:
-            xrslStr = jobdescs[0].UnParse('', '')[1]
-            if not xrslStr:
-                print('error: generating job description file')
-                tokill.append(jobid)
-                return
-
+        async with trio.open_nursery() as tasks:
+            for i in range(len(jobs)):
+                tasks.start_soon(upload_job_data, client, jobs[i], jobdescs[i], token, tokill, baseUrl + '/data', dcacheBase, dcclient)
     except trio.Cancelled:
-        tokill.append(jobid)
-        return
+        return tokill
+    jobs = [job for job in jobs if job['id'] not in tokill]
 
     # complete job submission
     requestUrl = baseUrl + '/jobs'
     headers = {'Authorization': 'Bearer ' + token}
-    json = {'id': jobid, 'desc': xrslStr}
+    json = [{k: v for k, v in job.items() if k in ('desc', 'id')} for job in jobs]
     try:
         resp = await client.put(requestUrl, json=json, headers=headers)
         json = resp.json()
     except httpx.RequestError as e:
         print('request error: {}'.format(e))
-        tokill.append(jobid)
-        return
+        return tokill.extend([job['id'] for job in jobs])
     except trio.Cancelled:
-        tokill.append(jobid)
-        return
+        return tokill.extend([job['id'] for job in jobs])
 
     if resp.status_code != 200:
         print('error: PUT /jobs: {} - {}'.format(resp.status_code, json['msg']))
-        tokill.append(jobid)
+        return tokill.extend([job['id'] for job in jobs])
+
+    # print submission results
+    for job, result in zip(jobs, json):
+        if 'msg' in result:
+            print('error: job {}: {}'.format(job['name'], result['msg']))
+            tokill.append(job['id'])
+        else:
+            print('Successfuly inserted job {} with ID {}'.format(job['name'], job['id']))
+
+    return tokill
+
+
+# function removes successful jobs from tokill list
+async def upload_job_data(client, job, jobdesc, token, tokill, dataUrl, dcacheBase=None, dcclient=None):
+    try:
+        # create directory for job's local input files if using dcache
+        if dcacheBase:
+            url = dcacheBase + '/' + str(job['id'])
+            if not await webdav_mkdir(dcclient, url):
+                return
+
+        # upload input files
+        if not await upload_input_files(client, job['id'], jobdesc, token, dataUrl, dcacheBase, dcclient):
+            return
+
+        # job description was modified and has to be unparsed
+        if dcacheBase:
+            xrslStr = jobdesc.UnParse('', '')[1]
+            if not xrslStr:
+                print('error: generating job description file')
+                return
+            else:
+                job['desc'] = xrslStr
+
+    except trio.Cancelled:
         return
 
-    print('{} - succesfully submited job with id {}'.format(resp.status_code, json['id']))
+    tokill.remove(job['id'])
 
 
 def main():
@@ -273,9 +314,7 @@ async def program():
             '!eNULL:!MD5'
         )
         context.set_ciphers(_DEFAULT_CIPHERS)
-
         dcclient = httpx.AsyncClient(verify=context)
-
     else:
         dcacheBase = None
         dcclient = None
@@ -286,9 +325,7 @@ async def program():
 
         tokill = []
         try:
-            async with trio.open_nursery() as tasks:
-                for desc in args.xRSL:
-                    tasks.start_soon(submit_job, client, desc, baseUrl, args.site, token, tokill, dcacheBase, dcclient)
+            tokill = await submit_jobs(client, args.xRSL, baseUrl, args.site, token, dcacheBase, dcclient)
         except trio.Cancelled:
             pass
         finally:

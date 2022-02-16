@@ -12,7 +12,7 @@ from act.arc.aCTDBArc import aCTDBArc
 from act.common.aCTConfig import aCTConfigARC
 from act.client.clientdb import ClientDB, createMysqlEscapeList
 from act.client.errors import NoSuchProxyError, NoJobDirectoryError
-from act.client.errors import TmpConfigurationError, InvalidJobDescriptionError
+from act.client.errors import ConfigError, InvalidJobDescriptionError
 from act.client.errors import NoSuchSiteError, InvalidJobRangeError
 from act.client.errors import InvalidJobIDError
 from act.client.common import readSites
@@ -560,13 +560,13 @@ class JobManager(object):
             arcid: A string with job's ARC ID.
 
         Raises:
-            TmpConfigurationError: tmp directory is not configured in aCT.
+            ConfigError: tmp directory is not configured in aCT.
             NoJobDirectoryError: Job directory does not exist in aCT.
         """
         tmpdir = self.arcconf.get(['tmp', 'dir'])
         if not tmpdir:
             self.logger.error('tmp directory is not in config')
-            raise TmpConfigurationError()
+            raise ConfigError("config/tmp/dir")
         jobdir = arcid.rsplit('/', 1)[-1]
         actJobDir = os.path.join(tmpdir, jobdir)
         if os.path.isdir(actJobDir):
@@ -575,7 +575,10 @@ class JobManager(object):
             raise NoJobDirectoryError(actJobDir)
 
     def getJobDataDir(self, jobid):
-        return os.path.join(self.arcconf.get(["actlocation", "datman"]), str(jobid))
+        datapath = self.arcconf.get(["actlocation", "datman"])
+        if not datapath:
+            raise ConfigError("config/actlocation/datman")
+        return os.path.join(datapath, str(jobid))
 
     def _createMysqlIntList(self, integers):
         """

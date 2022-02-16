@@ -74,7 +74,7 @@ async def getJob(jobid, client, token, resultsUrl, jobsUrl, toclean):
     # download result zip; if it fails don't clean job as user should decide
     headers = {'Authorization': 'Bearer ' + token}
     params = {'id': jobid}
-    noResults = False # in case where there is no result folder
+    noResults = False  # in case where there is no result folder
     filename = ''
     cancelGet = False
     try:
@@ -188,8 +188,8 @@ async def program():
                     tasks.start_soon(getJob, jobid, client, token, resultsUrl, jobsUrl, toclean)
         except trio.Cancelled:
             pass
-
-        if toclean:
+        finally:
             with trio.CancelScope(shield=True):
-                toclean = await clean_act(client, jobsUrl, toclean, token)
-                await clean_webdav(conf, args, toclean)
+                if toclean:
+                    toclean = await clean_act(client, jobsUrl, toclean, token)
+                    await clean_webdav(conf, args, toclean)
