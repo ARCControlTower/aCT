@@ -158,11 +158,12 @@ async def submit_job(client, descpath, baseUrl, site, token, tokill, dcacheBase=
     json = {'site': site, 'desc': xrslStr}
     headers = {'Authorization': 'Bearer ' + token}
     try:
-        with trio.CancelScope(shield=True):
-            resp = await client.post(requestUrl, headers=headers, json=json)
-            json = resp.json()
+        resp = await client.post(requestUrl, headers=headers, json=json)
+        json = resp.json()
     except httpx.RequestError as e:
         print('request error: {}'.format(e))
+        return
+    except trio.Cancelled:
         return
     if resp.status_code != 200:
         print('error: POST /jobs: {} - {}'.format(resp.status_code, json['msg']))
@@ -202,16 +203,15 @@ async def submit_job(client, descpath, baseUrl, site, token, tokill, dcacheBase=
     headers = {'Authorization': 'Bearer ' + token}
     json = {'id': jobid, 'desc': xrslStr}
     try:
-        with trio.CancelScope(shield=True):
-            resp = await client.put(requestUrl, json=json, headers=headers)
-            json = resp.json()
+        resp = await client.put(requestUrl, json=json, headers=headers)
+        json = resp.json()
     except httpx.RequestError as e:
         print('request error: {}'.format(e))
         tokill.append(jobid)
         return
-    #except trio.Cancelled:
-    #    tokill.append(jobid)
-    #    return
+    except trio.Cancelled:
+        tokill.append(jobid)
+        return
 
     if resp.status_code != 200:
         print('error: PUT /jobs: {} - {}'.format(resp.status_code, json['msg']))
@@ -282,7 +282,7 @@ async def program():
 
     baseUrl = conf['server'] + ':' + str(conf['port'])
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=1, max_connections=1)) as client:
 
         tokill = []
         try:
@@ -291,7 +291,7 @@ async def program():
                     tasks.start_soon(submit_job, client, desc, baseUrl, args.site, token, tokill, dcacheBase, dcclient)
         except trio.Cancelled:
             pass
-
-        if tokill:
+        finally:
             with trio.CancelScope(shield=True):
-                await cleanup(client, token, baseUrl + '/jobs', tokill, conf, args, dcclient)
+                if tokill:
+                    await cleanup(client, token, baseUrl + '/jobs', tokill, conf, args, dcclient)
