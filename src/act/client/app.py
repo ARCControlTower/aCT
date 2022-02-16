@@ -8,7 +8,7 @@ import act.client.x509proxy as x509proxy
 from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
 from act.client.errors import InvalidJobDescriptionError, InvalidJobIDError
-from act.client.errors import NoSuchSiteError, RESTError, InvalidJobRangeError
+from act.client.errors import NoSuchSiteError, RESTError, InvalidJobRangeError, ConfigError
 from act.common.aCTConfig import aCTConfigARC
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -193,123 +193,191 @@ def patch():
     return jsonify(jobids)
 
 
-# TODO: figure out if this can be done for multiple jobs
-# expects a JSON object of the following form:
-# {
-#   "desc": "<xRSL or ADL>",
-#   "site": "<site>"
-# }
+# expects a JSON list of job objects in the following form:
+# [
+#   {
+#     "desc": "<xRSL or ADL>",
+#     "site": "<site>"
+#   },
+#   {
+#     "desc": "<xRSL or ADL>",
+#     "site": "<site>"
+#   },
+#   ...
+# ]
 @app.route('/jobs', methods=['POST'])
-def submit():
+def create_jobs():
+    errpref = 'error: POST /jobs: '
     try:
         token = getToken()
-
-        # get and check job parameters
-        job = request.get_json()
-        if 'desc' not in job:
-            return {'msg': 'No job description file given'}, 400
-        if 'site' not in job:
-            return {'msg': 'No site given'}, 400
+        jobs = request.get_json()
         jmgr = JobManager()
-        checkJobDesc(job['desc'])
-        checkSite(job['site'])
-
-        # insert job and create its data directory
-        jobid = jmgr.clidb.insertJob(job['desc'], token['proxyid'], job['site'])
-        jobDataDir = jmgr.getJobDataDir(jobid)
-        os.makedirs(jobDataDir)
-    except BadRequest as e:
-        print('error: POST /jobs: {}'.format(e))
-        return {'msg': str(e)}, 400
     except RESTError as e:
-        print('error: POST /jobs: {}'.format(e))
+        print('{}{}'.format(errpref, e))
         return {'msg': str(e)}, e.httpCode
-    except InvalidJobDescriptionError:
-        print('error: POST /jobs: invalid job description')
-        return {'msg': 'Invalid job description'}, 400
-    except NoSuchSiteError:
-        print('error: POST /jobs: invalid site')
-        return {'msg': 'Invalid site'}, 400
+    except BadRequest as e:  # raised for invalid JSON
+        print('{}{}'.format(errpref, e))
+        return {'msg': str(e)}, 400
     except Exception as e:
-        print('error: POST /jobs: {}'.format(e))
+        print('{}{}'.format(errpref, e))
         return {'msg': 'Server error'}, 500
 
-    return {'id': jobid}, 200
+    results = []
+    for job in jobs:
+        result = {}
 
-
-# TODO: figure out if this can be done for multiple jobs
-# expects a JSON object of the following form:
-# {
-#   "id": <jobid>,
-#   "desc": "<xRSL or ADL>"
-# }
-@app.route('/jobs', methods=['PUT'])
-def submitWithData():
-    try:
-        # get token from request
-        token = getToken()
-        proxyid = token['proxyid']
-
-        # get job parameters
-        job = request.get_json()
-        if 'id' not in job:
-            return {'msg': 'No jobid parameter'}, 400
+        # check job description
         if 'desc' not in job:
-            return {'msg': 'No job description parameter'}, 400
-
-        # check description
+            print('{}No job description given'.format(errpref))
+            result['msg'] = 'No job description given'
+            results.append(result)
+            continue
         jobdescs = arc.JobDescriptionList()
         if not arc.JobDescription_Parse(job['desc'], jobdescs):
-            return {'msg': 'Invald job description'}, 400
+            print('{}Invalid job description'.format(errpref))
+            result['msg'] = 'Invalid job description'
+            results.append(result)
+            continue
+        result['name'] = jobdescs[0].Identification.JobName
 
-        # check if id given job exists
+        try:
+            # check site parameter
+            if 'site' not in job:
+                print('{}No site given'.format(errpref))
+                result['msg'] = 'No site given'
+                results.append(result)
+                continue
+            checkSite(job['site'])
+
+            # insert job and create its data directory
+            jobid = jmgr.clidb.insertJob(job['desc'], token['proxyid'], job['site'])
+            jobDataDir = jmgr.getJobDataDir(jobid)
+            os.makedirs(jobDataDir)
+        except NoSuchSiteError:
+            print('{}Invalid site'.format(errpref))
+            result['msg'] = 'Invalid site'
+            results.append(result)
+            continue
+        except Exception as e:
+            print('{}{}'.format(errpref, e))
+            result['msg'] = 'Server error'
+            results.append(result)
+            continue
+
+        result['id'] = jobid
+        results.append(result)
+
+    return jsonify(results)
+
+
+# expects a JSON list of job objects in the following form:
+# [
+#   {
+#     "desc": "<xRSL or ADL>",
+#     "id": "<job ID>"
+#   },
+#   {
+#     "desc": "<xRSL or ADL>",
+#     "id": "<job ID>"
+#   },
+#   ...
+# ]
+@app.route('/jobs', methods=['PUT'])
+def confirm_jobs():
+    errpref = 'error: PUT /jobs: '
+    try:
+        token = getToken()
+        proxyid = token['proxyid']
+        jobs = request.get_json()
         jmgr = JobManager()
-        jobid = jmgr.checkJobExists(proxyid, job['id'])
-        if not jobid:
-            return {'msg': 'Client job ID {} does not exist'.format(job['id'])}, 400
-
-        # get job's data directory
-        jobDataDir = jmgr.getJobDataDir(jobid)
     except BadRequest as e:
-        print('error: PUT /jobs: {}'.format(e))
+        print('{}{}'.format(errpref, e))
         return {'msg': str(e)}, 400
     except RESTError as e:
-        print('error: PUT /jobs: {}'.format(e))
+        print('{}{}'.format(errpref, e))
         return {'msg': str(e)}, e.httpCode
     except Exception as e:
-        print('error: PUT /jobs: {}'.format(e))
+        print('{}{}'.format(errpref, e))
         return {'msg': 'Server error'}, 500
 
-    # InputFiles need to be accessed through index otherwise
-    # the changes do not survive outside of for loop.
-    for i in range(len(jobdescs[0].DataStaging.InputFiles)):
-        filename = jobdescs[0].DataStaging.InputFiles[i].Name
-        filepath = os.path.join(jobDataDir, filename)
-        # TODO: handle the situation where file that should be
-        #       present is not present (right now we asume all
-        #       files are present and those who fail on this call
-        #       are remote resources
-        if not os.path.isfile(filepath):
+    results = []
+    for job in jobs:
+        result = {}
+        # check job description
+        if 'desc' not in job:
+            print('{}No job description given'.format(errpref))
+            result['msg'] = 'No job description given'
+            results.append(result)
             continue
-        jobdescs[0].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(os.path.abspath(filepath))
+        jobdescs = arc.JobDescriptionList()
+        if not arc.JobDescription_Parse(job['desc'], jobdescs):
+            print('{}Invalid job description'.format(errpref))
+            result['msg'] = 'Invalid job description'
+            results.append(result)
+            continue
+        result['name'] = jobdescs[0].Identification.JobName
 
-    # TODO: unparsing ADL at the time of writing didn't work
-    desc = jobdescs[0].UnParse('', '')[1]
-    jobdescs = arc.JobDescriptionList()
-    if not arc.JobDescription_Parse(desc, jobdescs):
-        print('error: PUT /jobs: error parsing generated description:\n{}'.format(desc))
-        return {'msg': 'Server error'}, 500
+        # check job ID
+        if 'id' not in job:
+            print('{}No job ID given')
+            result['msg'] = 'No job ID given'
+            results.append(result)
+            continue
+        result['id'] = job['id']
+        jobid = jmgr.checkJobExists(proxyid, job['id'])
+        if not jobid:
+            print('{}Job ID {} does not exist'.format(errpref, jobid))
+            result['msg'] = 'Job ID {} does not exist'.format(job['id'])
+            results.append(result)
+            continue
 
-    try:
-        # inserting job description ID makes job eligible for
-        # pickup by client2arc
-        descid = jmgr.clidb.insertDescription(desc)
-        jmgr.clidb.updateJob(jobid, {'jobdesc': descid})
-    except Exception as e:
-        print('error: PUT /jobs: {}'.format(e))
-        return {'msg': 'Server error'}, 500
+        # get job's data directory
+        try:
+            jobDataDir = jmgr.getJobDataDir(jobid)
+        except ConfigError as e:
+            print('{}{}'.format(errpref, e))
+            result['msg'] = 'Server error'
+            results.append(result)
+            continue
 
-    return {'id': jobid}, 200
+        # InputFiles need to be accessed through index otherwise
+        # the changes do not survive outside of for loop.
+        for i in range(len(jobdescs[0].DataStaging.InputFiles)):
+            filename = jobdescs[0].DataStaging.InputFiles[i].Name
+            filepath = os.path.join(jobDataDir, filename)
+            # TODO: handle the situation where file that should be
+            #       present is not present (right now we asume all
+            #       files are present and those who fail on this call
+            #       are remote resources
+            if not os.path.isfile(filepath):
+                continue
+            jobdescs[0].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(os.path.abspath(filepath))
+
+        # TODO: unparsing ADL at the time of writing didn't work
+        # Unparse modified job description and check its validity
+        desc = jobdescs[0].UnParse('', '')[1]
+        jobdescs = arc.JobDescriptionList()
+        if not arc.JobDescription_Parse(desc, jobdescs):
+            print('{}Invalid modified job description'.format(errpref))
+            result['msg'] = 'Server error'
+            results.append(result)
+            continue
+
+        # insert modified job description and confirm job for submission
+        try:
+            # inserting job description ID makes job eligible for
+            # pickup by client2arc
+            descid = jmgr.clidb.insertDescription(desc)
+            jmgr.clidb.updateJob(jobid, {'jobdesc': descid})
+        except Exception as e:
+            print('{}{}'.format(errpref, e))
+            result['msg'] = 'Server error'
+            results.append(result)
+            continue
+
+        results.append(result)
+
+    return jsonify(results)
 
 
 @app.route('/results', methods=['GET'])
@@ -597,4 +665,3 @@ def checkRFCProxy(proxy):
         if ext.oid.dotted_string == "1.3.6.1.5.5.7.1.14":
             return True
     return False
-

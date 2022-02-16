@@ -21,7 +21,7 @@ import logging
 from act.client.jobmgr import getIDsFromList, JobManager
 from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
 from act.client.errors import TargetDirExistsError, InvalidJobRangeError
-from act.client.errors import InvalidJobIDError, TmpConfigurationError
+from act.client.errors import InvalidJobIDError, ConfigError
 from act.client.errors import NoJobDirectoryError
 
 
@@ -97,7 +97,7 @@ def main():
     manager = JobManager()
     try:
         results = manager.getJobs(proxyid, jobs, args.state, args.find)
-    except TmpConfigurationError:
+    except ConfigError
         print('error: tmp directory not configured')
         sys.exit(5)
 

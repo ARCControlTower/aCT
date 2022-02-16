@@ -84,3 +84,99 @@ https://github.com/encode/httpx/pull/1016
 - main runs nursery with program task and sighup watcher (through
   trio signal system); watcher raises keyboardinterrupt exception
   which makes nursery cancel all tasks and respect shielding?
+
+
+
+# thoughts on error handling
+Some thoughts on the following example code:
+```
+@app.route('/jobs', methods=['POST'])
+def create_jobs():
+    errpref = 'error: POST /jobs: '
+    try:
+        token = getToken()
+        jobs = request.get_json()
+        jmgr = JobManager()
+    except RESTError as e:
+        print('{}: {}'.format(errpref, e))
+        return {'msg': str(e)}, e.httpCode
+    except BadRequest as e:  # raised for invalid JSON
+        print('{}: {}'.format(errpref, e))
+        return {'msg': str(e)}, 400
+    except Exception as e:
+        print('{}: {}'.format(errpref, e))
+        return {'msg': 'Server error'}, 500
+
+    results = []
+    for job in jobs:
+        result = {}
+
+        # check job description
+        if 'desc' not in job:
+            print('{}: No job description given'.format(errpref))
+            result['msg'] = 'No job description given'
+            results.append(result)
+            continue
+        jobdescs = arc.JobDescriptionList()
+        if not arc.JobDescription_Parse(job['desc'], jobdescs):
+            print('{}: Invalid job description'.format(errpref))
+            result['msg'] = 'Invalid job description'
+            results.append(result)
+            continue
+        result['name'] = jobdescs[0].Identification.JobName
+
+        if 'site' not in job:
+            print('{}: No site given for'.format(errpref))
+            result['msg'] = 'No site given'
+            results.append(result)
+            continue
+
+        try:
+            checkSite(job['site'])
+
+            # insert job and create its data directory
+            jobid = jmgr.clidb.insertJob(job['desc'], token['proxyid'], job['site'])
+            jobDataDir = jmgr.getJobDataDir(jobid)
+            os.makedirs(jobDataDir)
+        except NoSuchSiteError:
+            print('{}: Invalid site'.format(errpref))
+            result['msg'] = 'Invalid site'
+            results.append(result)
+            continue
+        except Exception as e:
+            print('{}: {}'.format(errpref, e))
+            result['msg'] = 'Server error'
+            results.append(result)
+            continue
+
+        result['id'] = jobid
+        results.append(result)
+
+    return jsonify(results)
+```
+
+- usecase: A bunch of steps that can could (should?) exit earlier.
+  This adds duplication.
+  Notice repetition of append statements. Those statements could be reduced code
+  was branched properly, but this would lead to a lot of indentaton.
+
+  There is a pattern. We start from core error message. This can then be modified
+  for logging system on backend response for frontent ("Server error", when we
+  don't want to expose information about internal errors and state.
+  + there could be a function that logs and generates flask response tuple, with
+    optional kwargs to override behavior where necessary
+  
+  + similar could be done for JSON response objects per job. Function would log
+    the message and generate or modify JSON object to be appended for current
+    job iteration.
+  
+  + how much common code is for upper two points? Are there more generic
+    patterns?
+  
+  (lisp macros, common lisp condition system and more low level continuation
+  system come to mind to be possible to solve those problems elegantly, or
+  FP monadic contexts?)
+
+- also, look at errpref pattern to avoid duplication of common log message
+  parts. Could/should this be implemented better by hooking into code to modify
+  msg or perform arbitrary manipulation on input data?

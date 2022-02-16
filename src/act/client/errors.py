@@ -47,9 +47,14 @@ class InvalidJobIDError(Exception):
         self.jobid = jobid
 
 
-class TmpConfigurationError(Exception):
-    """Error when tmp is not configured in aCT configuration."""
-    pass
+class ConfigError(Exception):
+    """Error when configuration parameter does not exist."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __str__(self):
+        return "Configuration parameter {} is not configured".format(self.name)
 
 
 class NoJobDirectoryError(Exception):
