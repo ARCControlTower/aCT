@@ -4,11 +4,12 @@ import io
 import jwt
 import arc
 import act.client.x509proxy as x509proxy
+import yaml
 
-from act.client.jobmgr import JobManager, checkJobDesc, checkSite, getIDsFromList
+from act.client.jobmgr import JobManager, checkJobDesc, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
 from act.client.errors import InvalidJobDescriptionError, InvalidJobIDError
-from act.client.errors import NoSuchSiteError, RESTError, InvalidJobRangeError, ConfigError
+from act.client.errors import UnknownClusterError, RESTError, InvalidJobRangeError, ConfigError
 from act.common.aCTConfig import aCTConfigARC
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -241,21 +242,21 @@ def create_jobs():
         result['name'] = jobdescs[0].Identification.JobName
 
         try:
-            # check site parameter
-            if 'site' not in job:
-                print('{}No site given'.format(errpref))
-                result['msg'] = 'No site given'
+            # check clusters
+            if 'clusterlist' not in job or not job['clusterlist']:
+                print('{}No clusters given'.format(errpref))
+                result['msg'] = 'No clusters given'
                 results.append(result)
                 continue
-            checkSite(job['site'])
+            checkClusters(job['clusterlist'])
 
             # insert job and create its data directory
-            jobid = jmgr.clidb.insertJob(job['desc'], token['proxyid'], job['site'])
+            jobid = jmgr.clidb.insertJob(job['desc'], token['proxyid'], ','.join(job['clusterlist']))
             jobDataDir = jmgr.getJobDataDir(jobid)
             os.makedirs(jobDataDir)
-        except NoSuchSiteError:
-            print('{}Invalid site'.format(errpref))
-            result['msg'] = 'Invalid site'
+        except UnknownClusterError as e:
+            print('{}Unknown cluster {}'.format(errpref, e.name))
+            result['msg'] = 'Unknown cluster {}'.format(e.name)
             results.append(result)
             continue
         except Exception as e:
@@ -453,7 +454,7 @@ def getCSR():
         return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
 
     try:
-        # load certificate string and check if proxy
+        # load certificate string and check proxy
         issuer = x509.load_pem_x509_certificate(issuer_pem.encode("utf-8"), default_backend())
         if not checkRFCProxy(issuer):
             print('error: POST /proxies: issuer cert is not a valid proxy')
@@ -665,3 +666,16 @@ def checkRFCProxy(proxy):
         if ext.oid.dotted_string == "1.3.6.1.5.5.7.1.14":
             return True
     return False
+
+
+# TODO: hardcoded
+# TODO: for now this is called in try except block so we don't handle exceptions
+def checkClusters(clusterlist):
+    with open('/etc/act/clusters.yaml', 'r') as f:
+        yamlstr = f.read()
+    conf = yaml.safe_load(yamlstr)
+    if 'clusters' not in conf:
+        raise ConfigError('/etc/act/clusters.yaml: clusters')
+    for cluster in conf['clusters']:
+        if cluster not in conf['clusters']:
+            raise UnknownClusterError(cluster)

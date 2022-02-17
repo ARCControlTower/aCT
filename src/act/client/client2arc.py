@@ -16,7 +16,6 @@ from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTLogger import aCTLogger
 from act.common.aCTSignal import ExceptInterrupt
 from act.client.clientdb import ClientDB
-from act.client.common import readSites
 
 
 class Client2Arc(object):
@@ -26,13 +25,6 @@ class Client2Arc(object):
     This object is very similar to other process objects, namely
     :class:~`act.common.aCTProcess.aCTProcess` and children, as well
     as :class:~`act.common.aCTATLASProcess.aCTATLASProcess` and children.
-
-    When exceptions are raised while dealing with database, they are logged
-    and reraised. They are caught again in main loop of this process and it
-    has not yet been investigated how much overlapping information is emmited
-    from both places. You can find those places where comment
-    '# possible double log' is. This is current simple solution for database
-    error management.
 
     Attributes:
         name: Name of a process, extracted from source code file.
@@ -70,7 +62,7 @@ class Client2Arc(object):
                 # TODO: this parsing does not make any difference
                 self.arcconf.parse()
                 self.process()
-                time.sleep(10) # TODO: HARDCODED
+                time.sleep(10)  # TODO: HARDCODED
         except ExceptInterrupt as x:
             self.log.info('Received interrupt {}, exiting'.format(str(x)))
         except:
@@ -130,9 +122,7 @@ class Client2Arc(object):
                 GROUP BY arcstate'.format(select)
             )
         except:
-            # possible double log
             self.log.exception('Error getting job info from arc table')
-            raise
         else:
             return c.fetchall()
 
@@ -145,7 +135,7 @@ class Client2Arc(object):
         # Get jobs that haven't been inserted to ARC table yet
         # (they don't have reference to ARC table, arcjobid is null).
         jobs = self.clidb.getJobsInfo(
-            ['id', 'jobdesc', 'siteName'],
+            ['id', 'jobdesc', 'clusterlist'],
             where='proxyid = %s AND arcjobid IS NULL AND jobdesc IS NOT NULL',
             where_params=[proxyid],
             order_by='%s',
@@ -153,9 +143,7 @@ class Client2Arc(object):
             limit=num
         )
         for job in jobs:
-            # get cluster list from config
-            sites = readSites()
-            clusterlist = ','.join(sites[job['siteName']])
+            clusterlist = job['clusterlist']
 
             # get job description, needed for setting priority
             jobdesc = self.arcdb.getArcJobDescription(job['jobdesc'])
@@ -173,9 +161,7 @@ class Client2Arc(object):
                     proxyid
                 )
             except:
-                # possible double log
                 self.log.exception('Error inserting job {} to arc table'.format(job['id']))
-                raise
             else: # create reference to job in client table
                 self.clidb.updateJob(job['id'], {'arcjobid': row['LAST_INSERT_ID()']})
 

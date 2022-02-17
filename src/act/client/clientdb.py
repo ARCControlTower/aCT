@@ -56,7 +56,7 @@ class ClientDB(aCTDB):
             created TIMESTAMP,
             jobname VARCHAR(255),
             jobdesc integer,
-            siteName VARCHAR(255),
+            clusterlist VARCHAR(1024),
             arcjobid integer,
             proxyid integer
         )"""
@@ -81,7 +81,7 @@ class ClientDB(aCTDB):
         else:
             self.Commit()
 
-    def insertJob(self, jobdesc, proxyid, siteName, lazy=False):
+    def insertJob(self, jobdesc, proxyid, clusterlist, lazy=False):
         """
         Insert job into clientjobs table.
 
@@ -94,8 +94,8 @@ class ClientDB(aCTDB):
             jobdesc: A string with xRSL job description.
             proxyid: ID from proxies table of a proxy that job will
                 be submitted with.
-            siteName: A string with name of a site in configuration
-                that job will be submitted to.
+            clusterlist: A string of comma separated URLs of clusters that job
+                will be submitted to.
             lazy: A boolean that determines whether transaction should be
                 commited after operation.
 
@@ -111,12 +111,12 @@ class ClientDB(aCTDB):
 
         # insert job
         query = """
-            INSERT INTO clientjobs (created, jobname, jobdesc, siteName, proxyid)
+            INSERT INTO clientjobs (created, jobname, jobdesc, clusterlist, proxyid)
             VALUES (%s, %s, %s, %s, %s)
         """
         c = self.db.getCursor()
         try:
-            c.execute(query, [self.getTimeStamp(), jobname, None, siteName, proxyid])
+            c.execute(query, [self.getTimeStamp(), jobname, None, clusterlist, proxyid])
             c.execute('SELECT LAST_INSERT_ID()')
             jobid = c.fetchone()['LAST_INSERT_ID()']
         except:
@@ -143,7 +143,7 @@ class ClientDB(aCTDB):
             return jobdescid
 
 
-    def insertJobAndDescription(self, jobdesc, proxyid, siteName, lazy=False):
+    def insertJobAndDescription(self, jobdesc, proxyid, clusterlist, lazy=False):
         """
         Insert job into clientjobs and job description into jobdescriptions.
 
@@ -154,8 +154,8 @@ class ClientDB(aCTDB):
             jobdesc: A string with xRSL job description.
             proxyid: ID from proxies table of a proxy that job will
                 be submitted with.
-            siteName: A string with name of a site in configuration
-                that job will be submitted to.
+            clusterlist: A string of comma separated URLs of clusters that job
+                will be submitted to.
             lazy: A boolean that determines whether transaction should be
                 commited after operation.
 
@@ -181,12 +181,12 @@ class ClientDB(aCTDB):
 
         # insert job
         query = """
-            INSERT INTO clientjobs (created, jobname, jobdesc, siteName, proxyid)
+            INSERT INTO clientjobs (created, jobname, jobdesc, clusterlist, proxyid)
             VALUES (%s, %s, %s, %s, %s)
         """
         c = self.db.getCursor()
         try:
-            c.execute(query, [self.getTimeStamp(), jobname, jobdescid, siteName, proxyid])
+            c.execute(query, [self.getTimeStamp(), jobname, jobdescid, clusterlist, proxyid])
             c.execute('SELECT LAST_INSERT_ID()')
             jobid = c.fetchone()['LAST_INSERT_ID()']
         except:
@@ -225,7 +225,7 @@ class ClientDB(aCTDB):
         desc['arcstate'] = "tosubmit"
         desc['tarcstate']  = desc['created']
         desc['tstate'] = desc['created']
-        desc['cluster']  = ''
+        desc['cluster'] = ''
         desc['clusterlist'] = clusterlist
         desc['jobdesc'] = jobdescid
         desc['attemptsleft'] = maxattempts

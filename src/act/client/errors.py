@@ -21,6 +21,19 @@ class NoSuchSiteError(Exception):
         self.siteName = siteName
 
 
+class UnknownClusterError(Exception):
+    """Error when cluster is not in configuration."""
+
+    def __init__(self, name):
+        """
+        Initialize cluster name variable.
+
+        Args:
+            name: A string with name of cluster.
+        """
+        self.name = name
+
+
 class InvalidJobRangeError(Exception):
     """Error when job range is invalid."""
 
