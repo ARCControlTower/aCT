@@ -141,11 +141,11 @@ async def upload_input_files(client, jobid, jobdesc, token, requestUrl, dcacheBa
 
 
 # TODO: could add checking if jobs list is empty for earlier exit
-async def submit_jobs(client, descs, baseUrl, site, token, dcacheBase=None, dcclient=None):
+async def submit_jobs(client, descs, baseUrl, clusterlist, token, dcacheBase=None, dcclient=None):
     # read job descriptions into a list of job dictionaries
     jobs = []
     for desc in descs:
-        job = {'site': site}
+        job = {'clusterlist': clusterlist}
         try:
             with open(desc, 'r') as f:
                 job['desc'] = f.read()
@@ -157,7 +157,7 @@ async def submit_jobs(client, descs, baseUrl, site, token, dcacheBase=None, dccl
 
     # submit jobs to aCT
     requestUrl = baseUrl + '/jobs'
-    json = [{k: v for k, v in job.items() if k in ('desc', 'site')} for job in jobs]
+    json = [{k: v for k, v in job.items() if k in ('desc', 'clusterlist')} for job in jobs]
     headers = {'Authorization': 'Bearer ' + token}
     try:
         resp = await client.post(requestUrl, headers=headers, json=json)
@@ -275,8 +275,8 @@ async def cleanup(client, token, jobsURL, tokill, conf, args, dcclient):
 async def program():
     parser = argparse.ArgumentParser(description='Submit job to aCT server')
     addCommonArgs(parser)
-    parser.add_argument('--site', default='default',
-            help='site that jobs should be submitted to')
+    parser.add_argument('--clusterlist', default='default',
+                        help='a name of a list of clusters specified in config under "clusters" option OR a comma separated list of cluster URLs')
     parser.add_argument('xRSL', nargs='+', help='path to job description file')
     parser.add_argument('--dcache', nargs='?', const='dcache', default='',
             help='URL of user\'s dCache directory')
@@ -294,6 +294,14 @@ async def program():
     checkConf(conf, ['server', 'port', 'token'])
 
     token = readTokenFile(conf['token'])
+
+    if 'clusters' in conf:
+        if args.clusterlist in conf['clusters']:
+            clusterlist = conf['clusters'][args.clusterlist]
+        else:
+            clusterlist = args.clusterlist.split(',')
+    else:
+        clusterlist = args.clusterlist.split(',')
 
     # get dcache location, create ssl and aio context
     if args.dcache:
@@ -325,7 +333,7 @@ async def program():
 
         tokill = []
         try:
-            tokill = await submit_jobs(client, args.xRSL, baseUrl, args.site, token, dcacheBase, dcclient)
+            tokill = await submit_jobs(client, args.xRSL, baseUrl, clusterlist, token, dcacheBase, dcclient)
         except trio.Cancelled:
             pass
         finally:

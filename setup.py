@@ -23,7 +23,8 @@ setup(name='aCT',
         'gunicorn',
         'sqlalchemy',
         'pyjwt',
-        'cryptography'
+        'cryptography',
+        'pyyaml',
       ],
       entry_points={
         'console_scripts': [

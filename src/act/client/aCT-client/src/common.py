@@ -153,7 +153,6 @@ async def run_with_sigint_handler(program):
 
     def sigint_handler(signum, sigframe):
         disableSIGINT()
-        print('Got SIGINT, cleaning up ...')
         cancel_scope.cancel()
 
     signal.signal(signal.SIGINT, sigint_handler)
