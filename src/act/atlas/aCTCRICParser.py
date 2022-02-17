@@ -72,7 +72,7 @@ class aCTCRICParser:
         with open(cricfilename) as f:
             sites = json.load(f)
         for sitename, siteinfo in sites.items():
-            siteinfo['push'] = 'push' in siteinfo['workflow']
+            siteinfo['push'] = 'push' in (siteinfo['workflow'] or 'push')
             siteinfo['schedconfig'] = sitename
             if (pilotmgr == 'all' or siteinfo['pilot_manager'] == pilotmgr) and \
                (pilotver is None or siteinfo['pilot_version'] == str(pilotver)) and \
