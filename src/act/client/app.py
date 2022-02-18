@@ -1,23 +1,22 @@
 import os
 import shutil
-import io
-import jwt
-import arc
-import act.client.x509proxy as x509proxy
-import yaml
+from datetime import datetime
 
-from act.client.jobmgr import JobManager, checkJobDesc, getIDsFromList
+import arc
+import jwt
+import yaml
+from act.client.errors import (ConfigError, InvalidJobIDError,
+                               InvalidJobRangeError, RESTError,
+                               UnknownClusterError)
+from act.client.jobmgr import JobManager, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
-from act.client.errors import InvalidJobDescriptionError, InvalidJobIDError
-from act.client.errors import UnknownClusterError, RESTError, InvalidJobRangeError, ConfigError
-from act.common.aCTConfig import aCTConfigARC
+from act.client.x509proxy import create_proxy_csr
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from datetime import datetime, timedelta
+from flask import Flask, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest
-
 
 # TODO: see if checkJobExists should be used anywhere else
 # TODO: implement proper logging
@@ -30,7 +29,6 @@ JWT_SECRET = "aCT JWT secret"
 STREAM_CHUNK_SIZE = 4096
 
 
-from flask import Flask, request, send_file, jsonify
 app = Flask(__name__)
 
 
@@ -383,16 +381,6 @@ def confirm_jobs():
 
 @app.route('/results', methods=['GET'])
 def getResults():
-    '''
-    Return a .zip archive of job results folder.
-
-    Request potentionaly accepts a list of IDs but only the first one is
-    processed because it's easier to respond for one job.
-
-    Returns:
-        status 200: A .zip archive of job results.
-        status 4** or 500: A string with error message.
-    '''
     try:
         token = getToken()
         jobids = getIDs()
@@ -468,7 +456,7 @@ def getCSR():
         )
 
         # generate CSR
-        csr = x509proxy.create_proxy_csr(issuer, private_key)
+        csr = create_proxy_csr(issuer, private_key)
         print('CSR generated: DN: {}, attr: {}, expiration: {}'.format(dn, attr, exptime))
 
         # put private key into string and store in db
