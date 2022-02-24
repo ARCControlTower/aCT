@@ -29,12 +29,12 @@ def getProxyIdFromProxy(proxyPath):
     try:
         return manager.getProxyIdForProxyFile(proxyPath)
     except NoSuchProxyError as e:
-        print("error: no proxy for DN=\"{}\" and attributes=\"{}\" "\
-                "found in database; use actproxy".format(e.dn, e.attribute))
+        print(f"error: no proxy for DN={e.dn} and attributes={e.attribute} \
+                found in database; use actproxy")
         sys.exit(1)
 
     except NoProxyFileError as e:
-        print("error: no proxy file \"{}\"; create proxy first".format(e.path))
+        print(f"error: no proxy file {e.path}; create proxy first")
         sys.exit(2)
 
     except ProxyFileExpiredError:

@@ -32,19 +32,19 @@ async def cleanJobs(client, url, token, params):
         resp = await client.delete(url, params=params, headers=headers)
         json = resp.json()
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 200:
-        raise ACTClientError('Response error: {}'.format(json['msg']))
+        raise ACTClientError(f'Response error: {json["msg"]}')
     return json
 
 
 async def patchJobs(client, url, token, params, arcstate):
     if arcstate not in ('tofetch', 'tocancel', 'toresubmit'):
-        raise ACTClientError('Invalid arcstate argument "{}"'.format(arcstate))
+        raise ACTClientError(f'Invalid arcstate argument "{arcstate}"')
 
     url += '/jobs'
     json = {'arcstate': arcstate}
@@ -53,13 +53,13 @@ async def patchJobs(client, url, token, params, arcstate):
         resp = await client.patch(url, json=json, params=params, headers=headers)
         json = resp.json()
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 200:
-        raise ACTClientError('Response error: {}'.format(json['msg']))
+        raise ACTClientError(f'Response error: {json["msg"]}')
     return json
 
 
@@ -82,13 +82,13 @@ async def postJobs(client, url, token, jobs):
         resp = await client.post(url, headers=headers, json=jobs)
         json = resp.json()
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 200:
-        raise ACTClientError('Response error: {}'.format(json['msg']))
+        raise ACTClientError(f'Response error: {json["msg"]}')
     return json
 
 
@@ -99,13 +99,13 @@ async def putJobs(client, url, token, jobs):
         resp = await client.put(url, json=jobs, headers=headers)
         json = resp.json()
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 200:
-        raise ACTClientError('Response error: {}'.format(json['msg']))
+        raise ACTClientError(f'Response error: {json["msg"]}')
     return json
 
 
@@ -125,9 +125,9 @@ async def webdavRmdir(client, url):
     try:
         resp = await client.delete(url, headers=headers)
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(str(e)))
+        raise ACTClientError(f'Request error: {e}')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     # TODO: should we rely on 204 and 404 being the only right answers?
     if resp.status_code == 404:  # ignore, because we are just trying to delete
         return
@@ -140,24 +140,24 @@ async def webdavMkdir(client, url):
     try:
         resp = await client.request('MKCOL', url, headers=headers)
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(str(e)))
+        raise ACTClientError(f'Request error: {e}')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 201:
-        raise ACTClientError('Error creating WebDAV directory {}: {}'.format(url, resp.text))
+        raise ACTClientError(f'Error creating WebDAV directory {url}: {resp.text}')
 
 
 async def webdavPut(client, url, path):
     try:
         resp = await client.put(url, content=fileSender(path))
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(str(e)))
+        raise ACTClientError(f'Request error: {e}')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     except trio.Cancelled:
-        raise ACTClientError('Upload cancelled for file {} to {}'.format(path, url))
+        raise ACTClientError(f'Upload cancelled for file {path} to {url}')
     if resp.status_code != 201:
-        raise ACTClientError('Error uploading file {} to {}: {}'.format(path, url, resp.text))
+        raise ACTClientError(f'Error uploading file {path} to {url}: {resp.text}')
 
 
 async def httpPut(client, url, token, name, path, jobid):
@@ -169,15 +169,15 @@ async def httpPut(client, url, token, name, path, jobid):
         resp = await client.put(url, content=fileSender(path), params=params, headers=headers)
         json = resp.json()
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(str(e)))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     except trio.Cancelled:
-        raise ACTClientError('Upload cancelled fot file {} to {}'.format(path, url))
+        raise ACTClientError(f'Upload cancelled fot file {path} to {url}')
     if resp.status_code != 200:
-        raise ACTClientError('Error uploading file {} to {}: {}'.format(path, url, json['msg']))
+        raise ACTClientError(f'Error uploading file {path} to {url}: {json["msg"]}')
 
 
 # https://docs.aiohttp.org/en/stable/client_quickstart.html?highlight=upload#streaming-uploads
@@ -209,13 +209,13 @@ async def getJobStats(client, url, token, **kwargs):
         resp = await client.get(url, params=params, headers=headers)
         json = resp.json()
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(repr(e)))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 200:
-        raise ACTClientError('Response error: {}'.format(json['msg']))
+        raise ACTClientError(f'Response error: {json["msg"]}')
     return json
 
 
@@ -267,13 +267,13 @@ async def downloadJobResults(client, url, token, jobid):
                 await storeResultChunks(resp, filename)
             else:
                 json = resp.json()
-                raise ACTClientError('Response error: {}'.format(json['msg']))
+                raise ACTClientError(f'Response error: {json["msg"]}')
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     return filename
 
 
@@ -288,11 +288,11 @@ async def storeResultChunks(resp, filename):
             if os.path.isfile(filename):
                 os.remove(filename)
         except Exception as e:
-            raise ACTClientError('{}'.format(e))
+            raise ACTClientError(f'{e}')
         raise
 
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
 
 
 # possible error conditions:
@@ -318,7 +318,7 @@ async def getJob(client, url, token, jobid):
             with zipfile.ZipFile(filename, 'r') as zip_ref:
                 zip_ref.extractall(dirname)
         except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
-            msg = 'Result zip extraction error: {}'.format(e)
+            msg = f'Result zip extraction error: {e}'
             extractFailed = True
 
     # delete results archive
@@ -326,7 +326,7 @@ async def getJob(client, url, token, jobid):
         if os.path.isfile(filename):
             os.remove(filename)
     except Exception as e:
-        raise ACTClientError('Results zip delete error: {}'.format(e))
+        raise ACTClientError(f'Results zip delete error: {e}')
 
     if extractFailed:
         raise ACTClientError(msg)
@@ -341,13 +341,13 @@ async def deleteProxy(client, url, token):
         resp = await client.delete(url, headers=headers)
         json = resp.json()
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 204:
-        raise ACTClientError('Response error: {}'.format(json['msg']))
+        raise ACTClientError(f'Response error: {json["msg"]}')
 
 
 async def uploadProxy(client, url, proxyStr, tokenPath):
@@ -357,13 +357,13 @@ async def uploadProxy(client, url, proxyStr, tokenPath):
         resp = await client.post(url, json={'cert': proxyStr})
         json = resp.json()
     except httpx.RequestError as e:
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 200:
-        raise ACTClientError('Response error: {}'.format(json['msg']))
+        raise ACTClientError(f'Response error: {json["msg"]}')
     token = json['token']
 
     # sign CSR
@@ -374,7 +374,7 @@ async def uploadProxy(client, url, proxyStr, tokenPath):
         chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
     except Exception as e:
         await deleteProxy(client, url, token)
-        raise ACTClientError('Error generating proxy: {}'.format(e))
+        raise ACTClientError(f'Error generating proxy: {e}')
 
     # upload signed cert
     json = {'cert': cert, 'chain': chain}
@@ -384,16 +384,16 @@ async def uploadProxy(client, url, proxyStr, tokenPath):
         json = resp.json()
     except httpx.RequestError as e:
         await deleteProxy(client, url, token)
-        raise ACTClientError('Request error: {}'.format(e))
+        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
         await deleteProxy(client, url, token)
-        raise ACTClientError('Response JSON decode error: {}; Is your aCT URL correct?'.format(e))
+        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
         await deleteProxy(client, url, token)
-        raise ACTClientError('{}'.format(e))
+        raise ACTClientError(f'{e}')
     if resp.status_code != 200:
         await deleteProxy(client, url, token)
-        raise ACTClientError('Response error: {}'.format(json['msg']))
+        raise ACTClientError(f'Response error: {json["msg"]}')
 
     # store auth token
     token = json['token']
@@ -405,7 +405,7 @@ async def uploadProxy(client, url, proxyStr, tokenPath):
         os.chmod(tokenPath, 0o600)
     except Exception as e:
         await deleteProxy(client, url, token)
-        raise ACTClientError('Error saving token: {}'.format(e))
+        raise ACTClientError(f'Error saving token: {e}')
 
 
 async def submitJobs(client, url, token, descs, clusterlist, webdavClient, webdavUrl):
@@ -453,7 +453,7 @@ async def submitJobs(client, url, token, descs, clusterlist, webdavClient, webda
     jobdescs = arc.JobDescriptionList()
     for job in jobs:
         if not arc.JobDescription_Parse(job['desc'], jobdescs):
-            job['msg'] = 'Parsing fail for job description {}'.format(job['descpath'])
+            job['msg'] = f'Parsing fail for job description {job["descpath"]}'
     for i in range(len(jobs) - 1, -1, -1):  # remove failed jobs
         if 'msg' in jobs[i]:
             results.append(jobs.pop(i))
@@ -561,7 +561,7 @@ async def uploadInputFiles(client, url, token, jobid, jobdesc, webdavClient, web
             continue
 
         if webdavUrl:
-            dst = '{}/{}/{}'.format(webdavUrl, jobid, infile.Name)
+            dst = f'{webdavUrl}/{jobid}/{infile.Name}'
             jobdesc.DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
             files[dst] = path
         else:

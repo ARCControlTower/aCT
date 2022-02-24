@@ -45,21 +45,21 @@ def checkIDString(listStr):
         if isRange:
             try:
                 firstIx, lastIx = group.split('-')
-            except ValueError: # if there is more than one dash
-                raise ACTClientError('Invalid ID range: {}'.format(group))
+            except ValueError:  # if there is more than one dash
+                raise ACTClientError(f'Invalid ID range: {group}')
             try:
                 _ = int(firstIx)
             except ValueError:
-                raise ACTClientError('Invalid ID range start: {}'.format(firstIx))
+                raise ACTClientError(f'Invalid ID range start: {firstIx}')
             try:
                 _ = int(lastIx)
             except ValueError:
-                raise ACTClientError('Invalid ID range end: {}'.format(lastIx))
+                raise ACTClientError(f'Invalid ID range end: {lastIx}')
         else:
             try:
                 _ = int(group)
             except ValueError:
-                raise ACTClientError('Invalid ID: {}'.format(group))
+                raise ACTClientError(f'Invalid ID: {group}')
 
 
 # duplicated from act.client.proxymgr
@@ -70,7 +70,7 @@ def readProxyFile(filename):
         with open(filename, 'r') as f:
             return f.read()
     except Exception as e:
-        print('error: read proxy: {}'.format(str(e)))
+        print(f'error: read proxy: {e}')
         sys.exit(1)
 
 
@@ -86,7 +86,7 @@ def readTokenFile(tokenFile):
         with open(tokenFile, 'r') as f:
             return f.read()
     except Exception as e:
-        print('error: read token file: {}'.format(str(e)))
+        print(f'error: read token file: {e}')
         sys.exit(1)
 
 
@@ -95,7 +95,7 @@ def readFile(filename):
         with open(filename, 'r') as f:
             return f.read()
     except Exception as e:
-        raise ACTClientError('Error reading file {}: {}'.format(filename, e))
+        raise ACTClientError(f'Error reading file {filename}: {e}')
 
 
 # optionally accepts session to dcache and closes it afterwards
@@ -139,7 +139,7 @@ def getProxyCertClient(proxypath):
         timeout = httpx.Timeout(5.0)
         client = httpx.AsyncClient(verify=context, timeout=timeout, limits=limits)
     except Exception as e:
-        raise ACTClientError('Error creating proxy SSL context: {}'.format(str(e)))
+        raise ACTClientError(f'Error creating proxy SSL context: {e}')
     return client
 
 
@@ -159,13 +159,13 @@ async def webdav_rmdir(client, url):
     try:
         resp = await client.delete(url, headers=headers)
     except httpx.RequestError as e:
-        print('request error: {}'.format(e))
+        print(f'request error: {e}')
         return
     # TODO: should we rely on 204 and 404 being the only right answers?
     if resp.status_code == 404:  # ignore, because we are just trying to delete
         return
     if resp.status_code >= 300:
-        print('error: cannot remove WebDAV directory {}: {} - {}'.format(url, resp.status_code, resp.text))
+        print(f'error: cannot remove WebDAV directory {url}: {resp.status_code} - {resp.text}')
 
 
 async def runWithSIGINTHandler(program, *args):
@@ -208,7 +208,7 @@ class JobCleanup(ACTClientError):
         self.exception = exception
 
     def __str__(self):
-        return 'Jobs for cleanup {} after error: {}'.format(self.cleanup, self.msg)
+        return f'Jobs for cleanup {self.cleanup} after error: {self.msg}'
 
 
 class ExitProgram(ACTClientError):

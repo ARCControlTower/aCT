@@ -40,7 +40,7 @@ else:
 
 # it is convenient to have hardcoded defaults for some settings
 DEFAULT_CONF = {
-    'proxy': '/tmp/x509up_u{}'.format(os.getuid()),
+    'proxy': f'/tmp/x509up_u{os.getuid()}',
     'token': os.path.join(DATA_BASE, TOKEN_NAME),
 }
 
@@ -79,4 +79,4 @@ def expandPaths(conf):
 def checkConf(config, keyList):
     for key in keyList:
         if key not in config:
-            raise ExitProgram("Config key {} not configured".format(key), 1)
+            raise ExitProgram(f'Config key {key} not configured', 1)

@@ -47,7 +47,7 @@ class Client2Arc(object):
         self.clidb = ClientDB(self.log)
         self.arcdb = aCTDBArc(self.log)
 
-        self.log.info('Started {}'.format(self.name))
+        self.log.info(f'Started {self.name}')
 
     def run(self):
         """
@@ -64,7 +64,7 @@ class Client2Arc(object):
                 self.process()
                 time.sleep(10)  # TODO: HARDCODED
         except ExceptInterrupt as x:
-            self.log.info('Received interrupt {}, exiting'.format(str(x)))
+            self.log.info(f'Received interrupt {x}, exiting')
         except:
             self.log.critical('*** Unexpected exception! ***')
             self.log.critical(traceback.format_exc())
@@ -82,7 +82,7 @@ class Client2Arc(object):
         proxies = self.clidb.getProxies()
         for proxyid in proxies:
             # get number of all states of jobs with fairshare proxyid
-            states = self.getJobStateCount('fairshare = {}'.format(proxyid))
+            states = self.getJobStateCount(f'fairshare = {proxyid}')
 
             # get number of running and submitted jobs
             running = 0
@@ -92,10 +92,8 @@ class Client2Arc(object):
                     running = state['COUNT(arcstate)']
                 elif state['arcstate'] in ('submitted', 'submitting'):
                     submitted += state['COUNT(arcstate)']
-            #self.log.debug('{} jobs running for proxyid {}'.format(running, proxyid))
-            #self.log.debug('{} jobs submitted for proxyid {}'.format(submitted, proxyid))
 
-            if submitted < max(0.2 * running, 100): # TODO: HARDCODED
+            if submitted < max(0.2 * running, 100):  # TODO: HARDCODED
                 self.insertNewJobs(proxyid, 20)
 
     def getJobStateCount(self, select):
@@ -116,10 +114,10 @@ class Client2Arc(object):
         c = self.arcdb.db.getCursor()
         try:
             c.execute(
-                'SELECT arcstate,COUNT(arcstate) \
+                f'SELECT arcstate,COUNT(arcstate) \
                 FROM arcjobs \
-                WHERE {} \
-                GROUP BY arcstate'.format(select)
+                WHERE {select} \
+                GROUP BY arcstate'
             )
         except:
             self.log.exception('Error getting job info from arc table')
@@ -161,14 +159,14 @@ class Client2Arc(object):
                     proxyid
                 )
             except:
-                self.log.exception('Error inserting job {} to arc table'.format(job['id']))
+                self.log.exception(f'Error inserting job {job["id"]} to arc table')
             else: # create reference to job in client table
                 self.clidb.updateJob(job['id'], {'arcjobid': row['LAST_INSERT_ID()']})
 
 
     def finish(self):
         """Log stop message."""
-        self.log.info('Stopped {}'.format(self.name))
+        self.log.info(f'Stopped {self.name}')
 
 
 if __name__ == '__main__':

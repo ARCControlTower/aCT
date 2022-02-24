@@ -233,7 +233,7 @@ async def subcommandClean(args, conf):
     with trio.CancelScope(shield=True):
         async with client:
             jobids = await cleanJobs(client, url, token, params)
-            print('Cleaned {} jobs'.format(len(jobids)))
+            print(f'Cleaned {len(jobids)} jobs')
             if jobids and webdavUrl:
                 print('Cleaning WebDAV directories ...')
                 webdavClient = getProxyCertClient(conf['proxy'])
@@ -257,7 +257,7 @@ async def subcommandFetch(args, conf):
 
     async with httpx.AsyncClient() as client:
         json = await fetchJobs(client, url, token, params)
-    print('Will fetch {} jobs'.format(len(json)))
+    print(f'Will fetch {len(json)} jobs')
 
 
 async def subcommandGet(args, conf):
@@ -310,9 +310,9 @@ async def adapterGetJob(client, url, token, jobid, jobname, toclean):
         print(e)
         return
     if not dirname:
-        print('No results for job {}'.format(jobname))
+        print(f'No results for job {jobname}')
     else:
-        print('Results for job {} stored in {}'.format(jobname, dirname))
+        print(f'Results for job {jobname} stored in {dirname}')
     toclean.append(jobid)
 
 
@@ -335,7 +335,7 @@ async def subcommandKill(args, conf):
         # kill in aCT
         async with httpx.AsyncClient() as client:
             json = await killJobs(client, url, token, params)
-        print('Will kill {} jobs'.format(len(json)))
+        print(f'Will kill {len(json)} jobs')
 
         # clean in WebDAV
         tokill = [job['c_id'] for job in json if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting')]
@@ -360,7 +360,7 @@ async def subcommandProxy(args, conf):
         async with httpx.AsyncClient() as client:
             await uploadProxy(client, url, proxyStr, conf['token'])
 
-    print('Successfully inserted proxy. Access token stored in {}'.format(conf['token']))
+    print(f'Successfully inserted proxy. Access token stored in {conf["token"]}')
 
 
 async def subcommandResub(args, conf):
@@ -380,7 +380,7 @@ async def subcommandResub(args, conf):
         async with httpx.AsyncClient() as client:
             json = await resubmitJobs(client, url, token, params)
 
-    print('Will resubmit {} jobs'.format(len(json)))
+    print(f'Will resubmit {len(json)} jobs')
 
 
 async def subcommandStat(args, conf):
@@ -434,9 +434,9 @@ async def subcommandStat(args, conf):
 
     # Print table header
     for col in clicols:
-        print('{:<{width}}'.format(col, width=colsizes['c_' + col]), end=' ')
+        print(f'{col: <{colsizes["c_" + col]}}', end=' ')
     for col in arccols:
-        print('{:<{width}}'.format(col, width=colsizes['a_' + col]), end=' ')
+        print(f'{col: <{colsizes["a_" + col]}}', end=' ')
     print()
     line = ''
     for value in colsizes.values():
@@ -451,13 +451,13 @@ async def subcommandStat(args, conf):
             txt = job.get(fullKey)
             if not txt or str(txt).strip() == '':
                 txt = "''"
-            print('{:<{width}}'.format(txt, width=colsizes[fullKey]), end=' ')
+            print(f'{txt: <{colsizes[fullKey]}}', end=' ')
         for col in arccols:
             fullKey = 'a_' + col
             txt = job.get(fullKey)
             if not txt or str(txt).strip() == '':
                 txt = "''"
-            print('{:<{width}}'.format(txt, width=colsizes[fullKey]), end=' ')
+            print(f'{txt: <{colsizes[fullKey]}}', end=' ')
         print()
 
 
@@ -494,11 +494,11 @@ async def subCleanup(client, url, token, jobs, webdavClient, webdavUrl):
     for job in jobs:
         if 'msg' in job:
             if 'name' in job:
-                print('Job {} not submitted: {}'.format(job['name'], job['msg']))
+                print(f'Job {job["name"]} not submitted: {job["msg"]}')
             else:
-                print('Job description {} not submitted: {}'.format(job['descpath'], job['msg']))
+                print(f'Job description {job["descpath"]} not submitted: {job["msg"]}')
         else:
-            print('Inserted job {} with ID {}'.format(job['name'], job['id']))
+            print(f'Inserted job {job["name"]} with ID {job["id"]}')
     return
 
     # clean jobs that could not be submitted
