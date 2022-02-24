@@ -136,7 +136,7 @@ def getProxyCertClient(proxypath):
         )
         context.set_ciphers(_DEFAULT_CIPHERS)
         limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-        timeout = httpx.Timeout(5.0)
+        timeout = httpx.Timeout(5.0, pool=None)
         client = httpx.AsyncClient(verify=context, timeout=timeout, limits=limits)
     except Exception as e:
         raise ACTClientError(f'Error creating proxy SSL context: {e}')

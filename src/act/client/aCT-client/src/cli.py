@@ -229,8 +229,11 @@ async def subcommandClean(args, conf):
         params['name'] = args.name
 
     webdavUrl = getWebDAVBase(args, conf)
-    client = httpx.AsyncClient()
+
     with trio.CancelScope(shield=True):
+        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
+        timeout = httpx.Timeout(5.0, pool=None)
+        client = httpx.AsyncClient(timeout=timeout, limits=limits)
         async with client:
             jobids = await cleanJobs(client, url, token, params)
             print(f'Cleaned {len(jobids)} jobs')
@@ -255,7 +258,10 @@ async def subcommandFetch(args, conf):
     if args.name:
         params['name'] = args.name
 
-    async with httpx.AsyncClient() as client:
+    limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
+    timeout = httpx.Timeout(5.0, pool=None)
+    client = httpx.AsyncClient(timeout=timeout, limits=limits)
+    async with client:
         json = await fetchJobs(client, url, token, params)
     print(f'Will fetch {len(json)} jobs')
 
@@ -277,7 +283,10 @@ async def subcommandGet(args, conf):
             raise ACTClientError('Wrong state parameter, should be "done" or "donefailed"')
         kwargs['state'] = args.state
 
-    async with httpx.AsyncClient() as client:
+    limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
+    timeout = httpx.Timeout(5.0, pool=None)
+    client = httpx.AsyncClient(timeout=timeout, limits=limits)
+    async with client:
         jobs = await filterJobsToDownload(client, url, token, **kwargs)
 
         toclean = []
@@ -333,7 +342,10 @@ async def subcommandKill(args, conf):
 
     with trio.CancelScope(shield=True):
         # kill in aCT
-        async with httpx.AsyncClient() as client:
+        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
+        timeout = httpx.Timeout(5.0, pool=None)
+        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        async with client:
             json = await killJobs(client, url, token, params)
         print(f'Will kill {len(json)} jobs')
 
@@ -357,7 +369,10 @@ async def subcommandProxy(args, conf):
     url = conf['server'] + ':' + str(conf['port'])
 
     with trio.CancelScope(shield=True):
-        async with httpx.AsyncClient() as client:
+        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
+        timeout = httpx.Timeout(5.0, pool=None)
+        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        async with client:
             await uploadProxy(client, url, proxyStr, conf['token'])
 
     print(f'Successfully inserted proxy. Access token stored in {conf["token"]}')
@@ -377,7 +392,10 @@ async def subcommandResub(args, conf):
         params['name'] = args.name
 
     with trio.CancelScope(shield=True):
-        async with httpx.AsyncClient() as client:
+        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
+        timeout = httpx.Timeout(5.0, pool=None)
+        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        async with client:
             json = await resubmitJobs(client, url, token, params)
 
     print(f'Will resubmit {len(json)} jobs')
@@ -403,7 +421,10 @@ async def subcommandStat(args, conf):
         params['name'] = args.name
 
     with trio.CancelScope(shield=True):
-        async with httpx.AsyncClient() as client:
+        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
+        timeout = httpx.Timeout(5.0, pool=None)
+        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        async with client:
             json = await getJobStats(client, url, token, **params)
 
     if not json:
@@ -480,7 +501,9 @@ async def subcommandSub(args, conf):
     webdavClient = getProxyCertClient(conf['proxy'])
 
     limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-    async with httpx.AsyncClient(limits=limits, timeout=None) as client:
+    timeout = httpx.Timeout(5.0, pool=None)
+    client = httpx.AsyncClient(timeout=timeout, limits=limits)
+    async with client:
         jobs = []
         try:
             jobs = await submitJobs(client, url, token, args.xRSL, clusterlist, webdavClient, webdavUrl)
