@@ -155,13 +155,13 @@ class JobManager(object):
                     shutil.rmtree(jobdir)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.error('Could not clean job results in {}'.format(jobdir))
-                except NoJobDirectoryError as e:
+                    self.logger.error(f'Could not clean job results in {jobdir}')
+                except NoJobDirectoryError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.info('Job {} has no job results to clean'.format(job['c_id']))
+                    self.logger.info(f'Job {job["c_id"]} has no job results to clean')
 
             # add job to removal query
-            arc_where += '{}, '.format(job['a_id'])
+            arc_where += f'{job["a_id"]}, '
             client_params.append(int(job['c_id']))
 
             deletedIDs.append(job['c_id'])
@@ -169,8 +169,8 @@ class JobManager(object):
         # delete jobs from tables
         if deletedIDs:
             arc_where = arc_where.rstrip(', ')
-            arc_where = ' id IN ({})'.format(arc_where)
-            client_where = ' id IN ({})'.format(createMysqlEscapeList(len(client_params)))
+            arc_where = f' id IN ({arc_where})'
+            client_where = f' id IN ({createMysqlEscapeList(len(client_params))})'
             patch = {'arcstate': 'toclean', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
             self.clidb.deleteJobs(client_where, client_params)
@@ -195,11 +195,11 @@ class JobManager(object):
             results: A :class:`JobGetResults` object with results.
         """
         if results.arcIDs: # jobs are cleaned from ARC by setting their state
-            arc_where = ' id in ({})'.format(self._createMysqlIntList(results.arcIDs))
+            arc_where = f' id in ({self._createMysqlIntList(results.arcIDs)})'
             patch = {'arcstate': 'toclean', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
         if results.clientIDs:
-            client_where = ' id in ({})'.format(createMysqlEscapeList(len(results.clientIDs)))
+            client_where = f' id in ({createMysqlEscapeList(len(results.clientIDs))})'
             self.clidb.deleteJobs(client_where, results.clientIDs)
 
         for result in results.jobdicts:
@@ -238,12 +238,11 @@ class JobManager(object):
             return []
 
         # update jobs' state for fetching
-        where = ' id IN ({})'.format(
-                self._createMysqlIntList([job['a_id'] for job in jobs]))
+        where = f' id IN ({self._createMysqlIntList([job["a_id"] for job in jobs])})'
         patch = {'arcstate': 'tofetch', 'tarcstate': self.arcdb.getTimeStamp()}
         self.arcdb.updateArcJobs(patch, where)
 
-        return [job['c_id'] for job in jobs] # TODO: performance issue?
+        return [job['c_id'] for job in jobs]
 
     def refetchJobs(self, proxyid, jobids=[], name_filter=''):
         """
@@ -290,12 +289,10 @@ class JobManager(object):
                     shutil.rmtree(jobdir)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception('Could not clean job results in {}'.format(
-                        jobdir))
+                    self.logger.exception(f'Could not clean job results in {jobdir}')
                 except NoJobDirectoryError as e:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception('Could not clean job results in {}'.format(
-                        e.jobdir))
+                    self.logger.exception(f'Could not clean job results in {e.jobdir}')
 
                 # finished jobs become done, tofetch jobs become donefailed;
                 # the job status should be preserved
@@ -304,11 +301,11 @@ class JobManager(object):
                 else:
                     patch = {'arcstate': 'tofetch'}
 
-            where = ' id = {}'.format(job['a_id'])
+            where = f' id = {job["a_id"]}'
             patch['tarcstate'] = self.arcdb.getTimeStamp()
             self.arcdb.updateArcJobs(patch, where)
 
-        return [job['c_id'] for job in jobs] # TODO: performance issue?
+        return [job['c_id'] for job in jobs]
 
     def getJobs(self, proxyid, jobids=[], state_filter='', name_filter=''):
         """
@@ -438,12 +435,12 @@ class JobManager(object):
                 arc_ids.append(int(job['a_id']))
 
         if arc_ids:
-            arc_where = ' id IN ({})'.format(
-                    self._createMysqlIntList(arc_ids))
+            arc_where = f' id IN ({self._createMysqlIntList(arc_ids)})'
+
             patch = {'arcstate': 'tocancel', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
         if client_ids:
-            client_where = ' id IN ({})'.format(createMysqlEscapeList(len(client_ids)))
+            client_where = f' id IN ({createMysqlEscapeList(len(client_ids))})'
             self.clidb.deleteJobs(client_where, client_ids)
 
         res = self.arcdb.db.releaseMutexLock('arcjobs')
@@ -485,8 +482,9 @@ class JobManager(object):
             return []
 
         # set job state for resubmittion
-        where = ' id IN ({})'.format(
-                self._createMysqlIntList([job['a_id'] for job in jobs]))
+        where = f' id IN ({self._createMysqlIntList([job["a_id"] for job in jobs])})'
+
+
         patch = {'arcstate': 'toresubmit', 'tarcstate': self.arcdb.getTimeStamp()}
         self.arcdb.updateArcJobs(patch, where)
 
@@ -595,7 +593,7 @@ class JobManager(object):
         where = ''
         if integers:
             for integer in integers:
-                where += '{}, '.format(integer)
+                where += f'{integer}, '
             where = where.rstrip(', ')
         return where
 
@@ -614,7 +612,7 @@ class JobManager(object):
             #else:
             #    where += ' c.id IN ({}) AND '.format(createMysqlEscapeList(len(ids)))
             #    where_params.extend(ids)
-            where += ' c.id IN ({}) AND '.format(createMysqlEscapeList(len(ids)))
+            where += f' c.id IN ({createMysqlEscapeList(len(ids))}) AND '
             where_params.extend(ids)
         return where, where_params
 

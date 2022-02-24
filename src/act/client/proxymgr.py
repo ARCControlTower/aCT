@@ -57,11 +57,11 @@ class ProxyManager(object):
         try:
             proxyInfo =  self.actproxy.getProxyInfo(dn, attribute, columns)
         except: # probably some sort of mysql error; log and raise
-            self.logger.exception('Error getting info for proxy dn={} attribute={}'.format(dn, attribute))
+            self.logger.exception(f'Error getting info for proxy dn={dn} attribute={attribute}')
             raise
         else:
             if not proxyInfo:
-                self.logger.error('No proxy with dn={} and attribute={}'.format(dn, attribute))
+                self.logger.error(f'No proxy with dn={dn} and attribute={attribute}')
                 raise NoSuchProxyError(dn, attribute)
             else:
                 return proxyInfo
@@ -84,8 +84,8 @@ class ProxyManager(object):
             raise NoProxyFileError(proxyPath)
         try:
             proxystr, dn, expirytime = self.actproxy._readProxyFromFile(proxyPath)
-        except: # probably some file reading error
-            self.logger.exception('Error reading proxy file {}'.format(proxyPath))
+        except:  # probably some file reading error
+            self.logger.exception(f'Error reading proxy file {proxyPath}')
             raise
         if expirytime < datetime.datetime.now():
             raise ProxyFileExpiredError()
@@ -163,7 +163,7 @@ class ProxyManager(object):
         Returns:
             A list of dictionaries with column name:value entries for proxies.
         """
-        return self.arcdb.getProxiesInfo(" dn = '{}' ".format(dn), columns)
+        return self.arcdb.getProxiesInfo(f" dn = '{dn}' ", columns)
 
     def getProxyKeyPEM(self, proxyid):
         c = self.arcdb.db.getCursor()

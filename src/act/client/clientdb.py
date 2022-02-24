@@ -257,13 +257,13 @@ class ClientDB(aCTDB):
         """
         query = 'DELETE FROM clientjobs'
         if where:
-            query += ' WHERE {}'.format(where)
+            query += f' WHERE {where}'
 
         c = self.db.getCursor()
         try:
             c.execute(query, params)
         except:
-            self.log.exception('Error deleting jobs with query: "{}"'.format(where))
+            self.log.exception(f'Error deleting jobs with query: "{where}"')
             raise
         else:
             self.Commit()
@@ -293,13 +293,12 @@ class ClientDB(aCTDB):
         # query params
         params = []
         # create query
-        query = 'SELECT {} FROM clientjobs '.format(
-            self._column_list2str(columns))
+        query = f'SELECT {self._column_list2str(columns)} FROM clientjobs '
         if 'where' in kwargs:
-            query += ' WHERE {} '.format(kwargs['where'])
+            query += f' WHERE {kwargs["where"]} '
             params.extend(kwargs['where_params'])
         if 'order_by' in kwargs:
-            query += ' ORDER BY {} '.format(kwargs['order_by'])
+            query += f' ORDER BY {kwargs["order_by"]} '
             params.extend(kwargs['order_by_params'])
         if 'limit' in kwargs:
             query += ' LIMIT %s'
@@ -347,7 +346,7 @@ class ClientDB(aCTDB):
         query = 'UPDATE clientjobs SET '
         params = []
         for key in patch.keys():
-            query += '{} = %s, '.format(key)
+            query += f'{key} = %s, '
             params.append(patch[key])
         query = query.rstrip(', ')
         query += ' WHERE id = %s'
@@ -357,7 +356,7 @@ class ClientDB(aCTDB):
         try:
             c.execute(query, params)
         except:
-            self.log.exception('Error updating job {}'.format(jobid))
+            self.log.exception(f'Error updating job {jobid}')
             raise
         else:
             if not lazy:
@@ -396,9 +395,9 @@ class ClientDB(aCTDB):
         query = "SELECT "
         # prepend table name for all columns and add them to query
         for col in clicols:
-            query += 'c.{} AS c_{}, '.format(col, col)
+            query += f'c.{col} AS c_{col}, '
         for col in arccols:
-            query += 'a.{} AS a_{}, '.format(col, col)
+            query += f'a.{col} AS a_{col}, '
         query = query.rstrip(', ') # strip last comma and space
 
         # inner join
@@ -408,10 +407,10 @@ class ClientDB(aCTDB):
         params = []
         # select job
         if 'where' in kwargs:
-            query += ' WHERE {}'.format(kwargs['where'])
+            query += f' WHERE {kwargs["where"]}'
             params.extend(kwargs['where_params'])
         if 'order_by' in kwargs:
-            query += ' ORDER BY {}'.format(kwargs['order_by'])
+            query += f' ORDER BY {kwargs["order_by"]}'
             params.extend(kwargs['order_by_params'])
         if 'limit' in kwargs:
             query += ' LIMIT %s'
@@ -421,7 +420,7 @@ class ClientDB(aCTDB):
         try:
             c.execute(query, params)
         except:
-            self.log.exception('Error getting inner join for query {}'.format(query))
+            self.log.exception(f'Error getting inner join for query {query}')
             raise
         else:
             return c.fetchall()
@@ -464,9 +463,9 @@ class ClientDB(aCTDB):
         query = "SELECT "
         # prepend table name for all columns and add them to query
         for col in clicols:
-            query += 'c.{} AS c_{}, '.format(col, col)
+            query += f'c.{col} AS c_{col}, '
         for col in arccols:
-            query += 'a.{} AS a_{}, '.format(col, col)
+            query += f'a.{col} AS a_{col}, '
         query = query.rstrip(', ') # strip last comma and space
 
         # left join
@@ -476,10 +475,10 @@ class ClientDB(aCTDB):
         params = []
         # select job
         if 'where' in kwargs:
-            query += ' WHERE {}'.format(kwargs['where'])
+            query += f' WHERE {kwargs["where"]}'
             params.extend(kwargs['where_params'])
         if 'order_by' in kwargs:
-            query += ' ORDER BY {}'.format(kwargs['order_by'])
+            query += f' ORDER BY {kwargs["order_by"]}'
             params.extend(kwargs['order_by_params'])
         if 'limit' in kwargs:
             query += ' LIMIT %s'
@@ -489,7 +488,7 @@ class ClientDB(aCTDB):
         try:
             c.execute(query, params)
         except:
-            self.log.exception('Error getting left join for query {}'.format(query))
+            self.log.exception(f'Error getting left join for query {query}')
             raise
         else:
             return c.fetchall()
@@ -510,11 +509,11 @@ class ClientDB(aCTDB):
         the same interface.
         """
         c = self.db.getCursor()
-        query = 'SHOW columns FROM {}'.format(tableName)
+        query = f'SHOW columns FROM {tableName}'
         try:
             c.execute(query)
         except:
-            self.log.exception('Error getting columns for table {}'.format(tableName))
+            self.log.exception(f'Error getting columns for table {tableName}')
             raise
         else:
             rows = c.fetchall()

@@ -77,10 +77,10 @@ def stat():
         jobids = getIDs()
         jobdicts = jmgr.getJobStats(proxyid, jobids, state_filter, name_filter, clicols, arccols)
     except RESTError as e:
-        print('error: GET /jobs: {}'.format(e))
+        print(f'error: GET /jobs: {e}')
         return {'msg': str(e)}, e.httpCode
-    except Exception:
-        print('error: GET /jobs: {}'.format(e))
+    except Exception as e:
+        print(f'error: GET /jobs: {e}')
         return {'msg': 'Server error'}, 500
     else:
         return jsonify(jobdicts)
@@ -104,7 +104,7 @@ def clean():
         token = getToken()
         jobids = getIDs()
     except RESTError as e:
-        print('error: DELETE /jobs: {}'.format(e))
+        print(f'error: DELETE /jobs: {e}')
         return {'msg': str(e)}, e.httpCode
     proxyid = token['proxyid']
 
@@ -119,9 +119,9 @@ def clean():
                 datadir = jmgr.getJobDataDir(jobid)
                 shutil.rmtree(jmgr.getJobDataDir(datadir))
             except OSError as e:
-                print('error: PATCH /jobs: deleting {}: {}'.format(datadir, e))
+                print(f'error: PATCH /jobs: deleting {datadir}: {e}')
     except Exception as e:
-        print('error: DELETE /jobs: {}'.format(e))
+        print(f'error: DELETE /jobs: {e}')
         return {'msg': 'Server error'}, 500
 
     return jsonify(deleted)
@@ -153,10 +153,10 @@ def patch():
         jobids = getIDs()
         arcstate = request.get_json().get('arcstate', None)
     except BadRequest as e:
-        print('error: PATCH /jobs: {}'.format(e))
+        print(f'error: PATCH /jobs: {e}')
         return {'msg': str(e)}, 400
     except RESTError as e:
-        print('error: PATCH /jobs: {}'.format(e))
+        print(f'error: PATCH /jobs: {e}')
         return {'msg': str(e)}, e.httpCode
     proxyid = token['proxyid']
 
@@ -183,14 +183,14 @@ def patch():
                         datadir = jmgr.getJobDataDir(job['c_id'])
                         shutil.rmtree(jmgr.getJobDataDir(datadir))
                     except OSError as e:
-                        print('error: PATCH /jobs: deleting {}: {}'.format(datadir, e))
+                        print(f'error: PATCH /jobs: deleting {datadir}: {e}')
             jobids = [job['c_id'] for job in jobs]
         elif arcstate == 'toresubmit':
             jobids = jmgr.resubmitJobs(proxyid, jobids, name_filter)
         else:
             return {'msg': '"arcstate" should be either "tofetch" or "tocancel" or "toresubmit"'}, 400
     except Exception as e:
-        print('error: PATCH /jobs: {}'.format(e))
+        print(f'error: PATCH /jobs: {e}')
         return {'msg': 'Server error'}, 500
     return jsonify(jobids)
 
@@ -215,13 +215,13 @@ def create_jobs():
         jobs = request.get_json()
         jmgr = JobManager()
     except RESTError as e:
-        print('{}{}'.format(errpref, e))
+        print(f'{errpref}{e}')
         return {'msg': str(e)}, e.httpCode
     except BadRequest as e:  # raised for invalid JSON
-        print('{}{}'.format(errpref, e))
+        print(f'{errpref}{e}')
         return {'msg': str(e)}, 400
     except Exception as e:
-        print('{}{}'.format(errpref, e))
+        print(f'{errpref}{e}')
         return {'msg': 'Server error'}, 500
 
     results = []
@@ -230,13 +230,13 @@ def create_jobs():
 
         # check job description
         if 'desc' not in job:
-            print('{}No job description given'.format(errpref))
+            print(f'{errpref}No job description given')
             result['msg'] = 'No job description given'
             results.append(result)
             continue
         jobdescs = arc.JobDescriptionList()
         if not arc.JobDescription_Parse(job['desc'], jobdescs):
-            print('{}Invalid job description'.format(errpref))
+            print(f'{errpref}Invalid job description')
             result['msg'] = 'Invalid job description'
             results.append(result)
             continue
@@ -245,7 +245,7 @@ def create_jobs():
         try:
             # check clusters
             if 'clusterlist' not in job or not job['clusterlist']:
-                print('{}No clusters given'.format(errpref))
+                print(f'{errpref}No clusters given')
                 result['msg'] = 'No clusters given'
                 results.append(result)
                 continue
@@ -256,12 +256,12 @@ def create_jobs():
             jobDataDir = jmgr.getJobDataDir(jobid)
             os.makedirs(jobDataDir)
         except UnknownClusterError as e:
-            print('{}Unknown cluster {}'.format(errpref, e.name))
-            result['msg'] = 'Unknown cluster {}'.format(e.name)
+            print(f'{errpref}Unknown cluster {e.name}')
+            result['msg'] = f'Unknown cluster {e.name}'
             results.append(result)
             continue
         except Exception as e:
-            print('{}{}'.format(errpref, e))
+            print(f'{errpref}{e}')
             result['msg'] = 'Server error'
             results.append(result)
             continue
@@ -293,13 +293,13 @@ def confirm_jobs():
         jobs = request.get_json()
         jmgr = JobManager()
     except BadRequest as e:
-        print('{}{}'.format(errpref, e))
+        print(f'{errpref}{e}')
         return {'msg': str(e)}, 400
     except RESTError as e:
-        print('{}{}'.format(errpref, e))
+        print(f'{errpref}{e}')
         return {'msg': str(e)}, e.httpCode
     except Exception as e:
-        print('{}{}'.format(errpref, e))
+        print(f'{errpref}{e}')
         return {'msg': 'Server error'}, 500
 
     results = []
@@ -307,13 +307,13 @@ def confirm_jobs():
         result = {}
         # check job description
         if 'desc' not in job:
-            print('{}No job description given'.format(errpref))
+            print(f'{errpref}No job description given')
             result['msg'] = 'No job description given'
             results.append(result)
             continue
         jobdescs = arc.JobDescriptionList()
         if not arc.JobDescription_Parse(job['desc'], jobdescs):
-            print('{}Invalid job description'.format(errpref))
+            print(f'{errpref}Invalid job description')
             result['msg'] = 'Invalid job description'
             results.append(result)
             continue
@@ -321,15 +321,15 @@ def confirm_jobs():
 
         # check job ID
         if 'id' not in job:
-            print('{}No job ID given')
+            print(f'{errpref}No job ID given')
             result['msg'] = 'No job ID given'
             results.append(result)
             continue
         result['id'] = job['id']
         jobid = jmgr.checkJobExists(proxyid, job['id'])
         if not jobid:
-            print('{}Job ID {} does not exist'.format(errpref, jobid))
-            result['msg'] = 'Job ID {} does not exist'.format(job['id'])
+            print(f'{errpref}Job ID {job["id"]} does not exist')
+            result['msg'] = f'Job ID {job["id"]} does not exist'
             results.append(result)
             continue
 
@@ -337,7 +337,7 @@ def confirm_jobs():
         try:
             jobDataDir = jmgr.getJobDataDir(jobid)
         except ConfigError as e:
-            print('{}{}'.format(errpref, e))
+            print(f'{errpref}{e}')
             result['msg'] = 'Server error'
             results.append(result)
             continue
@@ -360,7 +360,7 @@ def confirm_jobs():
         desc = jobdescs[0].UnParse('', '')[1]
         jobdescs = arc.JobDescriptionList()
         if not arc.JobDescription_Parse(desc, jobdescs):
-            print('{}Invalid modified job description'.format(errpref))
+            print(f'{errpref}Invalid modified job description')
             result['msg'] = 'Server error'
             results.append(result)
             continue
@@ -372,7 +372,7 @@ def confirm_jobs():
             descid = jmgr.clidb.insertDescription(desc)
             jmgr.clidb.updateJob(jobid, {'jobdesc': descid})
         except Exception as e:
-            print('{}{}'.format(errpref, e))
+            print(f'{errpref}{e}')
             result['msg'] = 'Server error'
             results.append(result)
             continue
@@ -412,7 +412,7 @@ def getResults():
         path = os.path.join(jobDataDir, os.path.basename(resultDir))
         archivePath = shutil.make_archive(path, 'zip', resultDir)
     except Exception as e:
-        print('error: GET /results: {}'.format(e))
+        print(f'error: GET /results: {e}')
         return {'msg': 'Server error'}, 500
 
     return send_file(archivePath)
@@ -425,10 +425,10 @@ def getCSR():
         issuer_pem = request.get_json().get('cert', None)
         pmgr = ProxyManager()
     except BadRequest as e:
-        print('error: POST /proxies: {}'.format(e))
+        print(f'error: POST /proxies: {e}')
         return {'msg': str(e)}, 400
     except Exception as e:
-        print('error: POST /proxies: creating proxy manager: {}'.format(e))
+        print(f'error: POST /proxies: creating proxy manager: {e}')
         return {'msg': 'Server error'}, 500
 
     # check proxy
@@ -460,7 +460,7 @@ def getCSR():
 
         # generate CSR
         csr = create_proxy_csr(issuer, private_key)
-        print('CSR generated: DN: {}, attr: {}, expiration: {}'.format(dn, attr, exptime))
+        print(f'CSR generated: DN: {dn}, attr: {attr}, expiration: {exptime}')
 
         # put private key into string and store in db
         pem = private_key.private_bytes(
@@ -477,7 +477,7 @@ def getCSR():
         csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
         token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
     except Exception as e:
-        print('error: POST /proxies: {}'.format(e))
+        print(f'error: POST /proxies: {e}')
         return {'msg': 'Server error'}, 500
 
     return {'token': token, 'csr': csr_pem}, 200
@@ -490,13 +490,13 @@ def uploadSignedProxy():
         data = request.get_json()
         pmgr = ProxyManager()
     except RESTError as e:
-        print('error: PUT /proxies: {}'.format(e))
+        print(f'error: PUT /proxies: {e}')
         return {'msg': str(e)}, e.httpCode
     except BadRequest as e:
-        print('error: PUT /proxies: {}'.format(e))
+        print(f'error: PUT /proxies: {e}')
         return {'msg': str(e)}, 400
     except Exception as e:
-        print('error: PUT /proxies: {}'.format(e))
+        print(f'error: PUT /proxies: {e}')
         return {'msg': 'Server error'}, 500
 
     proxyid = token['proxyid']
@@ -525,10 +525,10 @@ def uploadSignedProxy():
         proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, attr, exptime)
         token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
     except Exception as e:
-        print('error: PUT /proxies: {}'.format(e))
+        print(f'error: PUT /proxies: {e}')
         return {'msg': 'Server error'}, 500
 
-    print('Proxy submitted: DN: {}, attr: {}, expiration: {}'.format(dn, attr, exptime))
+    print(f'Proxy submitted: DN: {dn}, attr: {attr}, expiration: {exptime}')
     return {'token': token}, 200
 
 
@@ -539,10 +539,10 @@ def deleteProxy():
         pmgr = ProxyManager()
         pmgr.arcdb.deleteProxy(token['proxyid'])
     except RESTError as e:
-        print('error: DELETE /proxies: {}'.format(e))
+        print(f'error: DELETE /proxies: {e}')
         return {'msg': str(e)}, e.httpCode
     except Exception as e:
-        print('error: DELETE /proxies: {}'.format(e))
+        print(f'error: DELETE /proxies: {e}')
         return {'msg': 'Server error'}, 500
     return jsonify({'msg': 'Proxy deletion successful'}), 204
 
@@ -553,10 +553,10 @@ def uploadFile():
         token = getToken()
         jobids = getIDs()
     except RESTError as e:
-        print('error: PUT /data: {}'.format(e))
+        print(f'error: PUT /data: {e}')
         return {'msg': str(e)}, e.httpCode
     except Exception as e:
-        print('error: PUT /data: {}'.format(e))
+        print(f'error: PUT /data: {e}')
         return {'msg': 'Server error'}, 500
     proxyid = token['proxyid']
 
@@ -572,9 +572,9 @@ def uploadFile():
         jobid = jmgr.checkJobExists(proxyid, jobids[0])
         if not jobid:
             print('error: PUT /data: job ID does not exist')
-            return {'msg': 'Client Job ID {} does not exist'.format(jobids[0])}, 400
+            return {'msg': f'Client Job ID {jobids[0]} does not exist'}, 400
     except Exception as e:
-        print('error: PUT /data: {}'.format(e))
+        print(f'error: PUT /data: {e}')
         return {'msg': 'Server error'}, 500
 
 
@@ -604,7 +604,7 @@ def uploadFile():
                     break
                 f.write(chunk)
     except Exception as e:
-        print('error: PUT /data: {}'.format(e))
+        print(f'error: PUT /data: {e}')
         return {'msg': 'Server error'}, 500
 
     return {'msg': 'OK'}, 200
@@ -622,9 +622,9 @@ def getIDs():
         try:
             return getIDsFromList(ids)
         except InvalidJobIDError as e:
-            raise RESTError('Invalid job ID: {}'.format(e.jobid), 400)
+            raise RESTError(f'Invalid job ID: {e.jobid}', 400)
         except InvalidJobRangeError as e:
-            raise RESTError('Invalid job range: {}'.format(e.jobRange), 400)
+            raise RESTError(f'Invalid job range: {e.jobRange}', 400)
     else:
         return []
 

@@ -1,5 +1,4 @@
 import os
-import struct
 import time
 
 from cryptography import x509
@@ -11,10 +10,9 @@ from datetime import datetime, timedelta
 import delegate_proxy
 
 
-USERCERT    = os.path.expandvars("$HOME/.globus/usercert.pem")
-USERKEY     = os.path.expandvars("$HOME/.globus/userkey.pem")
-PROXYPATH   = "/tmp/x509up_u{}".format(os.getuid())
-#PROXYPATH   = "proxy.pem"
+USERCERT = os.path.expandvars("$HOME/.globus/usercert.pem")
+USERKEY = os.path.expandvars("$HOME/.globus/userkey.pem")
+PROXYPATH = f"/tmp/x509up_u{os.getuid()}"
 
 
 def create_proxy_csr(issuer_cert, proxy_key):

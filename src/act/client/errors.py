@@ -67,7 +67,7 @@ class ConfigError(Exception):
         self.name = name
 
     def __str__(self):
-        return "Configuration parameter {} is not configured".format(self.name)
+        return f"Configuration parameter {self.name} is not configured"
 
 
 class NoJobDirectoryError(Exception):
