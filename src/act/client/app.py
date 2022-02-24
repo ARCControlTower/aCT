@@ -23,6 +23,8 @@ from werkzeug.exceptions import BadRequest
 # TODO: HTTP return codes
 # TODO: consistently change relevant jobmgr API to return jobs as dicts
 #       rather than list of IDs
+# TODO: API should not return underscored column names for as many endpoints
+#       possible
 
 
 JWT_SECRET = "aCT JWT secret"
@@ -174,14 +176,15 @@ def patch():
             # otherwise cleaned by cleaning operation but this is one exception
             # where killing destroys the job immediately and has to remove the
             # data dir as well.
-            jobids = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
-            for job in jobids:
+            jobs = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
+            for job in jobs:
                 if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting'):
                     try:
                         datadir = jmgr.getJobDataDir(job['c_id'])
                         shutil.rmtree(jmgr.getJobDataDir(datadir))
                     except OSError as e:
                         print('error: PATCH /jobs: deleting {}: {}'.format(datadir, e))
+            jobids = [job['c_id'] for job in jobs]
         elif arcstate == 'toresubmit':
             jobids = jmgr.resubmitJobs(proxyid, jobids, name_filter)
         else:
@@ -664,6 +667,6 @@ def checkClusters(clusterlist):
     conf = yaml.safe_load(yamlstr)
     if 'clusters' not in conf:
         raise ConfigError('/etc/act/clusters.yaml: clusters')
-    for cluster in conf['clusters']:
+    for cluster in clusterlist:
         if cluster not in conf['clusters']:
             raise UnknownClusterError(cluster)
