@@ -115,7 +115,7 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of cleaned jobs.
+            A list of IDs of deleted jobs.
         """
         # wrong state filter, return immediately
         if state_filter not in ('', 'done', 'donefailed', 'cancelled', 'failed'):
@@ -219,7 +219,7 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of jobs assigned for fetching.
+            A list of IDs of fetched jobs.
         """
         # create query with filtering
         where = " a.arcstate = 'failed' AND c.proxyid = %s AND "
@@ -262,7 +262,7 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of jobs that will be refetched.
+            A list of IDs of jobs that will be refetched.
         """
         # create filters in query
         where = ' c.proxyid = %s AND '
@@ -390,7 +390,7 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of jobs assigned to be killed.
+            A list of job dictionaries.
         """
         # wrong state filter, return immediately
         if state_filter not in ('', 'submitted', 'running', 'tosubmit', 'submitting'):
@@ -465,7 +465,7 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of jobs assigned for resubmittion.
+            A list of IDs of jobs that will be resubmitted.
         """
         # create query with filters
         where = " a.arcstate = 'failed' AND c.proxyid = %s AND "
