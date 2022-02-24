@@ -1,19 +1,16 @@
 import argparse
 import os
-import sys
 
-import trio
 import httpx
+import trio
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
 import x509proxy
-from common import addCommonArgs, disableSIGINT, readProxyFile
-from common import run_with_sigint_handler
+from common import addCommonArgs, readProxyFile, runWithSIGINTHandler
 from config import checkConf, expandPaths, loadConf
 from delegate_proxy import parse_issuer_cred
-
 
 # TODO: use exceptions instead of system exit
 
@@ -87,7 +84,7 @@ async def uploadProxy(client, requestUrl, proxyStr, conf):
 
 
 def main():
-    trio.run(run_with_sigint_handler, program)
+    trio.run(runWithSIGINTHandler, program)
 
 
 async def program():
@@ -101,7 +98,7 @@ async def program():
     if args.server:
         conf['server'] = args.server
     if args.port:
-        conf['port']   = args.port
+        conf['port'] = args.port
 
     expandPaths(conf)
     checkConf(conf, ['server', 'port', 'token', 'proxy'])

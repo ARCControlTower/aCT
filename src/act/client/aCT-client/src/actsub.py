@@ -1,13 +1,13 @@
 import argparse
 import os
-import ssl
 import sys
 
 import arc
-import trio
 import httpx
+import trio
 
-from common import addCommonArgs, clean_webdav, readTokenFile, run_with_sigint_handler
+from common import (addCommonArgs, clean_webdav, readTokenFile,
+                    runWithSIGINTHandler, getProxyCertClient)
 from config import checkConf, expandPaths, loadConf
 
 TRANSFER_BLOCK_SIZE = 2**16
@@ -91,7 +91,6 @@ async def kill_jobs(client, url, jobids, token):
         print('error: killing jobs with failed input files: {} - {}'.format(resp.status_code, json['msg']))
 
 
-# TODO: environment variables in paths!!!
 async def upload_input_files(client, jobid, jobdesc, token, requestUrl, dcacheBase=None, dcclient=None):
     files = {}
 
@@ -263,7 +262,7 @@ async def upload_job_data(client, job, jobdesc, token, tokill, dataUrl, dcacheBa
 
 
 def main():
-    trio.run(run_with_sigint_handler, program)
+    trio.run(runWithSIGINTHandler, program)
 
 
 async def cleanup(client, token, jobsURL, tokill, conf, args, dcclient):
@@ -314,15 +313,7 @@ async def program():
         else:
             dcacheBase = args.dcache
 
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-        context.load_cert_chain(conf['proxy'], keyfile=conf['proxy'])
-        _DEFAULT_CIPHERS = (
-            'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
-            'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
-            '!eNULL:!MD5'
-        )
-        context.set_ciphers(_DEFAULT_CIPHERS)
-        dcclient = httpx.AsyncClient(verify=context)
+        dcclient = getProxyCertClient(conf['proxy'])
     else:
         dcacheBase = None
         dcclient = None

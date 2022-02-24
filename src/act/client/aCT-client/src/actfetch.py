@@ -1,16 +1,15 @@
 import argparse
-import sys
 
-import trio
 import httpx
+import trio
 
 from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
-                    disableSIGINT, readTokenFile, showHelpOnCommandOnly, run_with_sigint_handler)
+                    readTokenFile, runWithSIGINTHandler, showHelpOnCommandOnly)
 from config import checkConf, expandPaths, loadConf
 
 
 def main():
-    trio.run(run_with_sigint_handler, program)
+    trio.run(runWithSIGINTHandler, program)
 
 
 async def program():
@@ -43,7 +42,6 @@ async def program():
             params['id'] = args.id
         if args.name:
             params['name'] = args.name
-
 
     with trio.CancelScope(shield=True):
         async with httpx.AsyncClient() as client:
