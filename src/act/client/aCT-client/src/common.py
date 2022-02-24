@@ -129,7 +129,6 @@ def getProxyCertClient(proxypath):
     try:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         context.load_cert_chain(proxypath, keyfile=proxypath)
-        # TODO: check if default ssl context is good
         _DEFAULT_CIPHERS = (
             'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
             'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
