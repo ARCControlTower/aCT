@@ -3,12 +3,12 @@ import os
 import sys
 import zipfile
 
-import trio
 import httpx
+import trio
 
 from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
-                    clean_webdav, disableSIGINT, readTokenFile,
-                    showHelpOnCommandOnly, run_with_sigint_handler)
+                    clean_webdav, readTokenFile, runWithSIGINTHandler,
+                    showHelpOnCommandOnly)
 from config import checkConf, expandPaths, loadConf
 
 
@@ -146,7 +146,7 @@ async def clean_act(client, url, jobids, token):
 
 
 def main():
-    trio.run(run_with_sigint_handler, program)
+    trio.run(runWithSIGINTHandler, program)
 
 
 async def program():

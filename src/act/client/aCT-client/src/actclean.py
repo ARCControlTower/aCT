@@ -4,12 +4,13 @@ import httpx
 import trio
 
 from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
-                    readTokenFile, showHelpOnCommandOnly, run_with_sigint_handler, clean_webdav)
+                    clean_webdav, readTokenFile, runWithSIGINTHandler,
+                    showHelpOnCommandOnly)
 from config import checkConf, expandPaths, loadConf
 
 
 def main():
-    trio.run(run_with_sigint_handler, program)
+    trio.run(runWithSIGINTHandler, program)
 
 
 async def clean_jobs(url, params, token, conf, args):

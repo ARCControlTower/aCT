@@ -1,15 +1,16 @@
 import argparse
 
-import trio
 import httpx
+import trio
 
 from common import (addCommonArgs, addCommonJobFilterArgs, checkJobParams,
-                    clean_webdav, readTokenFile, showHelpOnCommandOnly, run_with_sigint_handler)
+                    clean_webdav, readTokenFile, runWithSIGINTHandler,
+                    showHelpOnCommandOnly)
 from config import checkConf, expandPaths, loadConf
 
 
 def main():
-    trio.run(run_with_sigint_handler, program)
+    trio.run(runWithSIGINTHandler, program)
 
 
 async def kill_jobs(url, params, headers, conf, args):

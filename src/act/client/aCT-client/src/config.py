@@ -1,19 +1,20 @@
-'''
+"""
 A set of functions and variables for handling "layered configuration".
 
 Every program gets configuration from a combination of different sources:
     - command line parameters
-    - environment variables !! not implemented
     - config file (default or provided as CLI argument)
     - some settings should have hardcoded values
 
 Some parameters are paths and we want to allow users to use environment
 variables and tilda (PATH_KEYS).
-'''
+"""
 
 import os
 import sys
 import yaml
+
+from common import ExitProgram
 
 # program parameters that are paths have to be expanded (env vars, tilda)
 PATH_KEYS = ('proxy', 'token', )
@@ -57,10 +58,8 @@ def loadConf(**kwargs):
         with open(path, 'r') as confFile:
             yamlstr = confFile.read()
         config = yaml.safe_load(yamlstr)
-    # TODO: handle exceptions more granularly
     except Exception as e:
-        print(e)
-        sys.exit(1)
+        raise ExitProgram(str(e), 1)
 
     # add missing keys that have hardcoded defaults
     for key in DEFAULT_KEYS:
@@ -80,5 +79,4 @@ def expandPaths(conf):
 def checkConf(config, keyList):
     for key in keyList:
         if key not in config:
-            print('error: config key not configured: {}'.format(key))
-            sys.exit(1)
+            raise ExitProgram("Config key {} not configured".format(key), 1)
