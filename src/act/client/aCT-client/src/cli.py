@@ -4,12 +4,13 @@ import sys
 import httpx
 import trio
 
-from common import (ACTClientError, checkJobParams, getProxyCertClient,
-                    getWebDAVBase, readFile, runWithSIGINTHandler)
+from common import (ACTClientError, checkJobParams, getWebDAVBase,
+                    getWebDAVClient, readFile, runWithSIGINTHandler)
 from config import checkConf, expandPaths, loadConf
 from operations import (cleanJobs, cleanWebDAV, fetchJobs,
-                        filterJobsToDownload, getJob, killJobs, resubmitJobs,
-                        uploadProxy, getJobStats, submitJobs)
+                        filterJobsToDownload, getJob, getJobStats, killJobs,
+                        resubmitJobs, submitJobs, uploadProxy)
+
 
 def addCommonArgs(parser):
     parser.add_argument(
@@ -239,7 +240,7 @@ async def subcommandClean(args, conf):
             print(f'Cleaned {len(jobids)} jobs')
             if jobids and webdavUrl:
                 print('Cleaning WebDAV directories ...')
-                webdavClient = getProxyCertClient(conf['proxy'])
+                webdavClient = getWebDAVClient(conf['proxy'])
                 async with webdavClient:
                     errors = await cleanWebDAV(webdavClient, webdavUrl, jobids)
                     for error in errors:
@@ -305,7 +306,7 @@ async def subcommandGet(args, conf):
                     webdavUrl = getWebDAVBase(args, conf)
                     if webdavUrl:
                         print('Cleaning WebDAV directories ...')
-                        webdavClient = getProxyCertClient(conf['proxy'])
+                        webdavClient = getWebDAVClient(conf['proxy'])
                         async with webdavClient:
                             errors = await cleanWebDAV(webdavClient, webdavUrl, toclean)
                             for error in errors:
@@ -354,7 +355,7 @@ async def subcommandKill(args, conf):
         webdavUrl = getWebDAVBase(args, conf)
         if tokill and webdavUrl:
             print('Cleaning WebDAV directories ...')
-            webdavClient = getProxyCertClient(conf['proxy'])
+            webdavClient = getWebDAVClient(conf['proxy'])
             async with webdavClient:
                 errors = await cleanWebDAV(webdavClient, webdavUrl, tokill)
                 for error in errors:
@@ -498,7 +499,7 @@ async def subcommandSub(args, conf):
     url = conf['server'] + ':' + str(conf['port'])
 
     webdavUrl = getWebDAVBase(args, conf)
-    webdavClient = getProxyCertClient(conf['proxy'])
+    webdavClient = getWebDAVClient(conf['proxy'])
 
     limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
     timeout = httpx.Timeout(5.0, pool=None)
