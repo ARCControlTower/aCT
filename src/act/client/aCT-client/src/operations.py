@@ -1,4 +1,5 @@
 import os
+import shutil
 import zipfile
 
 import arc
@@ -312,6 +313,7 @@ async def getJob(client, url, token, jobid):
     # extractFailed is needed to exit with error after zip file removal
     # if its extraction failes
     extractFailed = False
+    dirname = ''
     if os.path.isfile(filename):
         try:
             dirname = os.path.splitext(filename)[0]
@@ -329,6 +331,7 @@ async def getJob(client, url, token, jobid):
         raise ACTClientError(f'Results zip delete error: {e}')
 
     if extractFailed:
+        shutil.rmtree(dirname, ignore_errors=True)
         raise ACTClientError(msg)
 
     return dirname
