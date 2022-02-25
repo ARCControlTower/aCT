@@ -169,7 +169,7 @@ def patch():
     try:
         jmgr = JobManager()
         if arcstate == 'tofetch':
-            jobids = jmgr.fetchJobs(proxyid, jobids, name_filter)
+            jobs = jmgr.fetchJobs(proxyid, jobids, name_filter)
         elif arcstate == 'tocancel':
             # One state in which a job can be killed is before it is passed
             # to ARC. Such jobs have None as arcid. Data dirs for jobs are
@@ -184,15 +184,14 @@ def patch():
                         shutil.rmtree(jmgr.getJobDataDir(datadir))
                     except OSError as e:
                         print(f'error: PATCH /jobs: deleting {datadir}: {e}')
-            jobids = [job['c_id'] for job in jobs]
         elif arcstate == 'toresubmit':
-            jobids = jmgr.resubmitJobs(proxyid, jobids, name_filter)
+            jobs = jmgr.resubmitJobs(proxyid, jobids, name_filter)
         else:
             return {'msg': '"arcstate" should be either "tofetch" or "tocancel" or "toresubmit"'}, 400
     except Exception as e:
         print(f'error: PATCH /jobs: {e}')
         return {'msg': 'Server error'}, 500
-    return jsonify(jobids)
+    return jsonify(jobs)
 
 
 # expects a JSON list of job objects in the following form:
