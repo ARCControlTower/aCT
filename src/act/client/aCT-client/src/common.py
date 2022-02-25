@@ -52,7 +52,7 @@ def readFile(filename):
         raise ACTClientError(f'Error reading file {filename}: {e}')
 
 
-def getProxyCertClient(proxypath):
+def getWebDAVClient(proxypath):
     try:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         context.load_cert_chain(proxypath, keyfile=proxypath)
