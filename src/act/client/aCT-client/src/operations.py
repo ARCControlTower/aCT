@@ -471,6 +471,7 @@ async def submitJobs(client, url, token, descs, clusterlist, webdavClient, webda
                 tasks.start_soon(uploadJobData, client, url, token, jobs[i], jobdescs[i], webdavClient, webdavUrl)
     except trio.Cancelled:
         for i in range(len(jobs) - 1, -1, -1):  # add remaining jobs to results
+            jobs[i]['cleanup'] = True
             results.append(jobs.pop(i))
         return results
 
