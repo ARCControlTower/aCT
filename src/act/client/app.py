@@ -27,16 +27,11 @@ from werkzeug.exceptions import BadRequest
 #       possible
 
 
-JWT_SECRET = "aCT JWT secret"
 STREAM_CHUNK_SIZE = 4096
+CONFIG_PATH = '/etc/act/config.yaml'
 
 
 app = Flask(__name__)
-
-
-@app.route('/test', methods=['GET'])
-def test():
-    return "Hello World!\n", 200
 
 
 @app.route('/jobs', methods=['GET'])
@@ -474,7 +469,8 @@ def getCSR():
 
         # generate CSR string and auth token
         csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
-        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
+        conf = readConfig()
+        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, conf['jwt_secret'], algorithm='HS256')
     except Exception as e:
         print(f'error: POST /proxies: {e}')
         return {'msg': 'Server error'}, 500
@@ -522,7 +518,8 @@ def uploadSignedProxy():
         if not checkRFCProxy(proxy_obj):
             return {'msg': 'cert is not a valid proxy'}, 400
         proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, attr, exptime)
-        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, JWT_SECRET, algorithm='HS256')
+        conf = readConfig()
+        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, conf['jwt_secret'], algorithm='HS256')
     except Exception as e:
         print(f'error: PUT /proxies: {e}')
         return {'msg': 'Server error'}, 500
@@ -578,17 +575,6 @@ def uploadFile():
 
 
     try:
-        ## this block fires exception if client doesn't complete upload
-        #datafile = request.files.get('file', None)
-        #if not datafile:
-        #    print('error: PUT /data: file not sent')
-        #    return {'msg': 'No file sent'}, 400
-
-        #jobDataDir = jmgr.getJobDataDir(jobid)
-        ## TODO: werkzeug.safe_filename does not work because we need relative
-        ##       path that can go deep
-        #datafile.save(os.path.join(jobDataDir, datafile.filename))
-
         filename = request.args.get('filename', None)
         if filename is None:
             print('error: PUT /data: file name not given')
@@ -607,6 +593,21 @@ def uploadFile():
         return {'msg': 'Server error'}, 500
 
     return {'msg': 'OK'}, 200
+
+
+@app.route('/info', methods=['GET'])
+def info():
+    try:
+        getToken()
+        conf = readConfig()
+        json = {'clusters': conf['clusters']}
+    except RESTError as e:
+        print(f'error: GET /info: {e}')
+        return {'msg': str(e)}, e.httpCode
+    except Exception as e:
+        print(f'error: GET /info: {e}')
+        return {'msg': 'Server error'}, 500
+    return jsonify(json)
 
 
 def getIDs():
@@ -638,7 +639,8 @@ def getToken():
     try:
         # potential errors with tokstr, token decode, proxy manager ...
         tokstr = tokstr.split()[1]
-        token = jwt.decode(tokstr, JWT_SECRET, algorithms=['HS256'])
+        conf = readConfig()
+        token = jwt.decode(tokstr, conf['jwt_secret'], algorithms=['HS256'])
         pmgr = ProxyManager()
         result = pmgr.checkProxyExists(token['proxyid'])
         if result is None:
@@ -658,14 +660,18 @@ def checkRFCProxy(proxy):
     return False
 
 
+def readConfig():
+    with open(CONFIG_PATH, 'r') as f:
+        yamlstr = f.read()
+    return yaml.safe_load(yamlstr)
+
+
 # TODO: hardcoded
 # TODO: for now this is called in try except block so we don't handle exceptions
 def checkClusters(clusterlist):
-    with open('/etc/act/clusters.yaml', 'r') as f:
-        yamlstr = f.read()
-    conf = yaml.safe_load(yamlstr)
+    conf = readConfig()
     if 'clusters' not in conf:
-        raise ConfigError('/etc/act/clusters.yaml: clusters')
+        raise ConfigError(f'{CONFIG_PATH}: clusters')
     for cluster in clusterlist:
         if cluster not in conf['clusters']:
             raise UnknownClusterError(cluster)
