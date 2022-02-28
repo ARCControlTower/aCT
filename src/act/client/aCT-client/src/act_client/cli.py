@@ -139,6 +139,11 @@ def createParser():
         default='id,jobname',
         help='a list of columns from client table'
     )
+    parserStat.add_argument(
+        '--get-cols',
+        action='store_true',
+        help='get a list of possible columns from server'
+    )
 
     parserSub = subparsers.add_parser(
         'sub',
@@ -158,22 +163,7 @@ def createParser():
     return parser
 
 
-# potential code flow:
-# - different subcommands could have specific conf override requiring switch
-# - path parameters need to be expanded, common for all commands
-# - the way to execute commands could be different, requiring another switch,
-#   which means duplication
-#
-# PROBLEM!!!!
-# checkConf() call is specific for every command but requires to be run after
-# expand paths forcing us to use another switch:
-# common -> switch (argument overrides) -> common (expandPaths) ->
-# -> checkConf
-# UNLESS we put checkConf as part of specific code execution
 def runSubcommand(args):
-    if args.command in ('clean', 'fetch', 'get', 'kill', 'resub', 'stat'):
-        checkJobParams(args)
-
     conf = loadConf(path=args.conf)
 
     # override values from configuration with command arguments if available
@@ -243,6 +233,7 @@ async def subcommandInfo(args, conf):
 
 
 async def subcommandClean(args, conf):
+    checkJobParams(args)
     checkConf(conf, ['server', 'port', 'token', 'proxy'])
 
     token = readFile(conf['token'])
@@ -273,6 +264,7 @@ async def subcommandClean(args, conf):
 
 
 async def subcommandFetch(args, conf):
+    checkJobParams(args)
     checkConf(conf, ['server', 'port', 'token'])
 
     token = readFile(conf['token'])
@@ -291,6 +283,7 @@ async def subcommandFetch(args, conf):
 
 
 async def subcommandGet(args, conf):
+    checkJobParams(args)
     checkConf(conf, ['server', 'port', 'token'])
 
     token = readFile(conf['token'])
@@ -349,6 +342,7 @@ async def adapterGetJob(client, url, token, jobid, jobname, toclean):
 
 
 async def subcommandKill(args, conf):
+    checkJobParams(args)
     checkConf(conf, ['server', 'port', 'token'])
 
     token = readFile(conf['token'])
@@ -398,6 +392,7 @@ async def subcommandProxy(args, conf):
 
 
 async def subcommandResub(args, conf):
+    checkJobParams(args)
     checkConf(conf, ['server', 'port', 'token'])
 
     token = readFile(conf['token'])
@@ -425,6 +420,22 @@ async def subcommandStat(args, conf):
 
     url = conf['server'] + ':' + str(conf['port'])
 
+    if args.get_cols:
+        async with getRESTClient() as client:
+            headers = {'Authorization': 'Bearer ' + token}
+            async with getRESTClient() as client:
+                resp = await client.get(url + '/info', headers=headers)
+                json = resp.json()
+            if resp.status_code != 200:
+                raise ACTClientError(json['msg'])
+            print('arc columns:')
+            print(f'{", ".join(json["arc"])}')
+            print()
+            print('client columns:')
+            print(f'{", ".join(json["client"])}')
+            return
+
+    checkJobParams(args)
     params = {}
     if args.id:
         params['id'] = args.id

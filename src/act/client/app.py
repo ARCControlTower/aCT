@@ -600,7 +600,19 @@ def info():
     try:
         getToken()
         conf = readConfig()
+        jmgr = JobManager()
+
         json = {'clusters': conf['clusters']}
+
+        c = jmgr.arcdb.db.getCursor()
+        c.execute('SHOW COLUMNS FROM arcjobs')
+        rows = c.fetchall()
+        json['arc'] = [row['Field'] for row in rows]
+        c.execute('SHOW COLUMNS FROM clientjobs')
+        rows = c.fetchall()
+        json['client'] = [row['Field'] for row in rows]
+        c.close()
+
     except RESTError as e:
         print(f'error: GET /info: {e}')
         return {'msg': str(e)}, e.httpCode
