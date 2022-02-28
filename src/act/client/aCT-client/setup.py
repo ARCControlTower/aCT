@@ -7,19 +7,12 @@ setup(
     author = 'aCT team',
     author_email = 'act-dev@cern.ch',
     package_dir = {'': 'src'},
-    py_modules = [
-        'config',
-        'common',
-        'operations',
-        'x509proxy',
-        'delegate_proxy',
-    ],
     entry_points={
         'console_scripts': [
-            'act = cli:main',
+            'act = act_client.cli:main',
         ]
     },
-    install_requires = [
+    install_requires=[
         'cryptography',
         'pyyaml',
         'trio',

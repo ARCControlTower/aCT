@@ -1,6 +1,7 @@
 import os
 import shutil
 import zipfile
+from json.decoder import JSONDecodeError
 
 import arc
 import httpx
@@ -8,12 +9,10 @@ import trio
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
-from json.decoder import JSONDecodeError
 
-from common import ACTClientError, readFile, JobCleanup
-from delegate_proxy import parse_issuer_cred
-from x509proxy import sign_request
-
+from act_client.common import ACTClientError, JobCleanup, readFile
+from act_client.delegate_proxy import parse_issuer_cred
+from act_client.x509proxy import sign_request
 
 # TODO: use proper data structures for API rather than format expected
 #       on backend; also use kwargs

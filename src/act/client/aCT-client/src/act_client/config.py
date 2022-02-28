@@ -11,10 +11,10 @@ variables and tilda (PATH_KEYS).
 """
 
 import os
-import sys
+
 import yaml
 
-from common import ExitProgram
+from act_client.common import ExitProgram
 
 # program parameters that are paths have to be expanded (env vars, tilda)
 PATH_KEYS = ('proxy', 'token', )

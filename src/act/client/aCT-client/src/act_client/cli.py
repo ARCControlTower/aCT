@@ -1,16 +1,16 @@
 import argparse
 import sys
 
-import httpx
 import trio
 
-from common import (ACTClientError, checkJobParams, getRESTClient,
-                    getWebDAVBase, getWebDAVClient, readFile,
-                    runWithSIGINTHandler)
-from config import checkConf, expandPaths, loadConf
-from operations import (cleanJobs, cleanWebDAV, fetchJobs,
-                        filterJobsToDownload, getJob, getJobStats, killJobs,
-                        resubmitJobs, submitJobs, uploadProxy)
+from act_client.common import (ACTClientError, checkJobParams, getRESTClient,
+                               getWebDAVBase, getWebDAVClient, readFile,
+                               runWithSIGINTHandler)
+from act_client.config import checkConf, expandPaths, loadConf
+from act_client.operations import (cleanJobs, cleanWebDAV, fetchJobs,
+                                   filterJobsToDownload, getJob, getJobStats,
+                                   killJobs, resubmitJobs, submitJobs,
+                                   uploadProxy)
 
 
 def addCommonArgs(parser):
