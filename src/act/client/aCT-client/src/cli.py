@@ -4,8 +4,9 @@ import sys
 import httpx
 import trio
 
-from common import (ACTClientError, checkJobParams, getWebDAVBase,
-                    getWebDAVClient, readFile, runWithSIGINTHandler)
+from common import (ACTClientError, checkJobParams, getRESTClient,
+                    getWebDAVBase, getWebDAVClient, readFile,
+                    runWithSIGINTHandler)
 from config import checkConf, expandPaths, loadConf
 from operations import (cleanJobs, cleanWebDAV, fetchJobs,
                         filterJobsToDownload, getJob, getJobStats, killJobs,
@@ -232,9 +233,7 @@ async def subcommandClean(args, conf):
     webdavUrl = getWebDAVBase(args, conf)
 
     with trio.CancelScope(shield=True):
-        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-        timeout = httpx.Timeout(5.0, pool=None)
-        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        client = getRESTClient()
         async with client:
             jobids = await cleanJobs(client, url, token, params)
             print(f'Cleaned {len(jobids)} jobs')
@@ -259,9 +258,7 @@ async def subcommandFetch(args, conf):
     if args.name:
         params['name'] = args.name
 
-    limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-    timeout = httpx.Timeout(5.0, pool=None)
-    client = httpx.AsyncClient(timeout=timeout, limits=limits)
+    client = getRESTClient()
     async with client:
         json = await fetchJobs(client, url, token, params)
     print(f'Will fetch {len(json)} jobs')
@@ -284,33 +281,32 @@ async def subcommandGet(args, conf):
             raise ACTClientError('Wrong state parameter, should be "done" or "donefailed"')
         kwargs['state'] = args.state
 
-    limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-    timeout = httpx.Timeout(5.0, pool=None)
-    client = httpx.AsyncClient(timeout=timeout, limits=limits)
-    async with client:
-        jobs = await filterJobsToDownload(client, url, token, **kwargs)
-
-        toclean = []
-        try:
+    toclean = []
+    try:
+        client = getRESTClient()
+        async with client:
+            jobs = await filterJobsToDownload(client, url, token, **kwargs)
             async with trio.open_nursery() as tasks:
                 for job in jobs:
                     tasks.start_soon(adapterGetJob, client, url, token, job['c_id'], job['c_jobname'], toclean)
-        finally:
-            with trio.CancelScope(shield=True):
-                if toclean:
-                    # clean from aCT
+    finally:
+        with trio.CancelScope(shield=True):
+            if toclean:
+                # clean from aCT
+                client = getRESTClient()
+                async with client:
                     params = {'id': ','.join(map(str, toclean))}
                     toclean = await cleanJobs(client, url, token, params)
 
-                    # clean from WebDAV
-                    webdavUrl = getWebDAVBase(args, conf)
-                    if webdavUrl:
-                        print('Cleaning WebDAV directories ...')
-                        webdavClient = getWebDAVClient(conf['proxy'])
-                        async with webdavClient:
-                            errors = await cleanWebDAV(webdavClient, webdavUrl, toclean)
-                            for error in errors:
-                                print(error)
+                # clean from WebDAV
+                webdavUrl = getWebDAVBase(args, conf)
+                if webdavUrl:
+                    print('Cleaning WebDAV directories ...')
+                    webdavClient = getWebDAVClient(conf['proxy'])
+                    async with webdavClient:
+                        errors = await cleanWebDAV(webdavClient, webdavUrl, toclean)
+                        for error in errors:
+                            print(error)
 
 
 async def adapterGetJob(client, url, token, jobid, jobname, toclean):
@@ -343,9 +339,7 @@ async def subcommandKill(args, conf):
 
     with trio.CancelScope(shield=True):
         # kill in aCT
-        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-        timeout = httpx.Timeout(5.0, pool=None)
-        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        client = getRESTClient()
         async with client:
             json = await killJobs(client, url, token, params)
         print(f'Will kill {len(json)} jobs')
@@ -370,9 +364,7 @@ async def subcommandProxy(args, conf):
     url = conf['server'] + ':' + str(conf['port'])
 
     with trio.CancelScope(shield=True):
-        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-        timeout = httpx.Timeout(5.0, pool=None)
-        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        client = getRESTClient()
         async with client:
             await uploadProxy(client, url, proxyStr, conf['token'])
 
@@ -393,9 +385,7 @@ async def subcommandResub(args, conf):
         params['name'] = args.name
 
     with trio.CancelScope(shield=True):
-        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-        timeout = httpx.Timeout(5.0, pool=None)
-        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        client = getRESTClient()
         async with client:
             json = await resubmitJobs(client, url, token, params)
 
@@ -422,9 +412,7 @@ async def subcommandStat(args, conf):
         params['name'] = args.name
 
     with trio.CancelScope(shield=True):
-        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-        timeout = httpx.Timeout(5.0, pool=None)
-        client = httpx.AsyncClient(timeout=timeout, limits=limits)
+        client = getRESTClient()
         async with client:
             json = await getJobStats(client, url, token, **params)
 
@@ -498,18 +486,19 @@ async def subcommandSub(args, conf):
 
     url = conf['server'] + ':' + str(conf['port'])
 
-    webdavUrl = getWebDAVBase(args, conf)
-    webdavClient = getWebDAVClient(conf['proxy'])
-
-    limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-    timeout = httpx.Timeout(5.0, pool=None)
-    client = httpx.AsyncClient(timeout=timeout, limits=limits)
-    async with client:
-        jobs = []
-        try:
+    jobs = []
+    try:
+        client = getRESTClient()
+        webdavUrl = getWebDAVBase(args, conf)
+        webdavClient = getWebDAVClient(conf['proxy'])
+        async with client, webdavClient:
             jobs = await submitJobs(client, url, token, args.xRSL, clusterlist, webdavClient, webdavUrl)
-        finally:
-            with trio.CancelScope(shield=True):
+    finally:
+        with trio.CancelScope(shield=True):
+            client = getRESTClient()
+            webdavUrl = getWebDAVBase(args, conf)
+            webdavClient = getWebDAVClient(conf['proxy'])
+            async with client, webdavClient:
                 await subCleanup(client, url, token, jobs, webdavClient, webdavUrl)
 
 
@@ -521,9 +510,9 @@ async def subCleanup(client, url, token, jobs, webdavClient, webdavUrl):
                 print(f'Job {job["name"]} not submitted: {job["msg"]}')
             else:
                 print(f'Job description {job["descpath"]} not submitted: {job["msg"]}')
-        else:
+        elif not job['cleanup']:
             print(f'Inserted job {job["name"]} with ID {job["id"]}')
-    return
+    #return
 
     # clean jobs that could not be submitted
     tokill = [job['id'] for job in jobs if job['cleanup']]
