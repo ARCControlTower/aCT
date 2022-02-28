@@ -77,6 +77,11 @@ def createParser():
 
     subparsers = parser.add_subparsers(dest='command')
 
+    parserInfo = subparsers.add_parser(
+        'info',
+        help='show info about aCT server'
+    )
+
     parserClean = subparsers.add_parser(
         'clean',
         help='clean failed, done and donefailed jobs'
@@ -180,7 +185,9 @@ def runSubcommand(args):
     expandPaths(conf)
 
     asyncfun = None
-    if args.command == 'clean':
+    if args.command == 'info':
+        asyncfun = subcommandInfo
+    elif args.command == 'clean':
         asyncfun = subcommandClean
     elif args.command == 'fetch':
         asyncfun = subcommandFetch
@@ -214,6 +221,25 @@ def main():
     except ACTClientError as e:
         print(e)
         sys.exit(1)
+
+
+async def subcommandInfo(args, conf):
+    checkConf(conf, ['server', 'port', 'token'])
+
+    token = readFile(conf['token'])
+
+    url = conf['server'] + ':' + str(conf['port'])
+    headers = {'Authorization': 'Bearer ' + token}
+    async with getRESTClient() as client:
+        resp = await client.get(url + '/info', headers=headers)
+        json = resp.json()
+    if resp.status_code != 200:
+        raise ACTClientError(json['msg'])
+
+    print(f'aCT server URL: {url}')
+    print('Clusters:')
+    for cluster in json['clusters']:
+        print(f'{cluster}')
 
 
 async def subcommandClean(args, conf):

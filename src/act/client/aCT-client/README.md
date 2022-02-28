@@ -122,6 +122,7 @@ flag is given, the program will take a list of clusters from `default` group fro
 configuration. Instead of a list of URLs, the user can also give a name of a cluster
 group from configuration that the program will then look up, e. g.
 `--clusterlist=vega`. Refer to *Configuration* section example for more info.
+The list of enabled clusters on aCT server can be obtained by running `act info`
 
 Another flag that can be given for submission command is `--webdav`. If this flag
 is not given, the local job input files will be uploaded to internal data management
@@ -203,7 +204,8 @@ Configuration is in YAML format. Parameters with default values and optional par
 can be omitted. Possible parameters are:
 - `server`: URL of aCT server
 - `port`: port which aCT server is listening on
-- `clusters`: a YAML *mapping* of names to lists of clusters.
+- `clusters`: a YAML *mapping* of names to lists of clusters. A list of enabled
+  clusters for a server can be obtained with `act info`.
 - `token`: location where client should store auth token
   (optional, default: `$HOME/.local/share/act-client/token`)
 - `proxy`: location of proxy that client uses for authentication
