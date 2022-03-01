@@ -14,6 +14,7 @@ from act_client.common import ACTClientError, JobCleanup, readFile
 from act_client.delegate_proxy import parse_issuer_cred
 from act_client.x509proxy import sign_request
 
+
 # TODO: use proper data structures for API rather than format expected
 #       on backend; also use kwargs
 # TODO: unify API: PATCH tocancel returns job dicts, others return list
@@ -22,45 +23,51 @@ from act_client.x509proxy import sign_request
 #       timeout errors
 
 
-TRANSFER_BLOCK_SIZE = 2**16  # TODO: hardcoded
+TRANSFER_BLOCK_SIZE = 2**23  # TODO: hardcoded
 
 
-async def cleanJobs(client, url, token, params):
-    url += '/jobs'
-    headers = {'Authorization': 'Bearer ' + token}
+async def aCTJSONRequest(client, method, url, token, **kwargs):
     try:
-        resp = await client.delete(url, params=params, headers=headers)
+        resp = await aCTRequest(client, method, url, token, **kwargs)
         json = resp.json()
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
         raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
     if resp.status_code != 200:
         raise ACTClientError(f'Response error: {json["msg"]}')
     return json
+
+
+async def aCTRequest(client, method, url, token, **kwargs):
+    params = kwargs.get('params', None)
+    json = kwargs.get('json', None)
+    content = kwargs.get('content', None)
+    headers = {'Authorization': f'Bearer {token}'}
+    try:
+        resp = await client.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            json=json,
+            content=content,
+        )
+    except httpx.RequestError as e:
+        raise ACTClientError(f'Request error: {e}')
+    except Exception as e:
+        raise ACTClientError(f'{e}')
+    return resp
+
+
+async def cleanJobs(client, url, token, params):
+    return await aCTJSONRequest(client, 'DELETE', f'{url}/jobs', token, params=params)
 
 
 async def patchJobs(client, url, token, params, arcstate):
     if arcstate not in ('tofetch', 'tocancel', 'toresubmit'):
         raise ACTClientError(f'Invalid arcstate argument "{arcstate}"')
-
-    url += '/jobs'
     json = {'arcstate': arcstate}
-    headers = {'Authorization': 'Bearer ' + token}
-    try:
-        resp = await client.patch(url, json=json, params=params, headers=headers)
-        json = resp.json()
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    if resp.status_code != 200:
-        raise ACTClientError(f'Response error: {json["msg"]}')
-    return json
+
+    return await aCTJSONRequest(client, 'PATCH', f'{url}/jobs', token, params=params, json=json)
 
 
 async def fetchJobs(client, url, token, params):
@@ -76,37 +83,76 @@ async def resubmitJobs(client, url, token, params):
 
 
 async def postJobs(client, url, token, jobs):
-    url += '/jobs'
-    headers = {'Authorization': 'Bearer ' + token}
-    try:
-        resp = await client.post(url, headers=headers, json=jobs)
-        json = resp.json()
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    if resp.status_code != 200:
-        raise ACTClientError(f'Response error: {json["msg"]}')
-    return json
+    return await aCTJSONRequest(client, 'POST', f'{url}/jobs', token, json=jobs)
 
 
 async def putJobs(client, url, token, jobs):
-    url += '/jobs'
-    headers = {'Authorization': 'Bearer ' + token}
+    return await aCTJSONRequest(client, 'PUT', f'{url}/jobs', token, json=jobs)
+
+
+async def httpPut(client, url, token, name, path, jobid):
+    params = {'id': jobid, 'filename': name}
     try:
-        resp = await client.put(url, json=jobs, headers=headers)
-        json = resp.json()
+        return await aCTJSONRequest(client, 'PUT', f'{url}/data', token, content=fileSender(path), params=params)
+    except trio.Cancelled:
+        raise ACTClientError(f'Upload cancelled for file {path} to {url}')
+
+
+async def getJobStats(client, url, token, **kwargs):
+    PARAM_KEYS = ('id', 'name', 'state', 'clienttab', 'arctab')
+    params = {k: v for k, v in kwargs.items() if k in PARAM_KEYS}
+
+    # convert names of table params to correct REST API
+    if 'clienttab' in params:
+        params['client'] = params['clienttab']
+        del params['clienttab']
+    if 'arctab' in params:
+        params['arc'] = params['arctab']
+        del params['arctab']
+
+    return await aCTJSONRequest(client, 'GET', f'{url}/jobs', token, params=params)
+
+
+async def webdavRequest(client, method, url, **kwargs):
+    headers = kwargs.get('headers', None)
+    content = kwargs.get('content', None)
+
+    try:
+        resp = await client.request(method, url, headers=headers, content=content)
     except httpx.RequestError as e:
         raise ACTClientError(f'Request error: {e}')
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
     except Exception as e:
         raise ACTClientError(f'{e}')
-    if resp.status_code != 200:
-        raise ACTClientError(f'Response error: {json["msg"]}')
-    return json
+    return resp
+
+
+async def webdavRmdir(client, url):
+    headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
+    resp = await webdavRequest(client, 'DELETE', url, headers=headers)
+
+    # TODO: should we rely on 204 and 404 being the only right answers?
+    if resp.status_code == 404:  # ignore, because we are just trying to delete
+        return
+    if resp.status_code >= 300:
+        raise ACTClientError('Unexpected response for removal of WebDAV directory')
+
+
+async def webdavMkdir(client, url):
+    headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
+    resp = await webdavRequest(client, 'MKCOL', url, headers=headers)
+
+    if resp.status_code != 201:
+        raise ACTClientError(f'Error creating WebDAV directory {url}: {resp.text}')
+
+
+async def webdavPut(client, url, path):
+    try:
+        resp = await webdavRequest(client, 'PUT', url, content=fileSender(path))
+    except trio.Cancelled:
+        raise ACTClientError(f'Upload cancelled for file {path} to {url}')
+
+    if resp.status_code != 201:
+        raise ACTClientError(f'Error uploading file {path} to {url}: {resp.text}')
 
 
 async def cleanWebDAV(client, url, jobids):
@@ -120,66 +166,6 @@ async def cleanWebDAV(client, url, jobids):
     return errors
 
 
-async def webdavRmdir(client, url):
-    headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
-    try:
-        resp = await client.delete(url, headers=headers)
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    # TODO: should we rely on 204 and 404 being the only right answers?
-    if resp.status_code == 404:  # ignore, because we are just trying to delete
-        return
-    if resp.status_code >= 300:
-        raise ACTClientError('Unexpected response for removal of WebDAV directory')
-
-
-async def webdavMkdir(client, url):
-    headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
-    try:
-        resp = await client.request('MKCOL', url, headers=headers)
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    if resp.status_code != 201:
-        raise ACTClientError(f'Error creating WebDAV directory {url}: {resp.text}')
-
-
-async def webdavPut(client, url, path):
-    try:
-        resp = await client.put(url, content=fileSender(path))
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    except trio.Cancelled:
-        raise ACTClientError(f'Upload cancelled for file {path} to {url}')
-    if resp.status_code != 201:
-        raise ACTClientError(f'Error uploading file {path} to {url}: {resp.text}')
-
-
-async def httpPut(client, url, token, name, path, jobid):
-    url += '/data'
-    headers = {'Authorization': 'Bearer ' + token}
-    params = {'id': jobid, 'filename': name}
-    # how to distinguish between timeout cancel and ctrl-c cancel
-    try:
-        resp = await client.put(url, content=fileSender(path), params=params, headers=headers)
-        json = resp.json()
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    except trio.Cancelled:
-        raise ACTClientError(f'Upload cancelled fot file {path} to {url}')
-    if resp.status_code != 200:
-        raise ACTClientError(f'Error uploading file {path} to {url}: {json["msg"]}')
-
-
 # https://docs.aiohttp.org/en/stable/client_quickstart.html?highlight=upload#streaming-uploads
 #
 # Exceptions are handled in code that uses this
@@ -189,34 +175,6 @@ async def fileSender(filename):
         while chunk:
             yield chunk
             chunk = await f.read(TRANSFER_BLOCK_SIZE)
-
-
-async def getJobStats(client, url, token, **kwargs):
-    url += '/jobs'
-    PARAM_KEYS = ('id', 'name', 'state', 'clienttab', 'arctab')
-    params = {k: v for k, v in kwargs.items() if k in PARAM_KEYS}
-
-    # convert names of table params to correct REST API
-    if 'clienttab' in params:
-        params['client'] = params['clienttab']
-        del params['clienttab']
-    if 'arctab' in params:
-        params['arc'] = params['arctab']
-        del params['arctab']
-
-    headers = {'Authorization': 'Bearer ' + token}
-    try:
-        resp = await client.get(url, params=params, headers=headers)
-        json = resp.json()
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    if resp.status_code != 200:
-        raise ACTClientError(f'Response error: {json["msg"]}')
-    return json
 
 
 async def filterJobsToDownload(client, url, token, **kwargs):
@@ -235,20 +193,13 @@ async def filterJobsToDownload(client, url, token, **kwargs):
     if 'state' in kwargs:
         if kwargs['state'] not in ('done', 'donefailed'):
             raise ACTClientError('State parameter not "done" or "donefailed"')
-        # json = await getJobStats(client, url, token, **kwargs)
-        # jobids = [job['c_id'] for job in json]
         jobs = await getJobStats(client, url, token, **kwargs)
     else:
         kwargs['state'] = 'done'
-        # json = await getJobStats(client, url, token, **kwargs)
-        # jobids = set([job['c_id'] for job in json])
         jobs = await getJobStats(client, url, token, **kwargs)
 
         kwargs['state'] = 'donefailed'
-        # json = await getJobStats(client, url, token, **kwargs)
-        # jobids = jobids.union([job['c_id'] for job in json])
         jobs.extend(await getJobStats(client, url, token, **kwargs))
-    #return jobids
     return jobs
 
 
@@ -295,11 +246,6 @@ async def storeResultChunks(resp, filename):
         raise ACTClientError(f'{e}')
 
 
-# possible error conditions:
-# - GET /results - must not clean the job (both aCT and webdav)
-# - zip extraction failure - must not clean job (both aCT and webdav)
-# - zip removal failure - can clean job
-#
 # Returns path to results directory if results exist.
 async def getJob(client, url, token, jobid):
     # download results
@@ -337,17 +283,11 @@ async def getJob(client, url, token, jobid):
 
 
 async def deleteProxy(client, url, token):
-    url += '/proxies'
-    headers = {'Authorization': 'Bearer ' + token}
     try:
-        resp = await client.delete(url, headers=headers)
+        resp = await aCTRequest(client, 'DELETE', f'{url}/proxies', token)
         json = resp.json()
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
     except JSONDecodeError as e:
         raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
     if resp.status_code != 204:
         raise ACTClientError(f'Response error: {json["msg"]}')
 
