@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import zipfile
 from json.decoder import JSONDecodeError
 
@@ -23,7 +24,9 @@ from act_client.x509proxy import sign_request
 #       timeout errors
 
 
-TRANSFER_BLOCK_SIZE = 2**23  # TODO: hardcoded
+# TODO: hardcoded
+TRANSFER_BLOCK_SIZE = 2**23
+arcLimiter = trio.CapacityLimiter(1)
 
 
 async def aCTJSONRequest(client, method, url, token, **kwargs):
@@ -162,8 +165,28 @@ async def cleanWebDAV(client, url, jobids):
         errors = []
         for jobid in jobids:
             dirUrl = url + '/' + str(jobid)
-            tasks.start_soon(errorAdapter, errors, webdavRmdir, client, dirUrl)
+            #tasks.start_soon(errorAdapter, errors, webdavRmdir, client, dirUrl)
+            tasks.start_soon(errorAdapter, errors, arcrm, dirUrl)
     return errors
+
+
+async def arcrm(url):
+    async with arcLimiter:
+        try:
+            await trio.run_process(['/usr/bin/arcrm', url], capture_stdout=True, capture_stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            if 'No such file or directory: Not Found' not in e.stderr.decode('utf-8'):
+                raise ACTClientError(f'arcrm error:\nstdout={e.stdout}\nstderr={e.stderr}')
+
+
+async def arccp(src, dst):
+    try:
+        async with arcLimiter:
+            await trio.run_process(['/usr/bin/arccp', src, dst], capture_stdout=True, capture_stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        raise ACTClientError(f'arcrm error:\nstdout={e.stdout}\nstderr={e.stderr}')
+    except trio.Cancelled:
+        raise ACTClientError(f'Upload cancelled for file {src} to {dst}')
 
 
 # https://docs.aiohttp.org/en/stable/client_quickstart.html?highlight=upload#streaming-uploads
@@ -446,16 +469,16 @@ async def submitJobs(client, url, token, descs, clusterlist, webdavClient, webda
 
 
 async def uploadJobData(client, url, token, job, jobdesc, webdavClient, webdavUrl):
-    # create directory for job's local input files if using WebDAV
-    if webdavUrl:
-        dirUrl = webdavUrl + '/' + str(job['id'])
-        try:
-            await webdavMkdir(webdavClient, dirUrl)
-        except ACTClientError as e:
-            job['msg'] = str(e)
-            return
-        except trio.Cancelled:
-            return
+    ## create directory for job's local input files if using WebDAV
+    #if webdavUrl:
+    #    dirUrl = webdavUrl + '/' + str(job['id'])
+    #    try:
+    #        await webdavMkdir(webdavClient, dirUrl)
+    #    except ACTClientError as e:
+    #        job['msg'] = str(e)
+    #        return
+    #    except trio.Cancelled:
+    #        return
 
     # upload input files
     try:
@@ -517,7 +540,8 @@ async def uploadInputFiles(client, url, token, jobid, jobdesc, webdavClient, web
     async with trio.open_nursery() as tasks:
         for dst, src in files.items():
             if webdavUrl:  # upload to WebDAV
-                tasks.start_soon(errorAdapter, errors, webdavPut, webdavClient, dst, src)
+                #tasks.start_soon(errorAdapter, errors, webdavPut, webdavClient, dst, src)
+                tasks.start_soon(errorAdapter, errors, arccp, src, dst)
             else:  # upload to internal data management
                 tasks.start_soon(errorAdapter, errors, httpPut, client, url, token, dst, src, jobid)
     return errors
