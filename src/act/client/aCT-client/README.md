@@ -20,20 +20,20 @@ needed for a standalone Python interpreter that is completely separate from the 
 of the system or other virtual environments.
 
 To create a virtual environment, the user needs to choose the location of the
-environment and then run:
+environment and then run:  
 `$ python3 -m venv --system-site-packages /path/to/act-venv`
 
 `--system-site-packages` flag is necessary to copy ARC client's python bindings
 that are not available in PyPI package repository. `act-venv` is the name of this
 virtual environment.
 
-Once virtual environment is created, it has to be activated to be used.
+Once virtual environment is created, it has to be activated to be used.  
 `$ source /path/to/act-venv/bin/activate`
 All commands require shell with an active virtual environment. Your shell might
-indicate that the environment is active by prepending a prefix to its prompt:
+indicate that the environment is active by prepending a prefix to its prompt:  
 `(act-venv) $ act proxy`
 
-To install aCT client, run this command:
+To install aCT client, run this command:  
 `(act-venv) $ pip install git+https://github.com/jakobmerljak/aCT.git@test#subdirectory=src/act/client/aCT-client`
 The command installs aCT client from git repository as it is not distributed in
 a package repository like PyPI.
@@ -41,7 +41,7 @@ a package repository like PyPI.
 # The big picture
 aCT client is a program that allows submission and management of jobs similar to
 ARC Client tools with added benefits of aCT job management like job brokering to
-multiple clusters and automatic retries.
+multiple clusters.
 
 ## Job states
 Every job once submitted to aCT is in a particular aCT state. Users should have a
@@ -59,7 +59,7 @@ But it does not always go this way. Sometimes the jobs will go back to
 `submitted` state after being in `cancelling` for a while and appear as if
 they were resubmitted. In such cases it is best to wait for jobs to reach one
 of the "terminal" states like `cancelled` or `failed` or even `done` if the kill
-operation did not propagate fast enough. Once the jobs are in such states they
+operation did not propagate fast enough. Once the jobs are in such state they
 can be managed accordingly.
 
 Most common states:
@@ -96,7 +96,7 @@ consult admin and developers.
 ## Authentication
 To perform any operation on aCT, the user needs to be authenticated. This is done
 with a valid proxy certificate with proper VOMS extensions (by using `arcproxy`
-for instance). Then, the proxy needs to be submitted to aCT:
+for instance). Then, the proxy needs to be submitted to aCT:  
 `(act-venv) $ act proxy`
 
 This creates a delegated proxy on server required by aCT for further job and data
@@ -111,7 +111,7 @@ amount of time it might be because proxy or VOMS attributes are expired. In such
 case, create a new proxy and submit it to aCT.
 
 ## Submission
-Jobs can be submitted using the following command:
+Jobs can be submitted using the following command:  
 `(act-venv) $ act sub job1.xrsl job2.xrsl ...`
 The command instructs aCT to submit jobs to a given list of clusters. Those can
 be provided in several ways. First option is to provide a list of cluster URLs:
@@ -121,7 +121,7 @@ flag is given, the program will take a list of clusters from `default` group fro
 configuration. Instead of a list of URLs, the user can also give a name of a cluster
 group from configuration that the program will then look up, e. g.
 `--clusterlist=vega`. Refer to *Configuration* section example for more info.
-The list of enabled clusters on aCT server can be obtained by running `act info`
+The list of enabled clusters on aCT server can be obtained by running `act info`.
 
 Another flag that can be given for submission command is `--webdav`. If this flag
 is not given, the local job input files will be uploaded to internal data management
@@ -153,7 +153,7 @@ process where signals are ignored. It may thus appear as if submission cannot be
 cancelled. In such case, you can continue trying to cancel it using ctrl+c.
 
 ## Job status
-To check the status of all jobs, run the following command:
+To check the status of all jobs, run the following command:  
 `(act-venv) $ act stat -a`
 It prints a table of values that provide information on jobs managed by aCT.
 The default values provide for instance the ID of a job, its name, ID in ARC
@@ -161,8 +161,7 @@ middleware and states in ARC middleware as well as in aCT.
 The `stat` command has several parameters for filtering jobs based in ID, name
 and state. It also takes two flags, `--arc` and `--client` that allow the user
 to specify exactly which job attributes they want to be printed.
-`act stat --help` should be consulted for info on which attributes are
-possible to be queried.
+`act stat --help` should be consulted for info on which attributes can be queried.
 
 ## Fetching and resubmitting failed jobs
 Jobs in `failed` state can be fetched using `act fetch`. aCT will download any
@@ -172,7 +171,7 @@ resubmitted using `act resub`.
 ## Downloading job results
 The results of jobs in `done` or `donefailed` state can be downloaded using the
 command `act get`. `donefailed` jobs sometimes don't have results available.
-The results will be downloaded to the current directory, for every job a directory
+The results will be downloaded to the current directory. For every job a directory
 with a hash name of its ARC ID will be created and output files will be stored in
 that directory (as is with `arcget` from ARC Client tools). Successfully downloaded
 jobs are automatically cleaned from the system.
@@ -197,7 +196,7 @@ operation.
 
 # Configuration
 Default location for aCT configuration file is `$HOME/.config/act-client/config.yaml`.
-Configuration file can also be passed to commands, e. g.:
+Configuration file can also be passed to commands, e. g.:  
 `(act-venv) $ act --conf /path/to/your/conf <subcommand> <args>`
 
 Configuration is in YAML format. Parameters with default values and optional parameters
@@ -205,7 +204,8 @@ can be omitted. Possible parameters are:
 - `server`: URL of aCT server
 - `port`: port which aCT server is listening on
 - `clusters`: a YAML *mapping* of names to lists of clusters. A list of enabled
-  clusters for a server can be obtained with `act info`.
+  clusters for a server can be obtained with `act info`. If no `--clusterlist`
+  flag is given, the list called `default` will be used.
 - `token`: location where client should store auth token
   (optional, default: `$HOME/.local/share/act-client/token`)
 - `proxy`: location of proxy that client uses for authentication
