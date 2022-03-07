@@ -76,7 +76,7 @@ def main():
 
     # create a list of jobs to work on
     if args.all:
-        jobs = [] # empty means all jobs
+        jobs = []  # empty means all jobs
     elif args.jobs:
         try:
             jobs = getIDsFromList(args.jobs)
@@ -97,7 +97,7 @@ def main():
     manager = JobManager()
     try:
         results = manager.getJobs(proxyid, jobs, args.state, args.find)
-    except ConfigError
+    except ConfigError:
         print('error: tmp directory not configured')
         sys.exit(5)
 
@@ -109,7 +109,7 @@ def main():
     dontRemove = []
     for result in results.jobdicts:
         try:
-            if result['dir']: # if there are job results in tmp
+            if result['dir']:  # if there are job results in tmp
                 dst_dirname = os.path.basename(os.path.normpath(result['name']))
                 dstdir = getLocalDir(dst_dirname, args.dir)
                 shutil.copytree(result['dir'], dstdir)
