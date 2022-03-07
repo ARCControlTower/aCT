@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name = 'aCT-client',
@@ -7,6 +7,7 @@ setup(
     author = 'aCT team',
     author_email = 'act-dev@cern.ch',
     package_dir = {'': 'src'},
+    packages=find_packages('src'),
     entry_points={
         'console_scripts': [
             'act = act_client.cli:main',
