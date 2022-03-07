@@ -34,7 +34,7 @@ indicate that the environment is active by prepending a prefix to its prompt:
 `(act-venv) $ act proxy`
 
 To install aCT client, run this command:  
-`(act-venv) $ pip install git+https://github.com/jakobmerljak/aCT.git@test#subdirectory=src/act/client/aCT-client`
+`(act-venv) $ pip install git+https://github.com/ARCControlTower/aCT.git@test#subdirectory=src/act/client/aCT-client`
 The command installs aCT client from git repository as it is not distributed in
 a package repository like PyPI.
 
