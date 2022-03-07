@@ -56,11 +56,9 @@ def stat():
     '''
     name_filter = request.args.get('name', default='')
     state_filter = request.args.get('state', default='')
-
     clicols = request.args.get('client', default=[])
     if clicols:
         clicols = clicols.split(',')
-
     arccols = request.args.get('arc', default=[])
     if arccols:
         arccols = arccols.split(',')
@@ -146,7 +144,7 @@ def patch():
     try:
         token = getToken()
         jobids = getIDs()
-        arcstate = request.get_json().get('arcstate', None)
+        jsonData = request.get_json()
     except BadRequest as e:
         print(f'error: PATCH /jobs: {e}')
         return {'msg': str(e)}, 400
@@ -155,11 +153,16 @@ def patch():
         return {'msg': str(e)}, e.httpCode
     proxyid = token['proxyid']
 
+    if not jsonData:
+        print('error: PATCH /jobs: No JSON data')
+        return {'msg': 'error: PATCH /jobs: No JSON data'}, 400
+    else:
+        arcstate = jsonData.get('arcstate', None)
+        if arcstate is None:
+            return {'msg': 'Request data has no \'arcstate\' attribute'}, 400
+
     name_filter = request.args.get('name', default='')
     state_filter = request.args.get('state', default='')
-
-    if arcstate is None:
-        return {'msg': 'Request data has no \'arcstate\' attribute'}, 400
 
     try:
         jmgr = JobManager()
@@ -217,6 +220,9 @@ def create_jobs():
     except Exception as e:
         print(f'{errpref}{e}')
         return {'msg': 'Server error'}, 500
+
+    if not jobs:
+        return jsonify([])
 
     results = []
     for job in jobs:
@@ -295,6 +301,9 @@ def confirm_jobs():
     except Exception as e:
         print(f'{errpref}{e}')
         return {'msg': 'Server error'}, 500
+
+    if not jobs:
+        return jsonify([])
 
     results = []
     for job in jobs:
@@ -416,7 +425,7 @@ def getResults():
 def getCSR():
     # get issuer cert string from request
     try:
-        issuer_pem = request.get_json().get('cert', None)
+        jsonData = request.get_json()
         pmgr = ProxyManager()
     except BadRequest as e:
         print(f'error: POST /proxies: {e}')
@@ -425,10 +434,15 @@ def getCSR():
         print(f'error: POST /proxies: creating proxy manager: {e}')
         return {'msg': 'Server error'}, 500
 
-    # check proxy
-    if not issuer_pem:
-        print('error: POST /proxies: missing issuer certificate')
-        return {'msg': 'Missing issuer certificate'}, 400
+    if not jsonData:
+        print('error: POST /proxies: No JSON data')
+        return {'msg', 'No JSON data'}, 400
+    else:
+        issuer_pem = jsonData.get('cert', None)
+        if not issuer_pem:
+            print('error: POST /proxies: missing issuer certificate')
+            return {'msg': 'Missing issuer certificate'}, 400
+
     dn, exptime = pmgr.readProxyString(issuer_pem)
     if datetime.now() >= exptime:
         print('error: POST /proxies: expired certificate')
@@ -482,7 +496,7 @@ def getCSR():
 def uploadSignedProxy():
     try:
         token = getToken()
-        data = request.get_json()
+        jsonData = request.get_json()
         pmgr = ProxyManager()
     except RESTError as e:
         print(f'error: PUT /proxies: {e}')
@@ -494,15 +508,19 @@ def uploadSignedProxy():
         print(f'error: PUT /proxies: {e}')
         return {'msg': 'Server error'}, 500
 
+    if not jsonData:
+        print('error: PUT /proxies: No JSON data')
+        return {'msg': 'No JSON data'}, 400
+
     proxyid = token['proxyid']
-    cert_pem = data.get('cert', None)
-    chain_pem = data.get('chain', None)
+    cert_pem = jsonData.get('cert', None)
+    chain_pem = jsonData.get('chain', None)
     if cert_pem is None:
-        print('error: PUT /proxies: no signed certificate')
-        return {'msg': 'Signed certificate missing'}, 400
+        print('error: PUT /proxies: No signed certificate')
+        return {'msg': 'No signed certificate'}, 400
     if chain_pem is None:
-        print('error: PUT /proxies: no cert chain')
-        return {'msg': 'Cert chain missing'}, 400
+        print('error: PUT /proxies: No cert chain')
+        return {'msg': 'No cert chain'}, 400
 
     key_pem = pmgr.getProxyKeyPEM(proxyid)
     dn, exptime = pmgr.readProxyString(cert_pem)
