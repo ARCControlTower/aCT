@@ -14,7 +14,7 @@ import os
 
 import yaml
 
-from act_client.common import ExitProgram
+from act_client.common import ACTClientError
 
 # program parameters that are paths have to be expanded (env vars, tilda)
 PATH_KEYS = ('proxy', 'token', )
@@ -59,7 +59,7 @@ def loadConf(**kwargs):
             yamlstr = confFile.read()
         config = yaml.safe_load(yamlstr)
     except Exception as e:
-        raise ExitProgram(str(e), 1)
+        raise ACTClientError(str(e))
 
     # add missing keys that have hardcoded defaults
     for key in DEFAULT_KEYS:
@@ -79,4 +79,4 @@ def expandPaths(conf):
 def checkConf(config, keyList):
     for key in keyList:
         if key not in config:
-            raise ExitProgram(f'Config key {key} not configured', 1)
+            raise ACTClientError(f'Config key {key} not configured')
