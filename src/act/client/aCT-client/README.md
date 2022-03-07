@@ -161,7 +161,7 @@ middleware and states in ARC middleware as well as in aCT.
 The `stat` command has several parameters for filtering jobs based in ID, name
 and state. It also takes two flags, `--arc` and `--client` that allow the user
 to specify exactly which job attributes they want to be printed.
-`act stat --help` should be consulted for info on which attributes can be queried.
+`act stat --get-cols` should be consulted for info on which attributes can be queried.
 
 ## Fetching and resubmitting failed jobs
 Jobs in `failed` state can be fetched using `act fetch`. aCT will download any
@@ -201,8 +201,7 @@ Configuration file can also be passed to commands, e. g.:
 
 Configuration is in YAML format. Parameters with default values and optional parameters
 can be omitted. Possible parameters are:
-- `server`: URL of aCT server
-- `port`: port which aCT server is listening on
+- `server`: URL of aCT server (should include port if non standard)
 - `clusters`: a YAML *mapping* of names to lists of clusters. A list of enabled
   clusters for a server can be obtained with `act info`. If no `--clusterlist`
   flag is given, the list called `default` will be used.
@@ -216,7 +215,6 @@ can be omitted. Possible parameters are:
 Example configuration:
 ``` yaml
 server: https://act.vega.izum.si
-port: 443
 webdav: <url to your WebDAV directory>
 clusters:
   default:
