@@ -1,14 +1,12 @@
 import os
 import time
-
-from cryptography import x509
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa
 from datetime import datetime, timedelta
 
 import act.client.delegate_proxy as delegate_proxy
-
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 USERCERT = os.path.expandvars("$HOME/.globus/usercert.pem")
 USERKEY = os.path.expandvars("$HOME/.globus/userkey.pem")
@@ -125,7 +123,7 @@ def sign_request(csr, lifetime=24):
     """
     now = datetime.utcnow()
     if not csr.is_signature_valid:
-        raise ARCException('Invalid request signature.')
+        raise Exception('Invalid request signature.')
 
     with open(PROXYPATH,'rb') as f:
         proxy_pem=f.read()
