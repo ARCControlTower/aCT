@@ -15,7 +15,5 @@ setup(
     install_requires=[
         'cryptography',
         'pyyaml',
-        'trio',
-        'httpx',
     ]
 )

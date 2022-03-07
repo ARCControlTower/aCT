@@ -1,20 +1,20 @@
+import http.client
+import json
 import os
 import shutil
-import subprocess
+import signal
 import zipfile
-from json.decoder import JSONDecodeError
+from urllib.parse import urlencode, urlparse
 
 import arc
-import httpx
-import trio
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
-from act_client.common import ACTClientError, JobCleanup, readFile
+from act_client.common import (HTTP_BUFFER_SIZE, ACTClientError, SignalIgnorer,
+                               deleteFile, getHTTPConn, readFile)
 from act_client.delegate_proxy import parse_issuer_cred
 from act_client.x509proxy import sign_request
-
 
 # TODO: use proper data structures for API rather than format expected
 #       on backend; also use kwargs
@@ -24,88 +24,127 @@ from act_client.x509proxy import sign_request
 #       timeout errors
 
 
-# TODO: hardcoded
-TRANSFER_BLOCK_SIZE = 2**23
-arcLimiter = trio.CapacityLimiter(1)
+# TODO: Since http.client requires that every response is actually read, does
+# that require granular exception handling to call read() in every appropriate
+# place? Check it out.
 
 
-async def aCTJSONRequest(client, method, url, token, **kwargs):
+def httpRequest(conn, method, endpoint, **kwargs):
+    headers = kwargs.get('headers', {})
+
+    token = kwargs.get('token', None)
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+
+    jsonDict = kwargs.get('json', None)
+    if jsonDict:
+        body = json.dumps(jsonDict).encode()
+        headers['Content-type'] = 'application/json'
+    else:
+        body = kwargs.get('body', None)
+
+    params = kwargs.get('params', {})
+    for key, value in params.items():
+        if isinstance(value, list):
+            params[key] = ','.join([str(val) for val in value])
+
+    query = ''
+    if params:
+        query = urlencode(params)
+
+    if query:
+        url = f'{endpoint}?{query}'
+    else:
+        url = endpoint
+
     try:
-        resp = await aCTRequest(client, method, url, token, **kwargs)
-        json = resp.json()
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    if resp.status_code != 200:
-        raise ACTClientError(f'Response error: {json["msg"]}')
-    return json
-
-
-async def aCTRequest(client, method, url, token, **kwargs):
-    params = kwargs.get('params', None)
-    json = kwargs.get('json', None)
-    content = kwargs.get('content', None)
-    headers = {'Authorization': f'Bearer {token}'}
-    try:
-        resp = await client.request(
-            method,
-            url,
-            headers=headers,
-            params=params,
-            json=json,
-            content=content,
-        )
-    except httpx.RequestError as e:
+        conn.request(method, url, body=body, headers=headers)
+    except http.client.HTTPException as e:
         raise ACTClientError(f'Request error: {e}')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
+
+    try:
+        resp = conn.getresponse()
+    except http.client.RemoteDisconnected:
+        conn._connect()
+        conn.request(method, url, body=body, headers=headers)
+        resp = conn.getresponse()
+    except http.client.HTTPException as e:
+        raise ACTClientError(f'Request error: {e}')
+
     return resp
 
 
-async def cleanJobs(client, url, token, params):
-    return await aCTJSONRequest(client, 'DELETE', f'{url}/jobs', token, params=params)
+def aCTJSONRequest(*args, **kwargs):
+    resp = httpRequest(*args, **kwargs)
+    try:
+        jsonDict = loadJSON(resp.read().decode())
+    except http.client.HTTPException as e:
+        raise ACTClientError(f'Error reading response: {e}')
+    if resp.status != 200:
+        raise ACTClientError(f'Response error: {jsonDict["msg"]}')
+    return jsonDict
 
 
-async def patchJobs(client, url, token, params, arcstate):
+def loadJSON(jsonStr):
+    try:
+        jsonDict = json.loads(jsonStr)
+    except json.decoder.JSONDecodeError as e:
+        raise ACTClientError(f'Response JSON decode error: {e}')
+    return jsonDict
+
+
+def cleanJobs(conn, token, params):
+    return aCTJSONRequest(conn, 'DELETE', '/jobs', token=token, params=params)
+
+
+def patchJobs(conn, token, params, arcstate):
     if arcstate not in ('tofetch', 'tocancel', 'toresubmit'):
         raise ACTClientError(f'Invalid arcstate argument "{arcstate}"')
-    json = {'arcstate': arcstate}
-
-    return await aCTJSONRequest(client, 'PATCH', f'{url}/jobs', token, params=params, json=json)
-
-
-async def fetchJobs(client, url, token, params):
-    return await patchJobs(client, url, token, params, 'tofetch')
+    jsonDict = {'arcstate': arcstate}
+    return aCTJSONRequest(conn, 'PATCH', '/jobs', token=token, params=params, json=jsonDict)
 
 
-async def killJobs(client, url, token, params):
-    return await patchJobs(client, url, token, params, 'tocancel')
+def fetchJobs(*args):
+    return patchJobs(*args, 'tofetch')
 
 
-async def resubmitJobs(client, url, token, params):
-    return await patchJobs(client, url, token, params, 'toresubmit')
+def killJobs(*args):
+    return patchJobs(*args, 'tocancel')
 
 
-async def postJobs(client, url, token, jobs):
-    return await aCTJSONRequest(client, 'POST', f'{url}/jobs', token, json=jobs)
+def resubmitJobs(*args):
+    return patchJobs(*args, 'toresubmit')
 
 
-async def putJobs(client, url, token, jobs):
-    return await aCTJSONRequest(client, 'PUT', f'{url}/jobs', token, json=jobs)
+def postJobs(conn, token, jobs):
+    return aCTJSONRequest(conn, 'POST', '/jobs', token=token, json=jobs)
 
 
-async def httpPut(client, url, token, name, path, jobid):
-    params = {'id': jobid, 'filename': name}
+def putJobs(conn, token, jobs):
+    return aCTJSONRequest(conn, 'PUT', '/jobs', token=token, json=jobs)
+
+
+def httpPut(conn, token, name, path, jobid):
     try:
-        return await aCTJSONRequest(client, 'PUT', f'{url}/data', token, content=fileSender(path), params=params)
-    except trio.Cancelled:
-        raise ACTClientError(f'Upload cancelled for file {path} to {url}')
+        f = open(path, 'rb')
+    except Exception as e:
+        raise ACTClientError(f'Error opening file {path}: {e}')
+
+    params = {'id': jobid, 'filename': name}
+    return aCTJSONRequest(conn, 'PUT', '/data', token=token, body=f, params=params)
 
 
-async def getJobStats(client, url, token, **kwargs):
+def getJobStats(conn, token, **kwargs):
     PARAM_KEYS = ('id', 'name', 'state', 'clienttab', 'arctab')
-    params = {k: v for k, v in kwargs.items() if k in PARAM_KEYS}
+    params = {}
+    for k, v in kwargs.items():
+        if k not in PARAM_KEYS:
+            raise ACTClientError(f'Invalid parameter for stat operation: {k}')
+        else:
+            params[k] = v
 
-    # convert names of table params to correct REST API
+    # convert names of table params to correct REST API and
+    # convert lists to comma separated string of values
     if 'clienttab' in params:
         params['client'] = params['clienttab']
         del params['clienttab']
@@ -113,255 +152,206 @@ async def getJobStats(client, url, token, **kwargs):
         params['arc'] = params['arctab']
         del params['arctab']
 
-    return await aCTJSONRequest(client, 'GET', f'{url}/jobs', token, params=params)
+    return aCTJSONRequest(conn, 'GET', '/jobs', token=token, params=params)
 
 
-async def webdavRequest(client, method, url, **kwargs):
-    headers = kwargs.get('headers', None)
-    content = kwargs.get('content', None)
-
-    try:
-        resp = await client.request(method, url, headers=headers, content=content)
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    return resp
-
-
-async def webdavRmdir(client, url):
+def webdavRmdir(conn, url):
     headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
-    resp = await webdavRequest(client, 'DELETE', url, headers=headers)
+    resp = httpRequest(conn, 'DELETE', url, headers=headers)
+    text = resp.read()
 
     # TODO: should we rely on 204 and 404 being the only right answers?
-    if resp.status_code == 404:  # ignore, because we are just trying to delete
+    if resp.status == 404:  # ignore, because we are just trying to delete
         return
-    if resp.status_code >= 300:
-        raise ACTClientError('Unexpected response for removal of WebDAV directory')
+    if resp.status >= 300:
+        raise ACTClientError('Unexpected response for removal of WebDAV directory: {text}')
 
 
-async def webdavMkdir(client, url):
+def webdavMkdir(conn, url):
     headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
-    resp = await webdavRequest(client, 'MKCOL', url, headers=headers)
+    resp = httpRequest(conn, 'MKCOL', url, headers=headers)
+    text = resp.read()
 
-    if resp.status_code != 201:
-        raise ACTClientError(f'Error creating WebDAV directory {url}: {resp.text}')
+    if resp.status != 201:
+        raise ACTClientError(f'Error creating WebDAV directory {url}: {text}')
 
 
-async def webdavPut(client, url, path):
+# Optimal upload to dCache requires Expect 100-continue redirect that is first
+# attempted. If it doesn't succeed the file is uploaded normaly through central
+# dCache server or to regular WebDAV server.
+def webdavPut(conn, url, path):
     try:
-        resp = await webdavRequest(client, 'PUT', url, content=fileSender(path))
-    except trio.Cancelled:
-        raise ACTClientError(f'Upload cancelled for file {path} to {url}')
+        f = open(path, 'rb')
+    except Exception as e:
+        raise ACTClientError(f'Error opening file {path}: {e}')
 
-    if resp.status_code != 201:
-        raise ACTClientError(f'Error uploading file {path} to {url}: {resp.text}')
+    with f:
+        resp = httpRequest(conn, 'PUT', url, headers={'Expect': '100-continue'})
+        resp.read()
+        if resp.status == 307:
+            dstUrl = resp.getheader('Location')
+            parts = urlparse(dstUrl)
+            urlPath = f'{parts.path}?{parts.query}'
+            upconn = getHTTPConn(dstUrl, ssl=False)
+            try:
+                resp = httpRequest(upconn, 'PUT', urlPath, body=f)
+                text = resp.read()
+                status = resp.status
+            except http.client.HTTPException as e:
+                raise ACTClientError(f'Error redirecting WebDAV upload for file {path}: {e}')
+            finally:
+                upconn.close()
+        else:
+            resp = httpRequest(conn, 'PUT', url, body=f)
+            text = resp.read()
+            status = resp.status
+
+    if status != 201:
+        raise ACTClientError(f'Error uploading file {path}: {text}')
 
 
-async def cleanWebDAV(client, url, jobids):
-    if not jobids:
-        return []
-    async with trio.open_nursery() as tasks:
-        errors = []
-        for jobid in jobids:
-            dirUrl = url + '/' + str(jobid)
-            #tasks.start_soon(errorAdapter, errors, webdavRmdir, client, dirUrl)
-            tasks.start_soon(errorAdapter, errors, arcrm, dirUrl)
+def cleanWebDAV(conn, url, jobids):
+    errors = []
+    for jobid in jobids:
+        dirUrl = f'{url}/{jobid}'
+        try:
+            webdavRmdir(conn, dirUrl)
+        except Exception as e:
+            errors.append(str(e))
     return errors
 
 
-async def arcrm(url):
-    async with arcLimiter:
-        try:
-            await trio.run_process(['/usr/bin/arcrm', url], capture_stdout=True, capture_stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            if 'No such file or directory: Not Found' not in e.stderr.decode('utf-8'):
-                raise ACTClientError(f'arcrm error:\nstdout={e.stdout}\nstderr={e.stderr}')
-
-
-async def arccp(src, dst):
-    try:
-        async with arcLimiter:
-            await trio.run_process(['/usr/bin/arccp', src, dst], capture_stdout=True, capture_stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        raise ACTClientError(f'arcrm error:\nstdout={e.stdout}\nstderr={e.stderr}')
-    except trio.Cancelled:
-        raise ACTClientError(f'Upload cancelled for file {src} to {dst}')
-
-
-# https://docs.aiohttp.org/en/stable/client_quickstart.html?highlight=upload#streaming-uploads
-#
-# Exceptions are handled in code that uses this
-async def fileSender(filename):
-    async with await trio.open_file(filename, "rb") as f:
-        chunk = await f.read(TRANSFER_BLOCK_SIZE)
-        while chunk:
-            yield chunk
-            chunk = await f.read(TRANSFER_BLOCK_SIZE)
-
-
-async def filterJobsToDownload(client, url, token, **kwargs):
-    # add id to client columns if it is not there already
-    if 'clienttab' in kwargs:
-        if 'id' not in kwargs['clienttab']:
-            if not kwargs['clienttab']:
-                kwargs['clienttab'] = 'id'
-            else:
-                kwargs['clienttab'] += ',id'
-        if 'jobname' not in kwargs['clienttab']:  # needed to print result
-            kwargs['clienttab'] += ',jobname'
-    else:
-        kwargs['clienttab'] = 'id,jobname'
+def filterJobsToDownload(*args, **kwargs):
+    # specify job columns that have to be fetched
+    kwargs['clienttab'] = ['id', 'jobname']
 
     if 'state' in kwargs:
         if kwargs['state'] not in ('done', 'donefailed'):
             raise ACTClientError('State parameter not "done" or "donefailed"')
-        jobs = await getJobStats(client, url, token, **kwargs)
+        jobs = getJobStats(*args, **kwargs)
     else:
         kwargs['state'] = 'done'
-        jobs = await getJobStats(client, url, token, **kwargs)
+        jobs = getJobStats(*args, **kwargs)
 
         kwargs['state'] = 'donefailed'
-        jobs.extend(await getJobStats(client, url, token, **kwargs))
+        jobs.extend(getJobStats(*args, **kwargs))
     return jobs
 
 
-async def downloadJobResults(client, url, token, jobid):
-    # download result zip; if it fails don't clean job as user should decide
-    url += '/results'
-    headers = {'Authorization': 'Bearer ' + token}
-    params = {'id': jobid}
+def downloadJobResults(conn, token, jobid):
+    filename = ''
     try:
-        async with client.stream('GET', url, params=params, headers=headers) as resp:
-            if resp.status_code == 204:
-                return None
-            elif resp.status_code == 200:
-                # 'Content-Disposition': 'attachment; filename=ZrcMDm3nK4...m2cmmzn.zip'
-                filename = resp.headers['Content-Disposition'].split()[1].split('=')[1]
-                await storeResultChunks(resp, filename)
-            else:
-                json = resp.json()
-                raise ACTClientError(f'Response error: {json["msg"]}')
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
+        query = urlencode({'id': jobid})
+        url = f'/results?{query}'
+
+        resp = httpRequest(conn, 'GET', url, token=token)
+        if resp.status == 204:
+            resp.read()
+            return ''
+        elif resp.status == 200:
+            # 'Content-Disposition': 'attachment; filename=ZrcMD...cmmzn.zip'
+            filename = resp.getheader('Content-Disposition').split()[1].split('=')[1]
+            storeResultChunks(resp, filename)
+        else:
+            jsonDict = loadJSON(resp.read().decode())
+            raise ACTClientError(f'Response error: {jsonDict["msg"]}')
+
+    except (http.client.HTTPException, Exception) as e:
+        raise ACTClientError(f'Error downloading results: {e}')
+
+    # Cleanup code required here in case keyboard interrupt happens somewhere
+    # between the creation of result file and propagation of filename to the
+    # function getJob that performs cleanup as well.
+    except KeyboardInterrupt:
+        deleteFile(filename)
+        raise
+
     return filename
 
 
-async def storeResultChunks(resp, filename):
+def storeResultChunks(resp, filename):
     try:
-        async with await trio.open_file(filename, mode='wb') as f:
-            async for chunk in resp.aiter_bytes():
-                await f.write(chunk)
-
-    except trio.Cancelled:
-        try:
-            if os.path.isfile(filename):
-                os.remove(filename)
-        except Exception as e:
-            raise ACTClientError(f'{e}')
-        raise
-
+        with open(filename, 'wb') as f:
+            chunk = resp.read(HTTP_BUFFER_SIZE)
+            while chunk:
+                f.write(chunk)
+                chunk = resp.read(HTTP_BUFFER_SIZE)
     except Exception as e:
-        raise ACTClientError(f'{e}')
+        raise ACTClientError(f'Error storing job results to the file {filename}: {e}')
 
 
 # Returns path to results directory if results exist.
-async def getJob(client, url, token, jobid):
-    # download results
-    filename = await downloadJobResults(client, url, token, jobid)
-
-    if not filename:
-        return ''
-
-    # unzip results
-    # extractFailed is needed to exit with error after zip file removal
-    # if its extraction failes
-    extractFailed = False
+def getJob(*args):
+    filename = ''
     dirname = ''
-    if os.path.isfile(filename):
-        try:
-            dirname = os.path.splitext(filename)[0]
-            with zipfile.ZipFile(filename, 'r') as zip_ref:
-                zip_ref.extractall(dirname)
-        except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
-            msg = f'Result zip extraction error: {e}'
-            extractFailed = True
-
-    # delete results archive
+    extractFailed = False
     try:
-        if os.path.isfile(filename):
-            os.remove(filename)
-    except Exception as e:
-        raise ACTClientError(f'Results zip delete error: {e}')
+        # download results
+        filename = downloadJobResults(*args)
 
-    if extractFailed:
-        shutil.rmtree(dirname, ignore_errors=True)
-        raise ACTClientError(msg)
+        if not filename:
+            return ''
+
+        # Unzip results. extractFailed is needed to exit with error after zip
+        # file removal if extraction failes.
+        extractFailed = False
+        if os.path.isfile(filename):
+            try:
+                dirname = os.path.splitext(filename)[0]
+                with zipfile.ZipFile(filename, 'r') as zip_ref:
+                    zip_ref.extractall(dirname)
+            except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
+                msg = f'Could not extract results zip: {e}'
+                extractFailed = True
+        else:
+            raise ACTClientError(f'Path {filename} is not a file')
+
+    finally:
+        deleteFile(filename)
+
+        # exit with error on extraction failure
+        if extractFailed:
+            shutil.rmtree(dirname, ignore_errors=True)
+            raise ACTClientError(msg)
 
     return dirname
 
 
-async def deleteProxy(client, url, token):
+def deleteProxy(conn, token):
+    resp = httpRequest(conn, 'DELETE', '/proxies', token=token)
     try:
-        resp = await aCTRequest(client, 'DELETE', f'{url}/proxies', token)
-        json = resp.json()
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    if resp.status_code != 204:
-        raise ACTClientError(f'Response error: {json["msg"]}')
+        jsonDict = loadJSON(resp.read().decode())
+    except http.client.HTTPException as e:
+        raise ACTClientError(f'Proxy delete request error: {e}')
+    if resp.status != 204:
+        raise ACTClientError(f'Response error: {jsonDict["msg"]}')
 
 
-async def uploadProxy(client, url, proxyStr, tokenPath):
+def uploadProxy(conn, proxyStr, tokenPath):
     # submit proxy cert part to get CSR
-    url += '/proxies'
-    try:
-        resp = await client.post(url, json={'cert': proxyStr})
-        json = resp.json()
-    except httpx.RequestError as e:
-        raise ACTClientError(f'Request error: {e}')
-    except JSONDecodeError as e:
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        raise ACTClientError(f'{e}')
-    if resp.status_code != 200:
-        raise ACTClientError(f'Response error: {json["msg"]}')
-    token = json['token']
+    jsonDict = aCTJSONRequest(conn, 'POST', '/proxies', json={'cert':proxyStr})
+    token = jsonDict['token']
 
     # sign CSR
     try:
         proxyCert, _, issuerChains = parse_issuer_cred(proxyStr)
-        csr = x509.load_pem_x509_csr(json['csr'].encode('utf-8'), default_backend())
+        csr = x509.load_pem_x509_csr(jsonDict['csr'].encode('utf-8'), default_backend())
         cert = sign_request(csr).decode('utf-8')
         chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
     except Exception as e:
-        await deleteProxy(client, url, token)
+        deleteProxy(conn, token)
         raise ACTClientError(f'Error generating proxy: {e}')
 
     # upload signed cert
-    json = {'cert': cert, 'chain': chain}
-    headers = {'Authorization': 'Bearer ' + token}
+    jsonDict = {'cert': cert, 'chain': chain}
     try:
-        resp = await client.put(url, json=json, headers=headers)
-        json = resp.json()
-    except httpx.RequestError as e:
-        await deleteProxy(client, url, token)
-        raise ACTClientError(f'Request error: {e}')
-    except JSONDecodeError as e:
-        await deleteProxy(client, url, token)
-        raise ACTClientError(f'Response JSON decode error: {e}; Is your aCT URL correct?')
-    except Exception as e:
-        await deleteProxy(client, url, token)
-        raise ACTClientError(f'{e}')
-    if resp.status_code != 200:
-        await deleteProxy(client, url, token)
-        raise ACTClientError(f'Response error: {json["msg"]}')
+        jsonDict = aCTJSONRequest(conn, 'PUT', '/proxies', json=jsonDict, token=token)
+    except Exception:
+        deleteProxy(conn, token)
+        raise
 
     # store auth token
-    token = json['token']
+    token = jsonDict['token']
     try:
         if not os.path.exists(tokenPath):
             os.makedirs(os.path.dirname(tokenPath))
@@ -369,11 +359,14 @@ async def uploadProxy(client, url, proxyStr, tokenPath):
             f.write(token)
         os.chmod(tokenPath, 0o600)
     except Exception as e:
-        await deleteProxy(client, url, token)
+        deleteProxy(conn, token)
         raise ACTClientError(f'Error saving token: {e}')
 
 
-async def submitJobs(client, url, token, descs, clusterlist, webdavClient, webdavUrl):
+# SIGINT is disabled to ensure uninterrupted execution where necessary
+def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
+    sigint = SignalIgnorer(signal.SIGINT)
+
     results = []  # resulting list of job dicts
 
     # read job descriptions into a list of job dictionaries
@@ -389,23 +382,22 @@ async def submitJobs(client, url, token, descs, clusterlist, webdavClient, webda
             jobs.append(job)
 
     # submit jobs to aCT
-    json = [{k: v for k, v in job.items() if k in ('desc', 'clusterlist')} for job in jobs]
-    json = await postJobs(client, url, token, json)
+    jsonDict = [{k: v for k, v in job.items() if k in ('desc', 'clusterlist')} for job in jobs]
+    jsonDict = postJobs(conn, token, jsonDict)
 
     # move jobs with errors to results; do it backwards to not mess up index
     for i in range(len(jobs) - 1, -1, -1):
-        if 'msg' in json[i]:
-            if 'name' in json[i]:
-                jobs[i]['name'] = json[i]['name']
-            jobs[i]['msg'] = json[i]['msg']
+        if 'msg' in jsonDict[i]:
+            if 'name' in jsonDict[i]:
+                jobs[i]['name'] = jsonDict[i]['name']
+            jobs[i]['msg'] = jsonDict[i]['msg']
             results.append(jobs.pop(i))
         else:
-            jobs[i]['name'] = json[i]['name']
-            jobs[i]['id'] = json[i]['id']
+            jobs[i]['name'] = jsonDict[i]['name']
+            jobs[i]['id'] = jsonDict[i]['id']
 
     # The approach to killing is that all jobs from now on should be killed
-    # except for those that are submitted successfully and are removed from
-    # this list by functions that continue submission.
+    # except for those that are submitted successfully and marked otherwise.
     for job in jobs:
         job['cleanup'] = True
 
@@ -419,46 +411,40 @@ async def submitJobs(client, url, token, descs, clusterlist, webdavClient, webda
     for job in jobs:
         if not arc.JobDescription_Parse(job['desc'], jobdescs):
             job['msg'] = f'Parsing fail for job description {job["descpath"]}'
-    for i in range(len(jobs) - 1, -1, -1):  # remove failed jobs
+
+    # remove jobs with errors
+    for i in range(len(jobs) - 1, -1, -1):
         if 'msg' in jobs[i]:
             results.append(jobs.pop(i))
 
     # upload input files
-    #
-    # A job should be killed unless data upload succeeds. Data upload function
-    # should remove jobid from kill list on successful file upload.
     try:
-        async with trio.open_nursery() as tasks:
-            for i in range(len(jobs)):
-                tasks.start_soon(uploadJobData, client, url, token, jobs[i], jobdescs[i], webdavClient, webdavUrl)
-    except trio.Cancelled:
-        for i in range(len(jobs) - 1, -1, -1):  # add remaining jobs to results
-            jobs[i]['cleanup'] = True
-            results.append(jobs.pop(i))
+        sigint.restore()
+        for i in range(len(jobs)):
+            uploadJobData(conn, token, jobs[i], jobdescs[i], webdavConn, webdavUrl)
+    except KeyboardInterrupt:
+        results.extend(jobs)
         return results
+    else:
+        sigint.ignore()
 
-    # remove jobs that have to be cleaned up, mark other jobs
-    # for cleanup for next step
+    # remove jobs with errors
     for i in range(len(jobs) - 1, -1, -1):
-        if jobs[i]['cleanup']:
+        if 'msg' in jobs[i]:
             results.append(jobs.pop(i))
-        else:
-            jobs[i]['cleanup'] = True
 
     # complete job submission
-    json = [{k: v for k, v in job.items() if k in ('desc', 'id')} for job in jobs]
     try:
-        json = await putJobs(client, url, token, json)
-    except (trio.Cancelled, ACTClientError) as e:
-        for i in range(len(jobs) - 1, -1, -1):
-            results.append(jobs.pop(i))
-        if isinstance(e, ACTClientError):
-            raise JobCleanup(results, e)
-        else:
-            return results
+        jsonDict = [{k: v for k, v in job.items() if k in ('desc', 'id')} for job in jobs]
+        jsonDict = putJobs(conn, token, jsonDict)
+    except ACTClientError as e:
+        for job in jobs:
+            job['msg'] = str(e)
+        results.extend(jobs)
+        return results
 
     # process API errors
-    for job, result in zip(jobs, json):
+    for job, result in zip(jobs, jsonDict):
         if 'msg' in result:
             job['msg'] = result['msg']
         else:
@@ -468,23 +454,18 @@ async def submitJobs(client, url, token, descs, clusterlist, webdavClient, webda
     return results
 
 
-async def uploadJobData(client, url, token, job, jobdesc, webdavClient, webdavUrl):
-    ## create directory for job's local input files if using WebDAV
-    #if webdavUrl:
-    #    dirUrl = webdavUrl + '/' + str(job['id'])
-    #    try:
-    #        await webdavMkdir(webdavClient, dirUrl)
-    #    except ACTClientError as e:
-    #        job['msg'] = str(e)
-    #        return
-    #    except trio.Cancelled:
-    #        return
+def uploadJobData(conn, token, job, jobdesc, webdavConn, webdavUrl):
+    # create directory for job's local input files if using WebDAV
+    if webdavUrl:
+        dirUrl = f'{webdavUrl}/{job["id"]}'
+        try:
+            webdavMkdir(webdavConn, dirUrl)
+        except ACTClientError as e:
+            job['msg'] = str(e)
+            return
 
     # upload input files
-    try:
-        errors = await uploadInputFiles(client, url, token, job['id'], jobdesc, webdavClient, webdavUrl)
-    except trio.Cancelled:
-        return
+    errors = uploadInputFiles(conn, token, job['id'], jobdesc, webdavConn, webdavUrl)
     if errors:
         job['msg'] = '\n'.join(errors)
         return
@@ -498,10 +479,8 @@ async def uploadJobData(client, url, token, job, jobdesc, webdavClient, webdavUr
         else:
             job['desc'] = xrslStr
 
-    job['cleanup'] = False
 
-
-async def uploadInputFiles(client, url, token, jobid, jobdesc, webdavClient, webdavUrl):
+def uploadInputFiles(conn, token, jobid, jobdesc, webdavConn, webdavUrl):
     files = {}
 
     exepath = jobdesc.Application.Executable.Path
@@ -511,6 +490,7 @@ async def uploadInputFiles(client, url, token, jobid, jobdesc, webdavClient, web
     # if a file with the same name as executable is provided in inputFiles
     # in xRSL the value from inputFiles will be used (or file entry discarded
     # if the executable file is remote)
+    errors = []
     for i in range(len(jobdesc.DataStaging.InputFiles)):
         # we use index for access to InputFiles because changes
         # (for dcache) are not preserved otherwise?
@@ -519,11 +499,18 @@ async def uploadInputFiles(client, url, token, jobid, jobdesc, webdavClient, web
         if exepath == infile.Name and exepath in files:
             del files[exepath]
 
-        # TODO: add validation for different types of URLs
-        path = infile.Sources[0].FullPath()
+        path = infile.Sources[0].fullstr()
         if not path:
             path = infile.Name
+
+        # parse as URL, remote resource if scheme or hostname
+        url = urlparse(path)
+        if url.scheme not in ('file', None, '') or url.hostname:
+            continue
+
+        path = url.path
         if not os.path.isfile(path):
+            errors.append(f'Given path {path} is not a file')
             continue
 
         if webdavUrl:
@@ -533,22 +520,18 @@ async def uploadInputFiles(client, url, token, jobid, jobdesc, webdavClient, web
         else:
             files[infile.Name] = path
 
+    if errors:
+        return errors
+
     if not files:
         return []
 
-    errors = []
-    async with trio.open_nursery() as tasks:
-        for dst, src in files.items():
+    for dst, src in files.items():
+        try:
             if webdavUrl:  # upload to WebDAV
-                #tasks.start_soon(errorAdapter, errors, webdavPut, webdavClient, dst, src)
-                tasks.start_soon(errorAdapter, errors, arccp, src, dst)
+                webdavPut(webdavConn, dst, src)
             else:  # upload to internal data management
-                tasks.start_soon(errorAdapter, errors, httpPut, client, url, token, dst, src, jobid)
+                httpPut(conn, token, dst, src, jobid)
+        except (Exception, ACTClientError) as e:
+            errors.append(str(e))
     return errors
-
-
-async def errorAdapter(errors, asyncfun, *args):
-    try:
-        await asyncfun(*args)
-    except ACTClientError as e:
-        errors.append(str(e))

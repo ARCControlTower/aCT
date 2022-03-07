@@ -29,9 +29,8 @@ virtual environment.
 
 Once virtual environment is created, it has to be activated to be used.
 `$ source /path/to/act-venv/bin/activate`
-All commands that require virtual environment to be used will be shown in this
-document with the `(act-venv)` prefix, as would be displayed by most shell environments
-with activated virtual environmnet, e. g.:
+All commands require shell with an active virtual environment. Your shell might
+indicate that the environment is active by prepending a prefix to its prompt:
 `(act-venv) $ act proxy`
 
 To install aCT client, run this command:
