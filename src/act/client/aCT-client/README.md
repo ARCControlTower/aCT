@@ -148,6 +148,10 @@ jobs to remove them from the system.
 progressing. If you submit many jobs with big files it can take a while for
 submission of all to be finished and results to be printed.
 
+**WARNING**: There is a brief period of time in the beginning of job submission
+process where signals are ignored. It may thus appear as if submission cannot be
+cancelled. In such case, you can continue trying to cancel it using ctrl+c.
+
 ## Job status
 To check the status of all jobs, run the following command:
 `(act-venv) $ act stat -a`
@@ -187,12 +191,9 @@ aCT client programs have to perform proper cleanup of jobs and data files in cas
 of certain errors or specific conditions, like ctrl+c. That means that program
 execution cannot always be stopped immediately. Programs that have to perform
 proper cleanup and can take a while before they stop if they are cancelled with
-ctrl+c are:
-- `act clean`
-- `act get`
-- `act kill`
-- `act sub`
-While in the process of cleanup the ctrl+c signal will be ignored.
+ctrl+c are `act get` and `act sub`. Programs `act kill` and `act clean` can also
+perform longer cleanup but they cannot be cancelled as cleanup is their only
+operation.
 
 # Configuration
 Default location for aCT configuration file is `$HOME/.config/act-client/config.yaml`.
