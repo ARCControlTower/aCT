@@ -1,16 +1,14 @@
 import argparse
 import sys
 
-import trio
-
-from act_client.common import (ACTClientError, checkJobParams, getRESTClient,
-                               getWebDAVBase, getWebDAVClient, readFile,
-                               runWithSIGINTHandler)
+from act_client.common import (ACTClientError, disableSIGINT, getHTTPConn,
+                               getJobParams, getWebDAVBase, getWebDAVConn,
+                               readFile)
 from act_client.config import checkConf, expandPaths, loadConf
-from act_client.operations import (cleanJobs, cleanWebDAV, fetchJobs,
-                                   filterJobsToDownload, getJob, getJobStats,
-                                   killJobs, resubmitJobs, submitJobs,
-                                   uploadProxy)
+from act_client.operations import (aCTJSONRequest, cleanJobs, cleanWebDAV,
+                                   fetchJobs, filterJobsToDownload, getJob,
+                                   getJobStats, killJobs, resubmitJobs,
+                                   submitJobs, uploadProxy)
 
 
 def addCommonArgs(parser):
@@ -174,7 +172,6 @@ def runSubcommand(args):
 
     expandPaths(conf)
 
-    asyncfun = None
     if args.command == 'info':
         asyncfun = subcommandInfo
     elif args.command == 'clean':
@@ -194,8 +191,7 @@ def runSubcommand(args):
     elif args.command == 'sub':
         asyncfun = subcommandSub
 
-    #trio.run(runWithSIGINTHandler, asyncfun, args, conf, instruments=[Tracer()])
-    trio.run(runWithSIGINTHandler, asyncfun, args, conf)
+    asyncfun(args, conf)
 
 
 def main():
@@ -206,6 +202,7 @@ def main():
         parser.print_help()
         return
 
+    #runSubcommand(args)
     try:
         runSubcommand(args)
     except ACTClientError as e:
@@ -213,247 +210,254 @@ def main():
         sys.exit(1)
 
 
-async def subcommandInfo(args, conf):
-    checkConf(conf, ['server', 'port', 'token'])
+def subcommandInfo(args, conf):
+    checkConf(conf, ['server', 'token'])
 
     token = readFile(conf['token'])
 
-    url = conf['server'] + ':' + str(conf['port'])
-    headers = {'Authorization': 'Bearer ' + token}
-    async with getRESTClient() as client:
-        resp = await client.get(url + '/info', headers=headers)
-        json = resp.json()
-    if resp.status_code != 200:
-        raise ACTClientError(json['msg'])
+    disableSIGINT()
 
-    print(f'aCT server URL: {url}')
+    conn = getHTTPConn(conf['server'])
+    try:
+        jsonDict = aCTJSONRequest(conn, 'GET', '/info', token=token)
+    finally:
+        conn.close()
+
+    print(f'aCT server URL: {conf["server"]}')
     print('Clusters:')
-    for cluster in json['clusters']:
-        print(f'{cluster}')
+    for cluster in jsonDict['clusters']:
+        print(cluster)
 
 
-async def subcommandClean(args, conf):
-    checkJobParams(args)
-    checkConf(conf, ['server', 'port', 'token', 'proxy'])
+def subcommandClean(args, conf):
+    checkConf(conf, ['server', 'token', 'proxy'])
 
     token = readFile(conf['token'])
 
-    url = conf['server'] + ':' + str(conf['port'])
     params = {}
-    if args.id:
-        params['id'] = args.id
+    ids = getJobParams(args)
+    if ids:
+        params['id'] = ids
     if args.state:
         params['state'] = args.state
     if args.name:
         params['name'] = args.name
 
-    webdavUrl = getWebDAVBase(args, conf)
+    disableSIGINT()
 
-    with trio.CancelScope(shield=True):
-        client = getRESTClient()
-        async with client:
-            jobids = await cleanJobs(client, url, token, params)
-            print(f'Cleaned {len(jobids)} jobs')
-            if jobids and webdavUrl:
-                print('Cleaning WebDAV directories ...')
-                webdavClient = getWebDAVClient(conf['proxy'])
-                async with webdavClient:
-                    errors = await cleanWebDAV(webdavClient, webdavUrl, jobids)
-                    for error in errors:
-                        print(error)
+    conn = getHTTPConn(conf['server'])
+    try:
+        jobids = cleanJobs(conn, token, params)
+        print(f'Cleaned {len(jobids)} jobs')
+        webdavCleanup(args, conf, jobids)
+    finally:
+        conn.close()
 
 
-async def subcommandFetch(args, conf):
-    checkJobParams(args)
-    checkConf(conf, ['server', 'port', 'token'])
+# also closes connections given as params
+def webdavCleanup(args, conf, jobids, webdavConn=None, webdavUrl=None):
+    if not webdavUrl:
+        webdavUrl = getWebDAVBase(args, conf)
+    if jobids and webdavUrl:
+        print('Cleaning WebDAV directories ...')
+        if not webdavConn:
+            webdavConn = getWebDAVConn(conf['proxy'], conf['webdav'])
+        try:
+            errors = cleanWebDAV(webdavConn, webdavUrl, jobids)
+            for error in errors:
+                print(error)
+        finally:
+            webdavConn.close()
+
+
+def subcommandFetch(args, conf):
+    checkConf(conf, ['server', 'token'])
 
     token = readFile(conf['token'])
 
-    url = conf['server'] + ':' + str(conf['port'])
     params = {}
-    if args.id:
-        params['id'] = args.id
+    ids = getJobParams(args)
+    if ids:
+        params['id'] = ids
     if args.name:
         params['name'] = args.name
 
-    client = getRESTClient()
-    async with client:
-        json = await fetchJobs(client, url, token, params)
-    print(f'Will fetch {len(json)} jobs')
+    disableSIGINT()
+
+    conn = getHTTPConn(conf['server'])
+    try:
+        jsonDict = fetchJobs(conn, token, params)
+    finally:
+        conn.close()
+
+    print(f'Will fetch {len(jsonDict)} jobs')
 
 
-async def subcommandGet(args, conf):
-    checkJobParams(args)
-    checkConf(conf, ['server', 'port', 'token'])
+def subcommandGet(args, conf):
+    checkConf(conf, ['server', 'token'])
 
     token = readFile(conf['token'])
 
-    url = conf['server'] + ':' + str(conf['port'])
-
     kwargs = {}
-    if args.id:
-        kwargs['id'] = args.id
+    ids = getJobParams(args)
+    if ids:
+        kwargs['id'] = ids
     if args.name:
         kwargs['name'] = args.name
     if args.state:
-        if args.state not in ('done', 'donefailed'):
-            raise ACTClientError('Wrong state parameter, should be "done" or "donefailed"')
         kwargs['state'] = args.state
 
+    conn = getHTTPConn(conf['server'])
     toclean = []
     try:
-        client = getRESTClient()
-        async with client:
-            jobs = await filterJobsToDownload(client, url, token, **kwargs)
-            async with trio.open_nursery() as tasks:
-                for job in jobs:
-                    tasks.start_soon(adapterGetJob, client, url, token, job['c_id'], job['c_jobname'], toclean)
+        jobs = filterJobsToDownload(conn, token, **kwargs)
+        for job in jobs:
+            try:
+                dirname = getJob(conn, token, job['c_id'])
+            except ACTClientError as e:
+                print('Error downloading job {job["c_jobname"]}: {e}')
+                continue
+
+            if not dirname:
+                print(f'No results for job {job["c_jobname"]}')
+            else:
+                print(f'Results for job {job["c_jobname"]} stored in {dirname}')
+            toclean.append(job["c_id"])
+
+    except KeyboardInterrupt:
+        print('Stopping job download ...')
+
     finally:
-        with trio.CancelScope(shield=True):
-            if toclean:
-                # clean from aCT
-                client = getRESTClient()
-                async with client:
-                    params = {'id': ','.join(map(str, toclean))}
-                    toclean = await cleanJobs(client, url, token, params)
+        disableSIGINT()
 
-                # clean from WebDAV
-                webdavUrl = getWebDAVBase(args, conf)
-                if webdavUrl:
-                    print('Cleaning WebDAV directories ...')
-                    webdavClient = getWebDAVClient(conf['proxy'])
-                    async with webdavClient:
-                        errors = await cleanWebDAV(webdavClient, webdavUrl, toclean)
-                        for error in errors:
-                            print(error)
+        # reconnect in case KeyboardInterrupt left connection in a weird state
+        conn._connect()
 
+        if toclean:
+            # clean from aCT
+            params = {'id': toclean}
+            try:
+                toclean = cleanJobs(conn, token, params)
+            except ACTClientError as e:
+                print(e)
+                return
+            finally:
+                conn.close()
 
-async def adapterGetJob(client, url, token, jobid, jobname, toclean):
-    try:
-        dirname = await getJob(client, url, token, jobid)
-    except ACTClientError as e:
-        print(e)
-        return
-    if not dirname:
-        print(f'No results for job {jobname}')
-    else:
-        print(f'Results for job {jobname} stored in {dirname}')
-    toclean.append(jobid)
+            webdavCleanup(args, conf, toclean)
 
 
-async def subcommandKill(args, conf):
-    checkJobParams(args)
-    checkConf(conf, ['server', 'port', 'token'])
+def subcommandKill(args, conf):
+    checkConf(conf, ['server', 'token'])
 
     token = readFile(conf['token'])
 
-    url = conf['server'] + ':' + str(conf['port'])
-
     params = {}
-    if args.id:
-        params['id'] = args.id
+    ids = getJobParams(args)
+    if ids:
+        params['id'] = ids
     if args.state:
         params['state'] = args.state
     if args.name:
         params['name'] = args.name
 
-    with trio.CancelScope(shield=True):
-        # kill in aCT
-        client = getRESTClient()
-        async with client:
-            json = await killJobs(client, url, token, params)
-        print(f'Will kill {len(json)} jobs')
+    disableSIGINT()
 
-        # clean in WebDAV
-        tokill = [job['c_id'] for job in json if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting')]
-        webdavUrl = getWebDAVBase(args, conf)
-        if tokill and webdavUrl:
-            print('Cleaning WebDAV directories ...')
-            webdavClient = getWebDAVClient(conf['proxy'])
-            async with webdavClient:
-                errors = await cleanWebDAV(webdavClient, webdavUrl, tokill)
-                for error in errors:
-                    print(error)
+    # kill in aCT
+    conn = getHTTPConn(conf['server'])
+    try:
+        jsonDict = killJobs(conn, token, params)
+    finally:
+        conn.close()
+    print(f'Will kill {len(jsonDict)} jobs')
+
+    # clean in WebDAV
+    tokill = [job['c_id'] for job in jsonDict if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting')]
+    webdavCleanup(args, conf, tokill)
 
 
-async def subcommandProxy(args, conf):
-    checkConf(conf, ['server', 'port', 'token', 'proxy'])
+def subcommandProxy(args, conf):
+    checkConf(conf, ['server', 'token', 'proxy'])
 
     proxyStr = readFile(conf['proxy'])
 
-    url = conf['server'] + ':' + str(conf['port'])
+    disableSIGINT()
 
-    with trio.CancelScope(shield=True):
-        client = getRESTClient()
-        async with client:
-            await uploadProxy(client, url, proxyStr, conf['token'])
+    conn = getHTTPConn(conf['server'])
+    try:
+        uploadProxy(conn, proxyStr, conf['token'])
+    finally:
+        conn.close()
 
     print(f'Successfully inserted proxy. Access token stored in {conf["token"]}')
 
 
-async def subcommandResub(args, conf):
-    checkJobParams(args)
-    checkConf(conf, ['server', 'port', 'token'])
+def subcommandResub(args, conf):
+    checkConf(conf, ['server', 'token'])
 
     token = readFile(conf['token'])
 
-    url = conf['server'] + ':' + str(conf['port'])
-
     params = {}
-    if args.id:
-        params['id'] = args.id
+    ids = getJobParams(args)
+    if ids:
+        params['id'] = ids
     if args.name:
         params['name'] = args.name
 
-    with trio.CancelScope(shield=True):
-        client = getRESTClient()
-        async with client:
-            json = await resubmitJobs(client, url, token, params)
+    disableSIGINT()
+
+    conn = getHTTPConn(conf['server'])
+    try:
+        json = resubmitJobs(conn, token, params)
+    finally:
+        conn.close()
 
     print(f'Will resubmit {len(json)} jobs')
 
 
-async def subcommandStat(args, conf):
-    checkConf(conf, ['server', 'port', 'token'])
+def subcommandStat(args, conf):
+    checkConf(conf, ['server', 'token'])
 
     token = readFile(conf['token'])
 
-    url = conf['server'] + ':' + str(conf['port'])
+    disableSIGINT()
 
-    if args.get_cols:
-        async with getRESTClient() as client:
-            headers = {'Authorization': 'Bearer ' + token}
-            async with getRESTClient() as client:
-                resp = await client.get(url + '/info', headers=headers)
-                json = resp.json()
-            if resp.status_code != 200:
-                raise ACTClientError(json['msg'])
-            print('arc columns:')
-            print(f'{", ".join(json["arc"])}')
-            print()
-            print('client columns:')
-            print(f'{", ".join(json["client"])}')
-            return
+    conn = getHTTPConn(conf['server'])
+    try:
+        if args.get_cols:
+            getCols(conn, token)
+        else:
+            getStats(args, conn, token)
+    finally:
+        conn.close()
 
-    checkJobParams(args)
+
+def getCols(conn, token):
+    jsonDict = aCTJSONRequest(conn, 'GET', '/info', token=token)
+    print('arc columns:')
+    print(f'{", ".join(jsonDict["arc"])}')
+    print()
+    print('client columns:')
+    print(f'{", ".join(jsonDict["client"])}')
+
+
+def getStats(args, conn, token):
     params = {}
-    if args.id:
-        params['id'] = args.id
+    ids = getJobParams(args)
+    if ids:
+        params['id'] = ids
     if args.arc:
-        params['arctab'] = args.arc
+        params['arctab'] = args.arc.split(',')
     if args.client:
-        params['clienttab'] = args.client
+        params['clienttab'] = args.client.split(',')
     if args.state:
         params['state'] = args.state
     if args.name:
         params['name'] = args.name
 
-    with trio.CancelScope(shield=True):
-        client = getRESTClient()
-        async with client:
-            json = await getJobStats(client, url, token, **params)
+    jsonDict = getJobStats(conn, token, **params)
 
-    if not json:
+    if not jsonDict:
         return
 
     if args.arc:
@@ -468,7 +472,7 @@ async def subcommandStat(args, conf):
     # For each column, determine biggest sized value so that output can
     # be nicely formatted.
     colsizes = {}
-    for job in json:
+    for job in jsonDict:
         for key, value in job.items():
             # All keys have a letter and underscore prepended, which is not
             # used when printing
@@ -492,7 +496,7 @@ async def subcommandStat(args, conf):
     print(line)
 
     # Print jobs
-    for job in json:
+    for job in jsonDict:
         for col in clicols:
             fullKey = 'c_' + col
             txt = job.get(fullKey)
@@ -508,8 +512,8 @@ async def subcommandStat(args, conf):
         print()
 
 
-async def subcommandSub(args, conf):
-    checkConf(conf, ['server', 'port', 'token'])
+def subcommandSub(args, conf):
+    checkConf(conf, ['server', 'token'])
 
     token = readFile(conf['token'])
 
@@ -521,85 +525,50 @@ async def subcommandSub(args, conf):
     else:
         clusterlist = args.clusterlist.split(',')
 
-    url = conf['server'] + ':' + str(conf['port'])
-
+    conn = getHTTPConn(conf['server'])
+    webdavConn = None
+    webdavUrl = None
     jobs = []
     try:
-        client = getRESTClient()
-        webdavUrl = getWebDAVBase(args, conf)
-        webdavClient = getWebDAVClient(conf['proxy'])
-        async with client, webdavClient:
-            jobs = await submitJobs(client, url, token, args.xRSL, clusterlist, webdavClient, webdavUrl)
-    finally:
-        with trio.CancelScope(shield=True):
-            client = getRESTClient()
+        if args.webdav:
+            webdavConn = getWebDAVConn(conf['proxy'], conf['webdav'])
             webdavUrl = getWebDAVBase(args, conf)
-            webdavClient = getWebDAVClient(conf['proxy'])
-            async with client, webdavClient:
-                await subCleanup(client, url, token, jobs, webdavClient, webdavUrl)
+        jobs = submitJobs(conn, token, args.xRSL, clusterlist, webdavConn, webdavUrl)
+    except ACTClientError as e:
+        print(f'Error submitting jobs: {e}')
+    finally:
+        disableSIGINT()
+
+        # reconnect in case KeyboardInterrupt left connection in a weird state
+        conn._connect()
+        if webdavConn:
+            webdavConn._connect()
+
+        # print results
+        for job in jobs:
+            if 'msg' in job:
+                if 'name' in job:
+                    print(f'Job {job["name"]} not submitted: {job["msg"]}')
+                else:
+                    print(f'Job description {job["descpath"]} not submitted: {job["msg"]}')
+            elif not job['cleanup']:
+                print(f'Inserted job {job["name"]} with ID {job["id"]}')
+
+        try:
+            # existing webdavConn is closed by webdavCleanup
+            submitCleanup(args, conf, conn, token, jobs, webdavConn, webdavUrl)
+        finally:
+            conn.close()
 
 
-async def subCleanup(client, url, token, jobs, webdavClient, webdavUrl):
-    # print results
-    for job in jobs:
-        if 'msg' in job:
-            if 'name' in job:
-                print(f'Job {job["name"]} not submitted: {job["msg"]}')
-            else:
-                print(f'Job description {job["descpath"]} not submitted: {job["msg"]}')
-        elif not job['cleanup']:
-            print(f'Inserted job {job["name"]} with ID {job["id"]}')
-    #return
-
+def submitCleanup(args, conf, conn, token, jobs, webdavConn, webdavUrl):
     # clean jobs that could not be submitted
     tokill = [job['id'] for job in jobs if job['cleanup']]
     if tokill:
-        params = {'id': ','.join(map(str, tokill))}
         print('Cleaning up failed or cancelled jobs ...')
-        jobs = await killJobs(client, url, token, params)
+        params = {'id': tokill}
+        jobs = killJobs(conn, token, params)
 
-        jobids = [job['c_id'] for job in jobs]  # TODO: change API to not return underscored prefix
-        if jobids and webdavUrl:
-            print('Cleaning WebDAV directories ...')
-            errors = await cleanWebDAV(webdavClient, webdavUrl, jobids)
-            for error in errors:
-                print(error)
-
-
-class Tracer(trio.abc.Instrument):
-    def before_run(self):
-        print("!!! run started")
-
-    def _print_with_task(self, msg, task):
-        # repr(task) is perhaps more useful than task.name in general,
-        # but in context of a tutorial the extra noise is unhelpful.
-        print(f"{msg}: {task.name}")
-
-    def task_spawned(self, task):
-        self._print_with_task("### new task spawned", task)
-
-    def task_scheduled(self, task):
-        self._print_with_task("### task scheduled", task)
-
-    def before_task_step(self, task):
-        self._print_with_task(">>> about to run one step of task", task)
-
-    def after_task_step(self, task):
-        self._print_with_task("<<< task step finished", task)
-
-    def task_exited(self, task):
-        self._print_with_task("### task exited", task)
-
-    def before_io_wait(self, timeout):
-        if timeout:
-            print(f"### waiting for I/O for up to {timeout} seconds")
-        else:
-            print("### doing a quick check for I/O")
-        self._sleep_time = trio.current_time()
-
-    def after_io_wait(self, timeout):
-        duration = trio.current_time() - self._sleep_time
-        print(f"### finished I/O check (took {duration} seconds)")
-
-    def after_run(self):
-        print("!!! run finished")
+        # TODO: change API to not return underscored prefix
+        toclean = [job['c_id'] for job in jobs]
+        webdavCleanup(args, conf, toclean, webdavConn, webdavUrl)

@@ -1,20 +1,27 @@
+import http.client
+import os
 import signal
 import ssl
 
-import httpx
-import trio
+from urllib.parse import urlparse
+
+# TODO: hardcoded
+HTTP_BUFFER_SIZE = 2**23
 
 
-def checkJobParams(args):
+def getJobParams(args):
     if not args.all and not args.id:
         raise ACTClientError("No job ID given (use -a/--all) or --id")
-    if args.id:
-        checkIDString(args.id)
+    elif args.id:
+        return getIDsFromStr(args.id)
+    else:
+        []
 
 
 # modified from act.client.jobmgr.getIDsFromList
-def checkIDString(listStr):
+def getIDsFromStr(listStr):
     groups = listStr.split(',')
+    ids = []
     for group in groups:
         try:
             group.index('-')
@@ -29,18 +36,20 @@ def checkIDString(listStr):
             except ValueError:  # if there is more than one dash
                 raise ACTClientError(f'Invalid ID range: {group}')
             try:
-                _ = int(firstIx)
+                firstIx = int(firstIx)
             except ValueError:
                 raise ACTClientError(f'Invalid ID range start: {firstIx}')
             try:
-                _ = int(lastIx)
+                lastIx = int(lastIx)
             except ValueError:
                 raise ACTClientError(f'Invalid ID range end: {lastIx}')
+            ids.extend(range(int(firstIx), int(lastIx) + 1))
         else:
             try:
-                _ = int(group)
+                ids.append(int(group))
             except ValueError:
                 raise ACTClientError(f'Invalid ID: {group}')
+    return ids
 
 
 def readFile(filename):
@@ -51,7 +60,27 @@ def readFile(filename):
         raise ACTClientError(f'Error reading file {filename}: {e}')
 
 
-def getWebDAVClient(proxypath):
+def deleteFile(filename):
+    try:
+        if os.path.isfile(filename):
+            os.remove(filename)
+    except Exception as e:
+        raise ACTClientError(f'Could not delete results zip {filename}: {e}')
+
+
+def getHTTPConn(url, ssl=True, sslctx=None, blocksize=HTTP_BUFFER_SIZE):
+    try:
+        parts = urlparse(url)
+        if ssl:
+            conn = PipeFixer(parts.hostname, parts.port, blocksize, True, sslctx)
+        else:
+            conn = PipeFixer(parts.hostname, parts.port, blocksize, False)
+    except http.client.HTTPException as e:
+        raise ACTClientError(f'Error connecting to {host}:{port}: {e}')
+    return conn
+
+
+def getWebDAVConn(proxypath, url, blocksize=HTTP_BUFFER_SIZE):
     try:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS)
         context.load_cert_chain(proxypath, keyfile=proxypath)
@@ -61,19 +90,78 @@ def getWebDAVClient(proxypath):
             '!eNULL:!MD5'
         )
         context.set_ciphers(_DEFAULT_CIPHERS)
-        limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-        timeout = httpx.Timeout(5.0, pool=None)
-        client = httpx.AsyncClient(verify=context, timeout=timeout, limits=limits)
     except Exception as e:
         raise ACTClientError(f'Error creating proxy SSL context: {e}')
-    return client
+
+    return getHTTPConn(url, ssl=True, sslctx=context)
 
 
-def getRESTClient():
-    limits = httpx.Limits(max_keepalive_connections=1, max_connections=1)
-    timeout = httpx.Timeout(5.0, pool=None)
-    client = httpx.AsyncClient(timeout=timeout, limits=limits)
-    return client
+class PipeFixer(object):
+    """
+    Duck type around HTTP(S)Connection that reconnects on broken pipe.
+
+    Implements a subset of methods, the ones that are used by aCT client.
+    Alternative would be to use higher level library like requests that
+    could handle this automatically?
+    """
+
+    def __init__(self, host, port, blocksize, ssl=True, context=None):
+        self.host = host
+        self.port = port
+        self.blocksize = blocksize
+        self.ssl = ssl
+        self.context = context
+        self.conn = None
+        self._connect()
+
+    def close(self):
+        if self.conn:
+            self.conn.close()
+
+    def request(self, method, url, **kwargs):
+        self._reconnectOnBrokenPipe(self.conn.request, method, url, **kwargs)
+
+    def getresponse(self):
+        return self.conn.getresponse()
+
+    def set_debuglevel(self, level):
+        self.conn.set_debuglevel(level)
+
+    def _reconnectOnBrokenPipe(self, func, *args, **kwargs):
+        try:
+            func(*args, **kwargs)
+        except BrokenPipeError as e:
+            print('Connection lost, reconnecting ...')
+            try:
+                self._connect()
+            except http.client.HTTPException as e:
+                print('Failed to reconnect!')
+                raise ACTClientError('Could not reconnect: {e}')
+            print('Successfully reconnected!')
+
+            try:
+                func(*args, **kwargs)
+            except http.client.HTTPException as e:
+                print('Failed to resend request!')
+                raise ACTClientError('Could not resend request: {e}')
+            print('Successfully resent request!')
+
+    def _connect(self):
+        self.close()
+
+        if self.ssl:
+            self.conn = http.client.HTTPSConnection(
+                self.host,
+                port=self.port,
+                blocksize=self.blocksize,
+                context=self.context
+            )
+        else:
+            self.conn = http.client.HTTPConnection(
+                self.host,
+                port=self.port,
+                blocksize=self.blocksize
+            )
 
 
 def getWebDAVBase(args, conf):
@@ -87,21 +175,29 @@ def getWebDAVBase(args, conf):
     return webdavBase
 
 
-async def runWithSIGINTHandler(program, *args):
-    cancel_scope = trio.CancelScope()
-
-    def sigint_handler(signum, sigframe):
-        disableSIGINT()
-        cancel_scope.cancel()
-
-    signal.signal(signal.SIGINT, sigint_handler)
-
-    with cancel_scope:
-        await program(*args)
-
-
+# This does not save the old handler which is necessary if you want to restore
+# KeyboardInterrupt.
 def disableSIGINT():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+# Automatically starts ignoring signal when created and restores signal when
+# deleted. It can also explicitly be told to ignore or restore.
+class SignalIgnorer(object):
+
+    def __init__(self, signum):
+        self.signum = signum
+        self.ignore()
+
+    def __del__(self):
+        self.restore()
+
+    def ignore(self):
+        self.oldHandler = signal.getsignal(self.signum)
+        signal.signal(self.signum, signal.SIG_IGN)
+
+    def restore(self):
+        signal.signal(self.signum, self.oldHandler)
 
 
 class ACTClientError(Exception):
@@ -112,27 +208,3 @@ class ACTClientError(Exception):
 
     def __str__(self):
         return self.msg
-
-
-class JobCleanup(ACTClientError):
-    """
-    Raised with a list of jobs and exception to raise.
-
-    Jobs are dicts, those with 'cleanup' set to True should be cleaned up.
-    """
-
-    def __init__(self, cleanup, exception):
-        super().__init__(str(exception))
-        self.cleanup = cleanup
-        self.exception = exception
-
-    def __str__(self):
-        return f'Jobs for cleanup {self.cleanup} after error: {self.msg}'
-
-
-class ExitProgram(ACTClientError):
-    """Exception raised to exit program with message and return code."""
-
-    def __init__(self, msg='', code=0):
-        super().__init__(msg)
-        self.code = code
