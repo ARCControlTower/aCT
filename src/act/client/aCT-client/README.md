@@ -21,24 +21,125 @@ of the system or other virtual environments.
 
 To create a virtual environment, the user needs to choose the location of the
 environment and then run:  
-`$ python3 -m venv --system-site-packages /path/to/act-venv`
+`$ python3 -m venv --system-site-packages /path/to/act-venv`  
 
 `--system-site-packages` flag is necessary to copy ARC client's python bindings
 that are not available in PyPI package repository. `act-venv` is the name of this
 virtual environment.
 
 Once virtual environment is created, it has to be activated to be used.  
-`$ source /path/to/act-venv/bin/activate`
-All commands require shell with an active virtual environment. Your shell might
-indicate that the environment is active by prepending a prefix to its prompt:  
-`(act-venv) $ act proxy`
+`$ source /path/to/act-venv/bin/activate`  
+All commands require shell with an active virtual environment.
 
 To install aCT client, run this command:  
-`(act-venv) $ pip install git+https://github.com/ARCControlTower/aCT.git@test#subdirectory=src/act/client/aCT-client`
+`(act-venv) $ pip install git+https://github.com/ARCControlTower/aCT.git@test#subdirectory=src/act/client/aCT-client`  
 The command installs aCT client from git repository as it is not distributed in
-a package repository like PyPI.
+a package repository like PyPI. To run aCT client commands the virtual envionmnet
+needs to be activated. Your shell might indicate that the environment is active
+by prepending prefix to its prompt:  
+`(act-venv) $ `  
 
-# The big picture
+# Configuration
+Default location for aCT configuration file is `$HOME/.config/act-client/config.yaml`.
+Configuration file can also be passed to commands, e. g.:  
+`(act-venv) $ act --conf /path/to/your/conf <subcommand> <args>`  
+
+Configuration is in YAML format. Parameters with default values and optional parameters
+can be omitted. Possible parameters are:
+- `server`: URL of aCT server (should include port if non standard)
+- `clusters`: a YAML *mapping* of names to lists of clusters. A list of enabled
+  clusters for a server can be obtained with `act info`. If no `--clusterlist`
+  flag is given, the list called `default` will be used.
+- `token`: location where client should store auth token
+  (optional, default: `$HOME/.local/share/act-client/token`)
+- `proxy`: location of proxy that client uses for authentication
+  (optional, default: `/tmp/x509up_u$UID` - default location used by ARC client)
+- `webdav`: path to WebDAV folder accessible with your proxy certificate credentials
+  (optional, but required for use with empty `--webdav` flag)
+
+Example configuration:
+``` yaml
+server: https://act.vega.izum.si
+webdav: https://dcache.sling.si:2880/gen.vo.sling.si/john/jobdata
+clusters:
+  default:
+    - https://arc01.vega.izum.si/cpu
+    - https://arc02.vega.izum.si/cpu
+    - https://hpc.arnes.si/all
+    - https://nsc.ijs.si/gridlong
+  longcpu:
+    - https://arc01.vega.izum.si/longcpu
+    - https://hpc.arnes.si/long
+    - https://nsc.ijs.si/gridlong
+  gpu:
+    - https://arc01.vega.izum.si/gpu
+    - https://hpc.arnes.si/gpu
+  largememory:
+    - https://arc01.vega.izum.si/largemem
+    - https://hpc.arnes.si/all
+    - https://nsc.ijs.si/gridlong
+```
+
+# Example usage
+
+First, obtain proxy certificate with VOMS credentials needed to access the
+clusters:
+``` sh
+$ arcproxy -S gen.vo.sling.si`
+Enter pass phrase for private key:
+Your identity: /C=SI/O=SiGNET/O=IJS/OU=F9/CN=John Doe
+Contacting VOMS server (named gen.vo.sling.si): voms.sling.si on port: 15001
+Proxy generation succeeded
+Your proxy is valid until: 2022-03-08 23:44:07
+```
+
+Authenticate on the aCT server with the generated proxy:
+``` sh
+(act-client) $ act proxy
+Successfully inserted proxy. Access token stored in /home/john/.local/share/act-client/token
+```
+
+Submit jobs:
+``` sh
+(act-client) $ act sub arctest1.xrsl arctest2.xrsl arctest3.xrsl arctest4.xrsl --webdav
+Inserted job arctest1 with ID 28517
+Inserted job arctest2 with ID 28518
+Inserted job arctest3 with ID 28519
+Inserted job arctest4 with ID 28520
+```
+
+Check status of jobs:
+``` sh
+id    jobname  JobID                                                                                  State     arcstate
+-------------------------------------------------------------------------------------------------------------------------
+28517 arctest1 https://pikolit.ijs.si:443/arex/lqYKDmcZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmmk7KDmuhWSun Undefined submitted
+28518 arctest2 https://pikolit.ijs.si:443/arex/geMODmcZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmnk7KDmD1SOsn Undefined submitted
+28519 arctest3 https://pikolit.ijs.si:443/arex/wHqLDmdZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmok7KDml5d6kn Undefined submitted
+28520 arctest4 https://pikolit.ijs.si:443/arex/Mm0KDmeZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmpk7KDmCmAxyn Undefined submitted
+```
+
+Wait for jobs to finish:
+``` sh
+id    jobname  JobID                                                                                  State    arcstate
+-----------------------------------------------------------------------------------------------------------------------
+28517 arctest1 https://pikolit.ijs.si:443/arex/lqYKDmcZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmmk7KDmuhWSun Finished done
+28518 arctest2 https://pikolit.ijs.si:443/arex/geMODmcZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmnk7KDmD1SOsn Finished done
+28519 arctest3 https://pikolit.ijs.si:443/arex/wHqLDmdZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmok7KDml5d6kn Finished done
+28520 arctest4 https://pikolit.ijs.si:443/arex/Mm0KDmeZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmpk7KDmCmAxyn Finished done
+```
+
+Download job results:
+``` sh
+Results for job arctest1 stored in lqYKDmcZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmmk7KDmuhWSun
+Results for job arctest2 stored in geMODmcZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmnk7KDmD1SOsn
+Results for job arctest3 stored in wHqLDmdZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmok7KDml5d6kn
+Results for job arctest4 stored in Mm0KDmeZml0n4J8tmqCBXHLnABFKDmABFKDmFoFKDmpk7KDmCmAxyn
+Cleaning WebDAV directories ...
+```
+
+For more details about job management with aCT client read on.
+
+# Overview of aCT client
 aCT client is a program that allows submission and management of jobs similar to
 ARC Client tools with added benefits of aCT job management like job brokering to
 multiple clusters.
@@ -97,7 +198,7 @@ consult admin and developers.
 To perform any operation on aCT, the user needs to be authenticated. This is done
 with a valid proxy certificate with proper VOMS extensions (by using `arcproxy`
 for instance). Then, the proxy needs to be submitted to aCT:  
-`(act-venv) $ act proxy`
+`(act-venv) $ act proxy`  
 
 This creates a delegated proxy on server required by aCT for further job and data
 operations and stores a local access token. The lifetime of the token is the same
@@ -112,7 +213,7 @@ case, create a new proxy and submit it to aCT.
 
 ## Submission
 Jobs can be submitted using the following command:  
-`(act-venv) $ act sub job1.xrsl job2.xrsl ...`
+`(act-venv) $ act sub job1.xrsl job2.xrsl ...`  
 The command instructs aCT to submit jobs to a given list of clusters. Those can
 be provided in several ways. First option is to provide a list of cluster URLs:
 `--clusterlist=https://arc01.vega.izum.si/cpu,https://arc02.vega.izum.si/cpu`
@@ -154,7 +255,7 @@ cancelled. In such case, you can continue trying to cancel it using ctrl+c.
 
 ## Job status
 To check the status of all jobs, run the following command:  
-`(act-venv) $ act stat -a`
+`(act-venv) $ act stat -a`  
 It prints a table of values that provide information on jobs managed by aCT.
 The default values provide for instance the ID of a job, its name, ID in ARC
 middleware and states in ARC middleware as well as in aCT.
@@ -193,37 +294,3 @@ proper cleanup and can take a while before they stop if they are cancelled with
 ctrl+c are `act get` and `act sub`. Programs `act kill` and `act clean` can also
 perform longer cleanup but they cannot be cancelled as cleanup is their only
 operation.
-
-# Configuration
-Default location for aCT configuration file is `$HOME/.config/act-client/config.yaml`.
-Configuration file can also be passed to commands, e. g.:  
-`(act-venv) $ act --conf /path/to/your/conf <subcommand> <args>`
-
-Configuration is in YAML format. Parameters with default values and optional parameters
-can be omitted. Possible parameters are:
-- `server`: URL of aCT server (should include port if non standard)
-- `clusters`: a YAML *mapping* of names to lists of clusters. A list of enabled
-  clusters for a server can be obtained with `act info`. If no `--clusterlist`
-  flag is given, the list called `default` will be used.
-- `token`: location where client should store auth token
-  (optional, default: `$HOME/.local/share/act-client/token`)
-- `proxy`: location of proxy that client uses for authentication
-  (optional, default: `/tmp/x509up_u$UID` - default location used by ARC client)
-- `webdav`: path to WebDAV folder accessible with your proxy certificate credentials
-  (optional, but required for use with empty `--webdav` flag)
-
-Example configuration:
-``` yaml
-server: https://act.vega.izum.si
-webdav: <url to your WebDAV directory>
-clusters:
-  default:
-    - https://pikolit.ijs.si/batch
-    - https://rebula.ijs.si/batch
-  ijs:
-    - https://pikolit.ijs.si/batch
-    - https://rebula.ijs.si/batch
-  vega:
-    - https://arc01.vega.izum.si/cpu
-    - https://arc02.vega.izum.si/cpu
-```
