@@ -68,15 +68,17 @@ def deleteFile(filename):
         raise ACTClientError(f'Could not delete results zip {filename}: {e}')
 
 
-def getHTTPConn(url, ssl=True, sslctx=None, blocksize=HTTP_BUFFER_SIZE):
+def getHTTPConn(url, sslctx=None, blocksize=HTTP_BUFFER_SIZE):
     try:
         parts = urlparse(url)
-        if ssl:
+        if parts.scheme == 'https':
             conn = PipeFixer(parts.hostname, parts.port, blocksize, True, sslctx)
-        else:
+        elif parts.scheme == 'http':
             conn = PipeFixer(parts.hostname, parts.port, blocksize, False)
+        else:
+            raise ACTClientError(f'Unsupported URL scheme "{parts.scheme}"')
     except http.client.HTTPException as e:
-        raise ACTClientError(f'Error connecting to {host}:{port}: {e}')
+        raise ACTClientError(f'Error connecting to {parts.hostname}:{parts.port}: {e}')
     return conn
 
 
@@ -93,7 +95,7 @@ def getWebDAVConn(proxypath, url, blocksize=HTTP_BUFFER_SIZE):
     except Exception as e:
         raise ACTClientError(f'Error creating proxy SSL context: {e}')
 
-    return getHTTPConn(url, ssl=True, sslctx=context)
+    return getHTTPConn(url, sslctx=context)
 
 
 class PipeFixer(object):

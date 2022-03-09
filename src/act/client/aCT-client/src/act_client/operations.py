@@ -192,7 +192,7 @@ def webdavPut(conn, url, path):
             dstUrl = resp.getheader('Location')
             parts = urlparse(dstUrl)
             urlPath = f'{parts.path}?{parts.query}'
-            upconn = getHTTPConn(dstUrl, ssl=False)
+            upconn = getHTTPConn(dstUrl)
             try:
                 resp = httpRequest(upconn, 'PUT', urlPath, body=f)
                 text = resp.read()
