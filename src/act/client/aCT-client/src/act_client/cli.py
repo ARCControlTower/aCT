@@ -130,12 +130,12 @@ def createParser():
     parserStat.add_argument(
         '--arc',
         default='JobID,State,arcstate',
-        help='a list of columns from ARC table'
+        help='a comma separated list of columns from ARC table'
     )
     parserStat.add_argument(
         '--client',
         default='id,jobname',
-        help='a list of columns from client table'
+        help='a comma separated list of columns from client table'
     )
     parserStat.add_argument(
         '--get-cols',
@@ -435,10 +435,10 @@ def subcommandStat(args, conf):
 def getCols(conn, token):
     jsonDict = aCTJSONRequest(conn, 'GET', '/info', token=token)
     print('arc columns:')
-    print(f'{", ".join(jsonDict["arc"])}')
+    print(f'{",".join(jsonDict["arc"])}')
     print()
     print('client columns:')
-    print(f'{", ".join(jsonDict["client"])}')
+    print(f'{",".join(jsonDict["client"])}')
 
 
 def getStats(args, conn, token):
