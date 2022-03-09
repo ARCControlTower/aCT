@@ -8,6 +8,7 @@ import arc
 import logging
 
 from act.db.aCTDB import aCTDB
+from act.client.errors import InvalidColumnError
 
 
 class ClientDB(aCTDB):
@@ -287,8 +288,7 @@ class ClientDB(aCTDB):
         Returns:
             A list of dictionaries of column_name:value.
         """
-        if not self._checkColumns('clientjobs', columns):
-            return None
+        self._checkColumns('clientjobs', columns)
 
         # query params
         params = []
@@ -340,8 +340,7 @@ class ClientDB(aCTDB):
             lazy: A boolean that determines whether transaction should be
                 commited after operation.
         """
-        if not self._checkColumns('clientjobs', patch.keys()):
-            raise Exception("Invalid job attribute")
+        self._checkColumns('clientjobs', patch.keys())
 
         query = 'UPDATE clientjobs SET '
         params = []
@@ -387,9 +386,8 @@ class ClientDB(aCTDB):
         if not clicols and not arccols:
             return []
 
-        if not self._checkColumns('clientjobs', clicols) or \
-                not self._checkColumns('arcjobs', arccols):
-            raise Exception("Invalid columns")
+        self._checkColumns('clientjobs', clicols)
+        self._checkColumns('arcjobs', arccols)
 
         c = self.db.getCursor()
         query = "SELECT "
@@ -398,7 +396,7 @@ class ClientDB(aCTDB):
             query += f'c.{col} AS c_{col}, '
         for col in arccols:
             query += f'a.{col} AS a_{col}, '
-        query = query.rstrip(', ') # strip last comma and space
+        query = query.rstrip(', ')  # strip last comma and space
 
         # inner join
         query += " FROM clientjobs c "
@@ -455,9 +453,8 @@ class ClientDB(aCTDB):
         if not clicols and not arccols:
             return []
 
-        if not self._checkColumns('clientjobs', clicols) or \
-                not self._checkColumns('arcjobs', arccols):
-            raise Exception("Invalid columns")
+        self._checkColumns('clientjobs', clicols)
+        self._checkColumns('arcjobs', arccols)
 
         c = self.db.getCursor()
         query = "SELECT "
@@ -466,7 +463,7 @@ class ClientDB(aCTDB):
             query += f'c.{col} AS c_{col}, '
         for col in arccols:
             query += f'a.{col} AS a_{col}, '
-        query = query.rstrip(', ') # strip last comma and space
+        query = query.rstrip(', ')  # strip last comma and space
 
         # left join
         query += " FROM clientjobs c "
@@ -524,8 +521,7 @@ class ClientDB(aCTDB):
         tableColumns = self.getColumns(tableName)
         for col in columns:
             if col not in tableColumns:
-                return False
-        return True
+                raise InvalidColumnError(col)
 
 
 def createMysqlEscapeList(num):

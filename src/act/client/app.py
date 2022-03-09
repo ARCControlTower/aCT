@@ -11,6 +11,7 @@ from act.client.errors import (ConfigError, InvalidJobIDError,
 from act.client.jobmgr import JobManager, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
 from act.client.x509proxy import create_proxy_csr
+from act.client.errors import InvalidColumnError
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -69,6 +70,9 @@ def stat():
         proxyid = token['proxyid']
         jobids = getIDs()
         jobdicts = jmgr.getJobStats(proxyid, jobids, state_filter, name_filter, clicols, arccols)
+    except InvalidColumnError as e:
+        print(f'error: GET /jobs: {e}')
+        return {'msg': str(e)}, 400
     except RESTError as e:
         print(f'error: GET /jobs: {e}')
         return {'msg': str(e)}, e.httpCode

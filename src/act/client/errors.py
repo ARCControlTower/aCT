@@ -124,6 +124,16 @@ class NoProxyFileError(Exception):
         self.path = path
 
 
+class InvalidColumnError(Exception):
+    """Error when given column does not exist in database."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __str__(self):
+        return f'Invalid column "{self.name}"'
+
+
 class ProxyFileExpiredError(Exception):
     """Error when expired proxy file is used."""
     pass
