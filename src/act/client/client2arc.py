@@ -81,20 +81,7 @@ class Client2Arc(object):
         """
         proxies = self.clidb.getProxies()
         for proxyid in proxies:
-            # get number of all states of jobs with fairshare proxyid
-            states = self.getJobStateCount(f'fairshare = {proxyid}')
-
-            # get number of running and submitted jobs
-            running = 0
-            submitted = 0
-            for state in states:
-                if state['arcstate'] == 'running':
-                    running = state['COUNT(arcstate)']
-                elif state['arcstate'] in ('submitted', 'submitting'):
-                    submitted += state['COUNT(arcstate)']
-
-            if submitted < max(0.2 * running, 100):  # TODO: HARDCODED
-                self.insertNewJobs(proxyid, 20)
+            self.insertNewJobs(proxyid, 100)
 
     def getJobStateCount(self, select):
         """
