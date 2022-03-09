@@ -95,7 +95,7 @@ Your proxy is valid until: 2022-03-08 23:44:07
 
 Authenticate on the aCT server with the generated proxy:
 ``` sh
-(act-client) $ act proxy`
+(act-client) $ act proxy
 Successfully inserted proxy. Access token stored in /home/john/.local/share/act-client/token
 ```
 
