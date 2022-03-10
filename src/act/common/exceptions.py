@@ -19,7 +19,27 @@ class SubmitError(ACTError):
 class ARCHTTPError(ACTError):
     """ARC REST HTTP status error."""
 
-    def __init__(self, url, status, text):
-        super().__init__(f"{url} {status} {text}")
+    def __init__(self, status, text, msg):
+        super().__init__(msg)
         self.status = status
         self.text = text
+
+
+#class DelegationError(ACTError):
+#    """Error in delegation process."""
+#
+#    def __init__(self, exc):
+#        super().__init__(f"Delegation error: {exc}")
+#        self.exc = exc
+
+
+class InputFileError(ACTError):
+    pass
+
+
+class DescriptionParseError(ACTError):
+    pass
+
+
+class DescriptionUnparseError(ACTError):
+    pass

@@ -1,15 +1,18 @@
 import datetime
-import http.client
 import os
-import ssl
+
+from http.client import HTTPException
+from json import JSONDecodeError
 from random import shuffle
+from ssl import SSLError
 from urllib.parse import urlparse
 
-from act.arc.rest import (cleanJobs, getJobsDelegations, killJobs,
-                          renewDelegation, restartJobs, submitJobs)
+from act.arc.rest import RESTClient
+from act.common.exceptions import (ACTError, ARCHTTPError,
+                                   DescriptionParseError,
+                                   DescriptionUnparseError, InputFileError)
 from act.arc.aCTStatus import ARC_STATE_MAPPING
 from act.common.aCTProcess import aCTProcess
-from act.common.exceptions import ACTError, SubmitError
 
 
 class aCTSubmitter(aCTProcess):
@@ -141,6 +144,15 @@ class aCTSubmitter(aCTProcess):
 
             self.log.info(f"Submitting {len(jobs)} jobs")
 
+            # parse cluster URL and queue
+            try:
+                url = urlparse(self.cluster)
+            except ValueError as exc:
+                self.log.error(f"Error parsing cluster URL {url}: {exc}")
+                self.setJobsArcstate(jobs, "tosubmit", commit=True)
+                continue
+            queue = url.path.split("/")[-1]
+
             # get proxy path
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             if not os.path.isfile(proxypath):
@@ -152,47 +164,41 @@ class aCTSubmitter(aCTProcess):
             for job in jobs:
                 job["descstr"] = str(self.db.getArcJobDescription(str(job["jobdesc"])))
 
-            # parse cluster URL
-            url = urlparse(self.cluster)
-            queue = url.path.split("/")[-1]
-
+            # submit jobs to ARC
             try:
-                # create proxy authenticated connection
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-                context.load_cert_chain(proxypath, keyfile=proxypath)
-                conn = http.client.HTTPSConnection(url.netloc, context=context)
-
-                # submit jobs to ARC
-                jobs = submitJobs(conn, queue, proxypath, jobs, logger=self.log)
-
-            except ssl.SSLError as e:
-                self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
+                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
+                jobs = restClient.submitJobs(queue, jobs, self.log)
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+                self.log.error(f"Error submitting jobs to ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
                 continue
-            except (http.client.HTTPException, ConnectionError) as e:
-                self.log.error(f"Could not connect to cluster {url.netloc}: {e}")
+            except JSONDecodeError as exc:
+                self.log.error(f"Invalid JSON response from ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
                 continue
-            except SubmitError as e:
-                self.log.error(str(e))
-                self.setJobsArcstate(jobs, e.arcstate, commit=True)
-                continue
+            finally:
+                restClient.close()
 
             # log submission results and set job state
             for job in jobs:
-                if "msg" in job:
-                    job["arcstate"] = "tocancel"
-                    self.log.debug(f"Submission failed for job {job['appjobid']}: {job['msg']}")
-                else:
+                if not job["errors"]:
                     job["arcstate"] = "submitted"
-                    self.log.debug(f"Submission successfull for job {job['appjobid']}: {job['arcid']}")
+                    self.log.debug(f"Submission successfull for job {job['appjobid']} {job['id']}: {job['arcid']}")
+                else:
+                    for error in job["errors"]:
+                        if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError):
+                            job["arcstate"] = "tocancel"
+                        else:
+                            job["arcstate"] = "tosubmit"
+                        self.log.debug(f"Error submitting job {job['appjobid']} {job['id']}: {error}")
 
             # update job records in DB
             for job in jobs:
                 jobdict = {}
                 jobdict["arcstate"] = job["arcstate"]
-                jobdict["tarcstate"] = self.db.getTimeStamp()
-                jobdict["tstate"] = self.db.getTimeStamp()
+                tstamp = self.db.getTimeStamp()
+                jobdict["tarcstate"] = tstamp
+                jobdict["tstate"] = tstamp
                 jobdict["cluster"] = self.cluster
 
                 if url.port is None:
@@ -223,6 +229,7 @@ class aCTSubmitter(aCTProcess):
         self.log.info("Done")
 
     def setJobsArcstate(self, jobs, arcstate, commit=False):
+        self.log.debug(f"Setting arcstate of jobs to {arcstate}")
         for job in jobs:
             updateDict = {"arcstate": arcstate, "tarcstate": self.db.getTimeStamp()}
             self.db.updateArcJobLazy(job["id"], updateDict)
@@ -232,17 +239,23 @@ class aCTSubmitter(aCTProcess):
     # jobs that have been in submitting state for more than an hour
     # should be canceled
     def checkFailedSubmissions(self):
-
         jobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "jobdesc", "created"])
-
         for job in jobs:
-            if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.now(): # TODO: hardcoded
+            # TODO: hardcoded
+            if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
+                self.log.debug(f"Cancelling job {job['appjobid']} {job['id']}")
                 self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
-
         self.db.Commit()
 
     def processToCancel(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
+
+        # parse cluster URL
+        try:
+            url = urlparse(self.cluster)
+        except ValueError as exc:
+            self.log.error(f"Error parsing cluster URL {url}: {exc}")
+            return
 
         # fetch jobs from DB for this cluster and also jobs that
         # don't have cluster assigned
@@ -278,54 +291,54 @@ class aCTSubmitter(aCTProcess):
                     "arcid": job["IDFromEndpoint"],
                     "id": job["id"],
                     "appjobid": job["appjobid"],
-                    "arcstate": "cancelled"
+                    "arcstate": "cancelled",
+                    "errors": []
                 }
                 tokill.append(jobdict)
                 if job["IDFromEndpoint"]:
                     toARCKill.append(jobdict)
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            conn = None
+
             try:
-                # create proxy authenticated connection
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-                context.load_cert_chain(proxypath, keyfile=proxypath)
-                url = urlparse(self.cluster)
-                conn = http.client.HTTPSConnection(url.netloc, context=context)
-                self.log.debug(f"Connected to cluster {url.netloc}")
-
-                # clean jobs and log results
-                toARCKill = killJobs(conn, toARCKill)
-                for job in toARCKill:
-                    if "msg" in job:
-                        self.log.error(f"Error canceling job {job['appjobid']}: {job['msg']}")
-                    else:
-                        job["arcstate"] = "cancelling"
-                        self.log.debug(f"ARC will cancel job {job['appjobid']}")
-
-                # update DB
-                for job in tokill:
-                    jobdict = {"arcstate": job["arcstate"], "tarcstate": self.db.getTimeStamp()}
-                    if job["arcstate"] == "cancelling":
-                        jobdict["tstate"] = self.db.getTimeStamp()
-                    self.db.updateArcJobLazy(job["id"], jobdict)
-                self.db.Commit()
-
-            except ssl.SSLError as e:
-                self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
-            except (http.client.HTTPException, ConnectionError) as e:
-                self.log.error(f"Could not connect to cluster {url.netloc}: {e}")
-            except ACTError as e:
-                self.log.error(f"Error canceling ARC jobs: {e}")
+                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
+                toARCKill = restClient.killJobs(toARCKill)
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+                self.log.error(f"Error killing jobs in ARC: {exc}")
+            except JSONDecodeError as exc:
+                self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                if conn:
-                    conn.close()
+                restClient.close()
+
+            # log results
+            for job in toARCKill:
+                if not job["errors"]:
+                    job["arcstate"] = "cancelling"
+                    self.log.debug(f"ARC will cancel job {job['appjobid']}")
+                else:
+                    for error in job["errors"]:
+                        self.log.error(f"Error killing job {job['appjobid']} {job['id']}: {error}")
+
+            # update DB
+            for job in tokill:
+                jobdict = {"arcstate": job["arcstate"], "tarcstate": self.db.getTimeStamp()}
+                if job["arcstate"] == "cancelling":
+                    jobdict["tstate"] = self.db.getTimeStamp()
+                self.db.updateArcJobLazy(job["id"], jobdict)
+            self.db.Commit()
 
     # This does not handle jobs with empty clusterlist. What about that?
     #
     # This does not kill jobs (before cleaning them)!!!
     def processToResubmit(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "cluster"]
+
+        # parse cluster URL
+        try:
+            url = urlparse(self.cluster)
+        except ValueError as exc:
+            self.log.error(f"Error parsing cluster URL {url}: {exc}")
+            return
 
         # fetch jobs from DB
         jobstoresubmit = self.db.getArcJobsInfo(
@@ -353,51 +366,51 @@ class aCTSubmitter(aCTProcess):
                 jobdict = {
                     "arcid": job["IDFromEndpoint"],
                     "id": job["id"],
-                    "appjobid": job["appjobid"]
+                    "appjobid": job["appjobid"],
+                    "errors": []
                 }
                 toclean.append(jobdict)
                 if "cluster" in job:
                     toARCClean.append(jobdict)
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            conn = None
+
             try:
-                # create proxy authenticated connection
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-                context.load_cert_chain(proxypath, keyfile=proxypath)
-                url = urlparse(self.cluster)
-                conn = http.client.HTTPSConnection(url.netloc, context=context)
-                self.log.debug(f"Connected to cluster {url.netloc}")
-
-                # clean jobs and log results
-                toARCClean = cleanJobs(conn, toARCClean)
-                for job in toARCClean:
-                    if "msg" in job:
-                        self.log.error(f"Error cleaning job {job['appjobid']}: {job['msg']}")
-                    else:
-                        self.log.debug(f"Successfully cleaned job {job['appjobid']}")
-
-                # update DB
-                for job in toclean:
-                    tstamp = self.db.getTimeStamp()
-                    # "created" needs to be reset so that it doesn't get understood
-                    # as failing to submit since first insertion.
-                    jobdict = {"arcstate": "tosubmit", "tarcstate": tstamp, "created": tstamp}
-                    self.db.updateArcJobLazy(job["id"], jobdict)
-                self.db.Commit()
-
-            except ssl.SSLError as e:
-                self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
-            except http.client.HTTPException as e:
-                self.log.error(f"Could not connect to cluster {url.netloc}: {e}")
-            except ACTError as e:
-                self.log.error(f"Error cleaning ARC jobs: {e}")
+                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
+                toARCClean = restClient.cleanJobs(toARCClean)
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+                self.log.error(f"Error killing jobs in ARC: {exc}")
+            except JSONDecodeError as exc:
+                self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                if conn:
-                    conn.close()
+                restClient.close()
+
+            # log results
+            for job in toARCClean:
+                if not job["errors"]:
+                    self.log.debug(f"Successfully cleaned job {job['appjobid']} {job['id']}")
+                else:
+                    for error in job["errors"]:
+                        self.log.error(f"Error cleaning job {job['appjobid']} {job['id']}: {job['msg']}")
+
+            # update DB
+            for job in toclean:
+                tstamp = self.db.getTimeStamp()
+                # "created" needs to be reset so that it doesn't get understood
+                # as failing to submit since first insertion.
+                jobdict = {"arcstate": "tosubmit", "tarcstate": tstamp, "created": tstamp}
+                self.db.updateArcJobLazy(job["id"], jobdict)
+            self.db.Commit()
 
     def processToRerun(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
+
+        # parse cluster URL
+        try:
+            url = urlparse(self.cluster)
+        except ValueError as exc:
+            self.log.error(f"Error parsing cluster URL {url}: {exc}")
+            return
 
         # fetch jobs from DB
         jobstorerun = self.db.getArcJobsInfo(
@@ -424,71 +437,53 @@ class aCTSubmitter(aCTProcess):
                 jobdict = {
                     "arcid": job["IDFromEndpoint"],
                     "id": job["id"],
-                    "appjobid": job["appjobid"]
+                    "appjobid": job["appjobid"],
+                    "errors": []
                 }
                 torerun.append(jobdict)
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            conn = None
+
             try:
-                # create proxy authenticated connection
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-                context.load_cert_chain(proxypath, keyfile=proxypath)
-                url = urlparse(self.cluster)
-                conn = http.client.HTTPSConnection(url.netloc, context=context)
-                self.log.debug(f"Connected to cluster {url.netloc}")
+                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
 
                 # get delegations for jobs
-                # TODO: one delegation for each job is assumed
-                try:
-                    delegations = getJobsDelegations(conn, "/arex/rest/1.0", torerun)
-                except ACTError as e:  # TODO: what to do with such jobs?
-                    self.log.error(f"Unable to retreive delegations: {e}")
-                    continue
+                torerun = restClient.getJobsDelegations(torerun)
 
                 # renew delegations
                 torestart = []
-                for delegation, job in zip(delegations, torerun):
-                    if int(delegation["status-code"]) != 200:
-                        job["msg"] = f"{delegation['status-code']} {delegation['reason']}"
-                        continue
-                    try:
-                        renewDelegation(conn, "/arex/rest/1.0", delegation["delegation_id"], proxypath)
-                    except ACTError as e:
-                        job["msg"] = str(e)
-                    else:
-                        torestart.append(job)
-
-                # restart in ARC
-                try:
-                    restartJobs(conn, torestart)
-                except ACTError as e:
-                    self.log.error(f"Unable to restart jobs: {e}")
-                    continue
-
-                # log results and update DB
                 for job in torerun:
-                    tstamp = self.db.getTimeStamp()
-                    if "msg" in job:
-                        self.log.error(f"Error rerunning job {job['appjobid']}: {job['msg']}")
-                        self.db.updateArcJobLazy(job["id"], {"arcstate": "failed", "tarcstate": tstamp})
-                    else:
-                        self.log.info("Successfully rerun job {job['appjobid']}")
-                        self.db.updateArcJobLazy(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
-                self.db.Commit()
+                    if not job["errors"]:
+                        try:
+                            restClient.renewDelegation(job["delegation_id"])
+                        except Exception as exc:
+                            job["errors"].append(exc)
+                        else:
+                            torestart.append(job)
 
-            except ssl.SSLError as e:
-                self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
-            except http.client.HTTPException as e:
-                self.log.error(f"Could not connect to cluster {url.netloc}: {e}")
-            except ACTError as e:
-                self.log.error(f"Error cleaning ARC jobs: {e}")
+                # restart jobs
+                restClient.restartJobs(torestart)
+
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+                self.log.error(f"Error killing jobs in ARC: {exc}")
+            except JSONDecodeError as exc:
+                self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                if conn:
-                    conn.close()
+                restClient.close()
+
+            # log results and update DB
+            for job in torerun:
+                tstamp = self.db.getTimeStamp()
+                if job["errors"]:
+                    for error in job["errors"]:
+                        self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error}")
+                    self.db.updateArcJobLazy(job["id"], {"arcstate": "torerun", "tarcstate": tstamp})
+                else:
+                    self.log.info("Successfully rerun job {job['appjobid']} {job['id']}")
+                    self.db.updateArcJobLazy(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
+            self.db.Commit()
 
     def process(self):
-
         # process jobs which have to be cancelled
         self.processToCancel()
         # process jobs which have to be resubmitted

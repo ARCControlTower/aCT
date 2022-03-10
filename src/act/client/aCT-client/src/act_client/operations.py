@@ -317,11 +317,11 @@ def getJob(*args):
 
 def deleteProxy(conn, token):
     resp = httpRequest(conn, 'DELETE', '/proxies', token=token)
-    try:
-        jsonDict = loadJSON(resp.read().decode())
-    except http.client.HTTPException as e:
-        raise ACTClientError(f'Proxy delete request error: {e}')
     if resp.status != 204:
+        try:
+            jsonDict = loadJSON(resp.read().decode())
+        except http.client.HTTPException as e:
+            raise ACTClientError(f'Proxy delete request error: {e}')
         raise ACTClientError(f'Response error: {jsonDict["msg"]}')
 
 
@@ -351,8 +351,7 @@ def uploadProxy(conn, proxyStr, tokenPath):
     # store auth token
     token = jsonDict['token']
     try:
-        if not os.path.exists(tokenPath):
-            os.makedirs(os.path.dirname(tokenPath))
+        os.makedirs(os.path.dirname(tokenPath), exist_ok=True)
         with open(tokenPath, 'w') as f:
             f.write(token)
         os.chmod(tokenPath, 0o600)
@@ -405,7 +404,6 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
             job['msg'] = f'Parsing fail for job description {job["descpath"]}'
         else:
             job['desc'] = jobdescs[-1]
-            processJobDescription(job['desc'])
 
     # remove jobs with errors
     for i in range(len(jobs) - 1, -1, -1):
@@ -462,69 +460,11 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
     return results
 
 
-def processJobDescription(jobdesc):
-    exepath = jobdesc.Application.Executable.Path
-    if exepath and exepath[0] == "/":  # absolute paths are on compute nodes
-        exepath = ""
-    inpath = jobdesc.Application.Input
-    outpath = jobdesc.Application.Output
-    errpath = jobdesc.Application.Error
-    logpath = jobdesc.Application.LogDir
-
-    exePresent = False
-    stdinPresent = False
-    for infile in jobdesc.DataStaging.InputFiles:
-        if exepath == infile.Name:
-            exePresent = True
-        elif inpath == infile.Name:
-            stdinPresent = True
-
-    stdoutPresent = False
-    stderrPresent = False
-    logPresent = False
-    for outfile in jobdesc.DataStaging.OutputFiles:
-        if outpath == outfile.Name:
-            stdoutPresent = True
-        elif errpath == outfile.Name:
-            stderrPresent = True
-        elif logpath == outfile.Name:
-            logPresent = True
-
-    if exepath and not exePresent:
-        infile = arc.InputFileType()
-        infile.Name = exepath
-        jobdesc.DataStaging.InputFiles.append(infile)
-
-    if inpath and not stdinPresent:
-        infile = arc.InputFileType()
-        infile.Name = inpath
-        jobdesc.DataStaging.InputFiles.append(infile)
-
-    if outpath and not stdoutPresent:
-        outfile = arc.OutputFileType()
-        outfile.Name = outpath
-        jobdesc.DataStaging.OutputFiles.append(outfile)
-
-    if errpath and not stderrPresent:
-        outfile = arc.OutputFileType()
-        outfile.Name = errpath
-        jobdesc.DataStaging.OutputFiles.append(outfile)
-
-    if logpath and not logPresent:
-        outfile = arc.OutputFileType()
-        if not logpath.endswith('/'):
-            outfile.Name = f'{logpath}/'
-        else:
-            outfile.Name = logpath
-        jobdesc.DataStaging.OutputFiles.append(outfile)
-
-
 def uploadJobData(conn, token, job, webdavConn, webdavUrl):
     # create a dictionary of files to upload
     files = {}
     #for infile in job['desc'].DataStaging.InputFiles:
     for i in range(len(job['desc'].DataStaging.InputFiles)):
-        #path = infile.Sources[0].fullstr()
         infile = job['desc'].DataStaging.InputFiles[i]
         path = infile.Sources[0].fullstr()
         if not path:

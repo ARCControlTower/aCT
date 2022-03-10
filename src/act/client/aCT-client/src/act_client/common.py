@@ -79,6 +79,7 @@ def getHTTPConn(url, sslctx=None, blocksize=HTTP_BUFFER_SIZE):
             raise ACTClientError(f'Unsupported URL scheme "{parts.scheme}"')
     except http.client.HTTPException as e:
         raise ACTClientError(f'Error connecting to {parts.hostname}:{parts.port}: {e}')
+    #conn.set_debuglevel(1)
     return conn
 
 
