@@ -3,15 +3,16 @@
 # Fetches output from finished jobs
 #
 
-import http.client
 import os
 import shutil
-import ssl
+from http.client import HTTPException
+from json import JSONDecodeError
+from ssl import SSLError
 from urllib.parse import urlparse
 
-from act.arc.rest import fetchJobs
+from act.arc.rest import RESTClient
 from act.common.aCTProcess import aCTProcess
-from act.common.exceptions import ACTError
+from act.common.exceptions import ACTError, ARCHTTPError
 
 
 class aCTFetcher(aCTProcess):
@@ -22,14 +23,19 @@ class aCTFetcher(aCTProcess):
     def fetchJobs(self, arcstate, nextarcstate):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "jobdesc"]
 
+        # parse cluster URL
+        try:
+            url = urlparse(self.cluster)
+        except ValueError as exc:
+            self.log.error(f"Error parsing cluster URL {url}: {exc}")
+            return
+
         # TODO: hardcoded
         jobstofetch = self.db.getArcJobsInfo(f"arcstate='{arcstate}' and cluster='{self.cluster}' limit 100", COLUMNS)
 
         if not jobstofetch:
             return
         self.log.info(f"Fetching {len(jobstofetch)} jobs")
-
-        url = urlparse(self.cluster)
 
         # aggregate jobs by proxyid
         jobsdict = {}
@@ -39,7 +45,6 @@ class aCTFetcher(aCTProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, jobs in jobsdict.items():
-
             # remove existing results, create result dir
             for job in jobs:
                 resdir = os.path.join(self.tmpdir, job["IDFromEndpoint"])
@@ -48,47 +53,41 @@ class aCTFetcher(aCTProcess):
 
                 # add key for fetchJobs
                 job["arcid"] = job["IDFromEndpoint"]
+                job["errors"] = []
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            conn = None
+
             try:
-                # create proxy authenticated connection
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-                context.load_cert_chain(proxypath, keyfile=proxypath)
-                conn = http.client.HTTPSConnection(url.netloc, context=context)
-                self.log.debug(f"Connected to cluster {url.netloc}")
+                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
 
                 # fetch jobs
                 # TODO: hardcoded workers
-                results = fetchJobs(conn, "/arex/rest/1.0", self.tmpdir, proxypath, jobs, 10, logger=self.log)
+                results = restClient.fetchJobs(self.tmpdir, jobs, workers=10, logger=self.log)
 
-                for job in results:
-                    # TODO: retry based on error condition
-                    if "msg" in job:
-                        self.log.error(f"Error fetching  job {job['appjobid']}: {job['msg']}")
-                        jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
-                        self.db.updateArcJobLazy(job["id"], jobdict)
-                    else:
-                        self.log.debug(f"Successfully fetched job {job['appjobid']}")
-                        jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
-                        self.db.updateArcJobLazy(job["id"], jobdict)
-
-                self.db.Commit()
-
-            except ssl.SSLError as e:
-                self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
-            except http.client.HTTPException as e:
-                self.log.error(f"Could not connect to cluster {url.netloc}: {e}")
-            except ACTError as e:
-                self.log.error(f"Error cleaning ARC jobs: {e}")
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+                self.log.error(f"Error killing jobs in ARC: {exc}")
+            except JSONDecodeError as exc:
+                self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                if conn:
-                    conn.close()
+                restClient.close()
+
+            for job in results:
+                # TODO: retry based on error condition
+                if job["errors"]:
+                    for error in job["errors"]:
+                        self.log.error(f"Error fetching  job {job['appjobid']} {job['id']}: {error}")
+                    jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
+                    self.db.updateArcJobLazy(job["id"], jobdict)
+                else:
+                    self.log.debug(f"Successfully fetched job {job['appjobid']}")
+                    jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
+                    self.db.updateArcJobLazy(job["id"], jobdict)
+
+            self.db.Commit()
 
         self.log.debug("Done")
 
     def process(self):
-
         # download failed job outputs that should be fetched
         self.fetchJobs('tofetch', 'donefailed')
         # download finished job outputs

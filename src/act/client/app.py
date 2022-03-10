@@ -563,7 +563,7 @@ def deleteProxy():
     except Exception as e:
         print(f'error: DELETE /proxies: {e}')
         return {'msg': 'Server error'}, 500
-    return jsonify({'msg': 'Proxy deletion successful'}), 204
+    return '', 204
 
 
 @app.route('/data', methods=['PUT'])
@@ -681,7 +681,7 @@ def getToken():
         if result is None:
             raise RESTError('Server error', 500)
         if result is False:
-            raise RESTError('Proxy from token does not exist in database or is expired; use actproxy', 401)
+            raise RESTError('Proxy from token does not exist in database or is expired', 401)
     except jwt.ExpiredSignatureError:
         raise RESTError('Auth token is expired', 401)
     else:

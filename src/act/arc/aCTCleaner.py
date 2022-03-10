@@ -2,20 +2,28 @@
 #
 # Cleans jobs from CE and ARC DB
 #
-import http.client
 import os
-import ssl
+from http.client import HTTPException
+from ssl import SSLError
 from urllib.parse import urlparse
+from json import JSONDecodeError
 
-from act.arc.rest import cleanJobs
+from act.arc.rest import RESTClient
 from act.common.aCTProcess import aCTProcess
-from act.common.exceptions import ACTError
+from act.common.exceptions import ACTError, ARCHTTPError
 
 
 class aCTCleaner(aCTProcess):
 
     def processToClean(self):
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "cluster"]
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
+
+        # parse cluster URL
+        try:
+            url = urlparse(self.cluster)
+        except ValueError as exc:
+            self.log.error(f"Error parsing cluster URL {url}: {exc}")
+            return
 
         # TODO: hardcoded limits
         #
@@ -35,8 +43,6 @@ class aCTCleaner(aCTProcess):
 
         self.log.info(f"Cleaning {len(jobstoclean)} jobs")
 
-        url = urlparse(self.cluster)
-
         # aggregate jobs by proxyid
         jobsdict = {}
         for row in jobstoclean:
@@ -53,48 +59,39 @@ class aCTCleaner(aCTProcess):
                 jobdict = {
                     "arcid": job["IDFromEndpoint"],
                     "id": job["id"],
-                    "appjobid": job["appjobid"]
+                    "appjobid": job["appjobid"],
+                    "errors": []
                 }
                 toclean.append(jobdict)
-                if job["cluster"]:
+                if job["IDFromEndpoint"]:
                     toARCClean.append(jobdict)
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            conn = None
+
             try:
-                # create proxy authenticated connection
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-                context.load_cert_chain(proxypath, keyfile=proxypath)
-                conn = http.client.HTTPSConnection(url.netloc, context=context)
-                self.log.debug(f"Connected to cluster {url.netloc}")
-
-                # clean jobs and log results
-                toARCClean = cleanJobs(conn, toARCClean)
-                for job in toARCClean:
-                    if "msg" in job:
-                        self.log.error(f"Error cleaning job {job['appjobid']}: {job['msg']}")
-                    else:
-                        self.log.debug(f"Successfully cleaned job {job['appjobid']}")
-
-                for job in toclean:
-                    self.db.deleteArcJob(job["id"])
-
-                self.db.Commit()
-
-            except ssl.SSLError as e:
-                self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
-            except http.client.HTTPException as e:
-                self.log.error(f"Could not connect to cluster {url.netloc}: {e}")
-            except ACTError as e:
-                self.log.error(f"Error cleaning ARC jobs: {e}")
+                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
+                toARCClean = restClient.cleanJobs(toARCClean)
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+                self.log.error(f"Error killing jobs in ARC: {exc}")
+            except JSONDecodeError as exc:
+                self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                if conn:
-                    conn.close()
+                restClient.close()
+
+            # log results and update DB
+            for job in toARCClean:
+                if job["errors"]:
+                    for error in job["errors"]:
+                        self.log.error(f"Error cleaning job {job['appjobid']} {job['id']}: {error}")
+                else:
+                    self.log.debug(f"Successfully cleaned job {job['appjobid']} {job['id']}")
+            for job in toclean:
+                self.db.deleteArcJob(job["id"])
+            self.db.Commit()
 
         self.log.debug("Done")
 
     def process(self):
-
         # clean jobs
         self.processToClean()
 
