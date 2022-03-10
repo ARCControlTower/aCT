@@ -1,10 +1,13 @@
-import time
 import os
+import time
+
 import arc
+
 
 def sleep(t):
     for i in range(0,t):
         time.sleep(1)
+
 
 def setFilePermissionsRecursive(path, dirmod=0o755, filemod=0o644):
     for root,dirs,files in os.walk(path):
@@ -14,6 +17,7 @@ def setFilePermissionsRecursive(path, dirmod=0o755, filemod=0o644):
             os.chmod(os.path.join(root,f), filemod)
     # set permissions for the path itself as well
     os.chmod(path, dirmod)
+
 
 def RunThreadsSplit(plist,nthreads=1):
     it=0
@@ -30,6 +34,7 @@ def RunThreadsSplit(plist,nthreads=1):
         for t in tl:
             t.join()
 
+
 class DataPoint:
     '''
     Wrapper around arc.datapoint_from_url() which does not clean up DataPoints
@@ -40,5 +45,6 @@ class DataPoint:
     '''
     def __init__(self, u, uc):
         self.h = arc.datapoint_from_url(u, uc)
+
     def __del__(self):
         arc.DataPoint.__swig_destroy__(self.h)
