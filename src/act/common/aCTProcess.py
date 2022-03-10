@@ -1,16 +1,16 @@
-import time
 import os
 import random
+import ssl
 import sys
-import arc
+import time
 import traceback
 from urllib.parse import urlparse
 
-from . import aCTLogger
-from . import aCTConfig
-from . import aCTSignal
+import arc
 from act.arc import aCTDBArc
 from act.condor.aCTDBCondor import aCTDBCondor
+
+from . import aCTConfig, aCTLogger, aCTSignal
 
 
 class aCTProcess:
@@ -59,7 +59,6 @@ class aCTProcess:
         self.starttime=time.time()
         self.log.info("Started %s for cluster %s", self.name, self.cluster)
 
-
     def process(self):
         '''
         Called every loop during the main loop. Subclasses must implement this
@@ -102,3 +101,16 @@ class aCTProcess:
         self.dbcondor.close()
         self.log.info("Cleanup for cluster %s", self.cluster)
         os._exit(0)
+
+    def getProxySSLContext(self, proxyid):
+        # create SSL context authenticated with user's proxy certificate
+        proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+        context.load_cert_chain(proxypath, keyfile=proxypath)
+        _DEFAULT_CIPHERS = (
+            'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
+            'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
+            '!eNULL:!MD5'
+        )
+        context.set_ciphers(_DEFAULT_CIPHERS)
+        return context
