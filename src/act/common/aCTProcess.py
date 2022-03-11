@@ -1,6 +1,5 @@
 import os
 import random
-import ssl
 import sys
 import time
 import traceback
@@ -101,16 +100,3 @@ class aCTProcess:
         self.dbcondor.close()
         self.log.info("Cleanup for cluster %s", self.cluster)
         os._exit(0)
-
-    def getProxySSLContext(self, proxyid):
-        # create SSL context authenticated with user's proxy certificate
-        proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-        context.load_cert_chain(proxypath, keyfile=proxypath)
-        _DEFAULT_CIPHERS = (
-            'ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+HIGH:'
-            'DH+HIGH:ECDH+3DES:DH+3DES:RSA+AESGCM:RSA+AES:RSA+HIGH:RSA+3DES:!aNULL:'
-            '!eNULL:!MD5'
-        )
-        context.set_ciphers(_DEFAULT_CIPHERS)
-        return context

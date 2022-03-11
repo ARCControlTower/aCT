@@ -124,7 +124,7 @@ def sign_request(csr, lifetime=24):
     """
     now = datetime.utcnow()
     if not csr.is_signature_valid:
-        raise Exception('Invalid request signature.')
+        raise Exception('Invalid request signature')
 
     with open(PROXYPATH,'rb') as f:
         proxy_pem=f.read()

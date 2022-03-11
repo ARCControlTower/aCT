@@ -1,16 +1,17 @@
 from setuptools import setup, find_packages
 
-setup(name='aCT',
-      version='0.1',
-      description='ARC Control Tower',
-      url='http://github.com/ARCControlTower/aCT',
-      python_requires='>=3.6',
-      author='aCT team',
-      author_email='act-dev@cern.ch',
-      license='Apache 2.0',
-      package_dir = {'': 'src'},
-      packages=find_packages('src'),
-      install_requires=[
+setup(
+    name='aCT',
+    version='0.1',
+    description='ARC Control Tower',
+    url='http://github.com/ARCControlTower/aCT',
+    python_requires='>=3.6',
+    author='aCT team',
+    author_email='act-dev@cern.ch',
+    license='Apache 2.0',
+    package_dir={'': 'src'},
+    packages=find_packages('src'),
+    install_requires=[
         'mysql-connector-python',   # connection to MySQL database
         'htcondor',                 # bindings to use HTCondor to submit jobs
         'pylint',                   # for travis automatic tests
@@ -25,8 +26,8 @@ setup(name='aCT',
         'pyjwt',
         'cryptography',
         'pyyaml',
-      ],
-      entry_points={
+    ],
+    entry_points={
         'console_scripts': [
             'actbootstrap = act.common.aCTBootstrap:main',
             'actmain = act.common.aCTMain:main',
@@ -46,9 +47,9 @@ setup(name='aCT',
             'actstat    = act.client.actstat:main',
             'actsub     = act.client.actsub:main'
         ]
-      },
-      data_files=[
-          ('etc/act', ['doc/aCTConfigARC.xml.template',
-                       'doc/aCTConfigATLAS.xml.template'])
-      ]
+    },
+    data_files=[
+        ('etc/act', ['doc/aCTConfigARC.xml.template',
+         'doc/aCTConfigATLAS.xml.template'])
+    ]
 )
