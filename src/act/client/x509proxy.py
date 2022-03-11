@@ -117,22 +117,22 @@ def check_rfc_proxy(proxy):
         raise Exception('Invalid X509 RFC 3820 proxy.')
 
 
-def sign_request(csr, lifetime=24):
+def sign_request(csr, proxypath=PROXYPATH, lifetime=24):
     """
     Sign proxy.
     """
     now = datetime.utcnow()
     if not csr.is_signature_valid:
-        raise Exception('Invalid request signature.')
+        raise Exception('Invalid request signature')
 
-    with open(PROXYPATH,'rb') as f:
-        proxy_pem=f.read()
+    with open(proxypath,'rb') as f:
+        proxy_pem = f.read()
 
     proxy = x509.load_pem_x509_certificate(proxy_pem, default_backend())
 
-    oid=x509.ObjectIdentifier("1.3.6.1.4.1.8005.100.100.5")
-    value=proxy.extensions.get_extension_for_oid(oid).value.value
-    vomsext=x509.extensions.UnrecognizedExtension(oid,value)
+    oid = x509.ObjectIdentifier("1.3.6.1.4.1.8005.100.100.5")
+    value = proxy.extensions.get_extension_for_oid(oid).value.value
+    vomsext = x509.extensions.UnrecognizedExtension(oid, value)
 
     check_rfc_proxy(proxy)
     key = serialization.load_pem_private_key(proxy_pem, password=None, backend=default_backend())
