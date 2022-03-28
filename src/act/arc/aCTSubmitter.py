@@ -567,9 +567,6 @@ class aCTSubmitter(aCTProcess):
         jobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "jobdesc", "created"])
 
         for job in jobs:
-            #created = datetime.datetime.fromisoformat(job["created"])  # TODO: >= 3.7
-            #fmt = r"%Y-%m-%d %H:%M:%S"
-            #created = datetime.datetime.strptime(job["created"], fmt)
             if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.now(): # TODO: hardcoded
                 self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
 

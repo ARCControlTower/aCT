@@ -60,7 +60,6 @@ def httpRequest(conn, method, endpoint, **kwargs):
     return resp
 
 
-# TODO: do we wrap exception message from httpRequest into another?
 def createDelegation(conn, endpoint, proxypath):
     try:
         resp = httpRequest(conn, "POST", f"{endpoint}/delegations?action=new", headers={"Accept": "application/json"})
@@ -104,7 +103,6 @@ def deleteDelegation(conn, endpoint, delegationID):
         raise ACTError(f'Cannot delete delegation {delegationID}: {resp.status} {respstr}')
 
 
-# TODO: do we wrap exception message from httpRequest into another?
 # TODO: refactor common code with createDelegation (2nd step of delegation process)
 def renewDelegation(conn, endpoint, delegationID, proxypath):
     try:
@@ -130,36 +128,6 @@ def renewDelegation(conn, endpoint, delegationID, proxypath):
             raise Exception(f"Error response for signed cert upload for proxy {proxypath} and delegation {delegationID}: {resp.status} {respstr}")
     except Exception as e:
         raise ACTError(f"Delegation renewal error: {e}")
-
-
-# takes a list of jobdicts with ARC ID hashes:
-# [
-#   {"arcid": ...},
-#   {"arcid": ...}
-# ]
-def getJobsDelegations(conn, endpoint, jobs):
-    if not jobs:
-        return []
-    toget = [{"id": job["arcid"]} for job in jobs]
-
-    jsonData = {}
-    if len(toget) == 1:
-        jsonData["job"] = toget[0]
-    else:
-        jsonData["job"] = toget
-
-    try:
-        resp = httpRequest(conn, "POST", f"{endpoint}/jobs?action=delegations", headers={"Accept": "application/json"})
-        respstr = resp.read().decode()
-        jsonData = json.loads(respstr)
-    except (ACTError, http.client.HTTPException, ConnectionError) as e:
-        raise ACTError("Cannot get delegations: {e}")
-    except json.decoder.JSONDecodeError as e:
-        raise ACTError(f"Invalid JSON: {e}")
-    if isinstance(jsonData["job"], dict):
-        return [jsonData["job"]]
-    else:
-        return jsonData["job"]
 
 
 def getProxySSLContext(proxypath):
@@ -393,16 +361,50 @@ def fileUploader(conn, uploadQueue, resultQueue):
         uploadQueue.task_done()
 
 
-def cleanJobs(conn, jobs):
-    return manageJobs(conn, jobs, "clean")
+def getJobsInfo(conn, jobs):
+    results = manageJobs(conn, jobs, "info")
+    return getJobOperationResults(jobs, results, "info_document")
+
+
+def getJobsStatus(conn, jobs):
+    results = manageJobs(conn, jobs, "status")
+    return getJobOperationResults(jobs, results, "state")
 
 
 def killJobs(conn, jobs):
-    return manageJobs(conn, jobs, "kill")
+    results = manageJobs(conn, jobs, "kill")
+    return checkJobOperation(jobs, results)
+
+
+def cleanJobs(conn, jobs):
+    results = manageJobs(conn, jobs, "clean")
+    return checkJobOperation(jobs, results)
 
 
 def restartJobs(conn, jobs):
-    return manageJobs(conn, jobs, "restart")
+    results = manageJobs(conn, jobs, "restart")
+    return checkJobOperation(jobs, results)
+
+
+def getJobsDelegations(conn, jobs):
+    results = manageJobs(conn, jobs, "delegations")
+    return getJobOperationResults(jobs, results, "delegation_id")
+
+
+def checkJobOperation(jobs, results):
+    for job, result in zip(jobs, results):
+        if int(result["status-code"]) != 202:
+            job["msg"] = f"{result['status-code']} {result['reason']}"
+    return jobs
+
+
+def getJobOperationResults(jobs, results, key):
+    for job, result in zip(jobs, results):
+        if int(result["status-code"]) != 200:
+            job["msg"] = f"{result['status-code']} {result['reason']}"
+        else:
+            job[key] = result[key]
+    return jobs
 
 
 # requires a list of dictionary jobs:
@@ -410,11 +412,15 @@ def restartJobs(conn, jobs):
 #   "arcid": ...,
 # }
 def manageJobs(conn, jobs, action):
-    if action not in ("kill", "clean", "restart"):
+    ACTIONS = ("info", "status", "kill", "clean", "restart", "delegations")
+    if not jobs:
+        return jobs
+
+    if action not in ACTIONS:
         raise ACTError(f"Invalid job management operation: {action}")
 
     # JSON data for request
-    tomanage = [{"id": job["arcid"]} for job in jobs]  # TODO: checks for dictionary keys?
+    tomanage = [{"id": job["arcid"]} for job in jobs]
     jsonData = {}
     if len(tomanage) == 1:
         jsonData["job"] = tomanage[0]
@@ -430,20 +436,14 @@ def manageJobs(conn, jobs, action):
             headers={"Accept": "application/json", "Content-type": "application/json"}
         )
         respstr = resp.read().decode()
-        # apparently if there are errors with jobs, the 201 is returned (for clean action)
         if resp.status != 201:
             raise ACTError(f"ARC error response: {resp.status} {respstr}")
         jsonData = json.loads(respstr)
     except json.JSONDecodeError as e:
         raise ACTError(f"Could not parse JSON response: {e}")
 
+    # convert data to list
     if isinstance(jsonData["job"], dict):
-        results = [jsonData["job"]]
+        return [jsonData["job"]]
     else:
-        results = jsonData["job"]
-
-    for job, result in zip(jobs, results):
-        if int(result["status-code"]) != 202:
-            job["msg"] = f"{result['status-code']} {result['reason']}"
-
-    return jobs
+        return jsonData["job"]
