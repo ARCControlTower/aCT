@@ -141,7 +141,7 @@ def Submit(id, appjobid, jobdescstr, ucproxy, cluster, fairshare, fairshares, nq
                 if aris.Protocol() == 'https':
                     aris.ChangePath('/arex')
                     # tmp filter for REST, to remove when EMI-ES no longer necessary
-                    if fairshare in ['ARC-TEST']:
+                    if fairshare in ['ARC-TEST','Vega','Vega_MCORE','Vega_largemem']:
                         infoendpoints = [arc.Endpoint(aris.str(), arc.Endpoint.COMPUTINGINFO, 'org.nordugrid.arcrest')]
                     else:
                         infoendpoints = [arc.Endpoint(aris.str(), arc.Endpoint.COMPUTINGINFO, 'org.ogf.glue.emies.resourceinfo')]
@@ -428,8 +428,9 @@ class aCTSubmitter(aCTProcess):
                     jdb = result.get(timeout)
                     jconv = JobConv()
                     job = jconv.db2job(jdb)
-                except multiprocessing.TimeoutError:
+                except (multiprocessing.TimeoutError, ExceptInterrupt) as error:
                     self.log.error("%s: submission timeout: exit and try again" % task[1])
+                    self.log.error("Exception: %s" % error)
                     # abort submission if Submit process is stuck
                     #pool.terminate()
                     KillPool(pool)
