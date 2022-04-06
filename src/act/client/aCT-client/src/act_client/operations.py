@@ -20,8 +20,6 @@ from act_client.x509proxy import sign_request
 #       on backend; also use kwargs
 # TODO: unify API: PATCH tocancel returns job dicts, others return list
 #       of job IDs
-# TODO: properly set up limits and timeouts for httpx library and handle
-#       timeout errors
 
 
 # TODO: Since http.client requires that every response is actually read, does
@@ -329,7 +327,7 @@ def deleteProxy(conn, token):
 
 def uploadProxy(conn, proxyStr, tokenPath):
     # submit proxy cert part to get CSR
-    jsonDict = aCTJSONRequest(conn, 'POST', '/proxies', json={'cert':proxyStr})
+    jsonDict = aCTJSONRequest(conn, 'POST', '/proxies', json={'cert': proxyStr})
     token = jsonDict['token']
 
     # sign CSR
@@ -374,7 +372,7 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
     for desc in descs:
         job = {'clusterlist': clusterlist, 'descpath': desc, 'cleanup': False}
         try:
-            job['desc'] = readFile(desc)
+            job['descstr'] = readFile(desc)
         except ACTClientError as e:
             job['msg'] = str(e)
             results.append(job)
@@ -382,19 +380,23 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
             jobs.append(job)
 
     # submit jobs to aCT
-    jsonDict = [{k: v for k, v in job.items() if k in ('desc', 'clusterlist')} for job in jobs]
-    jsonDict = postJobs(conn, token, jsonDict)
+    jsonData = []
+    for job in jobs:
+        jsonData.append({
+            'desc': job['descstr'],
+            'clusterlist': job['clusterlist']
+        })
+    jsonData = postJobs(conn, token, jsonData)
 
     # move jobs with errors to results; do it backwards to not mess up index
     for i in range(len(jobs) - 1, -1, -1):
-        if 'msg' in jsonDict[i]:
-            if 'name' in jsonDict[i]:
-                jobs[i]['name'] = jsonDict[i]['name']
-            jobs[i]['msg'] = jsonDict[i]['msg']
+        if 'name' in jsonData[i]:
+            jobs[i]['name'] = jsonData[i]['name']
+        if 'msg' in jsonData[i]:
+            jobs[i]['msg'] = jsonData[i]['msg']
             results.append(jobs.pop(i))
         else:
-            jobs[i]['name'] = jsonDict[i]['name']
-            jobs[i]['id'] = jsonDict[i]['id']
+            jobs[i]['id'] = jsonData[i]['id']
 
     # The approach to killing is that all jobs from now on should be killed
     # except for those that are submitted successfully and marked otherwise.
@@ -402,15 +404,13 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
         job['cleanup'] = True
 
     # parse job descriptions
-    #
-    # We first traverse from left to right to populate jobdescs
-    # list at the same indexes. We could not do this backwards
-    # because this is a SWIG C++ custom data structure and not
-    # regular python list.
     jobdescs = arc.JobDescriptionList()
     for job in jobs:
-        if not arc.JobDescription_Parse(job['desc'], jobdescs):
+        if not arc.JobDescription_Parse(job['descstr'], jobdescs):
             job['msg'] = f'Parsing fail for job description {job["descpath"]}'
+        else:
+            job['desc'] = jobdescs[-1]
+            processJobDescription(job['desc'])
 
     # remove jobs with errors
     for i in range(len(jobs) - 1, -1, -1):
@@ -420,8 +420,8 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
     # upload input files
     try:
         sigint.restore()
-        for i in range(len(jobs)):
-            uploadJobData(conn, token, jobs[i], jobdescs[i], webdavConn, webdavUrl)
+        for job in jobs:
+            uploadJobData(conn, token, job, webdavConn, webdavUrl)
     except KeyboardInterrupt:
         results.extend(jobs)
         return results
@@ -433,10 +433,21 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
         if 'msg' in jobs[i]:
             results.append(jobs.pop(i))
 
+    # job descriptions were modified and have be unparsed
+    for job in jobs:
+        job['descstr'] = job['desc'].UnParse('emies:adl')[1]
+        if not job['descstr']:
+            job['msg'] = 'Error generating job description'
+
     # complete job submission
     try:
-        jsonDict = [{k: v for k, v in job.items() if k in ('desc', 'id')} for job in jobs]
-        jsonDict = putJobs(conn, token, jsonDict)
+        jsonData = []
+        for job in jobs:
+            jsonData.append({
+                'id': job['id'],
+                'desc': job['descstr']
+            })
+        jsonData = putJobs(conn, token, jsonData)
     except ACTClientError as e:
         for job in jobs:
             job['msg'] = str(e)
@@ -444,7 +455,7 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
         return results
 
     # process API errors
-    for job, result in zip(jobs, jsonDict):
+    for job, result in zip(jobs, jsonData):
         if 'msg' in result:
             job['msg'] = result['msg']
         else:
@@ -454,84 +465,111 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
     return results
 
 
-def uploadJobData(conn, token, job, jobdesc, webdavConn, webdavUrl):
-    # create directory for job's local input files if using WebDAV
-    if webdavUrl:
-        dirUrl = f'{webdavUrl}/{job["id"]}'
-        try:
-            webdavMkdir(webdavConn, dirUrl)
-        except ACTClientError as e:
-            job['msg'] = str(e)
-            return
-
-    # upload input files
-    errors = uploadInputFiles(conn, token, job['id'], jobdesc, webdavConn, webdavUrl)
-    if errors:
-        job['msg'] = '\n'.join(errors)
-        return
-
-    # job description was modified and has to be unparsed
-    if webdavUrl:
-        xrslStr = jobdesc.UnParse('', '')[1]
-        if not xrslStr:
-            job['msg'] = 'Error generating job description'
-            return
-        else:
-            job['desc'] = xrslStr
-
-
-def uploadInputFiles(conn, token, jobid, jobdesc, webdavConn, webdavUrl):
-    files = {}
-
+def processJobDescription(jobdesc):
     exepath = jobdesc.Application.Executable.Path
-    if not os.path.isabs(exepath):
-        files[os.path.basename(exepath)] = exepath
+    if exepath and exepath[0] == "/":  # absolute paths are on compute nodes
+        exepath = ""
+    inpath = jobdesc.Application.Input
+    outpath = jobdesc.Application.Output
+    errpath = jobdesc.Application.Error
+    logpath = jobdesc.Application.LogDir
 
-    # if a file with the same name as executable is provided in inputFiles
-    # in xRSL the value from inputFiles will be used (or file entry discarded
-    # if the executable file is remote)
-    errors = []
-    for i in range(len(jobdesc.DataStaging.InputFiles)):
-        # we use index for access to InputFiles because changes
-        # (for dcache) are not preserved otherwise?
-        infile = jobdesc.DataStaging.InputFiles[i]
+    exePresent = False
+    stdinPresent = False
+    for infile in jobdesc.DataStaging.InputFiles:
+        if exepath == infile.Name:
+            exePresent = True
+        elif inpath == infile.Name:
+            stdinPresent = True
 
-        if exepath == infile.Name and exepath in files:
-            del files[exepath]
+    stdoutPresent = False
+    stderrPresent = False
+    logPresent = False
+    for outfile in jobdesc.DataStaging.OutputFiles:
+        if outpath == outfile.Name:
+            stdoutPresent = True
+        elif errpath == outfile.Name:
+            stderrPresent = True
+        elif logpath == outfile.Name:
+            logPresent = True
 
+    if exepath and not exePresent:
+        infile = arc.InputFileType()
+        infile.Name = exepath
+        jobdesc.DataStaging.InputFiles.append(infile)
+
+    if inpath and not stdinPresent:
+        infile = arc.InputFileType()
+        infile.Name = inpath
+        jobdesc.DataStaging.InputFiles.append(infile)
+
+    if outpath and not stdoutPresent:
+        outfile = arc.OutputFileType()
+        outfile.Name = outpath
+        jobdesc.DataStaging.OutputFiles.append(outfile)
+
+    if errpath and not stderrPresent:
+        outfile = arc.OutputFileType()
+        outfile.Name = errpath
+        jobdesc.DataStaging.OutputFiles.append(outfile)
+
+    if logpath and not logPresent:
+        outfile = arc.OutputFileType()
+        if not logpath.endswith('/'):
+            outfile.Name = f'{logpath}/'
+        else:
+            outfile.Name = logpath
+        jobdesc.DataStaging.OutputFiles.append(outfile)
+
+
+def uploadJobData(conn, token, job, webdavConn, webdavUrl):
+    # create a dictionary of files to upload
+    files = {}
+    #for infile in job['desc'].DataStaging.InputFiles:
+    for i in range(len(job['desc'].DataStaging.InputFiles)):
+        #path = infile.Sources[0].fullstr()
+        infile = job['desc'].DataStaging.InputFiles[i]
         path = infile.Sources[0].fullstr()
         if not path:
             path = infile.Name
 
         # parse as URL, remote resource if scheme or hostname
-        url = urlparse(path)
+        try:
+            url = urlparse(path)
+        except ValueError as e:
+            job['msg'] = f'Error parsing source of file {infile.Name}: {e}'
+            return
         if url.scheme not in ('file', None, '') or url.hostname:
             continue
 
+        # check if local file exists
         path = url.path
         if not os.path.isfile(path):
-            errors.append(f'Given path {path} is not a file')
-            continue
+            job['msg'] = f'Given path {path} is not a file'
+            return
 
+        # modify job description if using WebDAV
         if webdavUrl:
-            dst = f'{webdavUrl}/{jobid}/{infile.Name}'
-            jobdesc.DataStaging.InputFiles[i].Sources[0] = arc.SourceType(dst)
-            files[dst] = path
-        else:
-            files[infile.Name] = path
+            url = f'{webdavUrl}/{job["id"]}/{infile.Name}'
+            infile.Sources[0] = arc.SourceType(url)
 
-    if errors:
-        return errors
+        files[infile.Name] = path
 
-    if not files:
-        return []
+    # create all directories for WebDAV
+    if webdavUrl:
+        try:
+            webdavMkdir(webdavConn, f'{webdavUrl}/{job["id"]}')
+        except ACTClientError as e:
+            job['msg'] = str(e)
+            return
 
+    # upload input files
     for dst, src in files.items():
         try:
-            if webdavUrl:  # upload to WebDAV
-                webdavPut(webdavConn, dst, src)
-            else:  # upload to internal data management
-                httpPut(conn, token, dst, src, jobid)
-        except (Exception, ACTClientError) as e:
-            errors.append(str(e))
-    return errors
+            if webdavUrl:
+                webdavPut(webdavConn, f'{webdavUrl}/{job["id"]}/{dst}', src)
+            else:
+                httpPut(conn, token, dst, src, job['id'])
+        except ACTClientError as e:
+            job['msg'] = f'Error uploading {src} to {dst}: {e}'
+            return

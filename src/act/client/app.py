@@ -200,11 +200,11 @@ def patch():
 # [
 #   {
 #     "desc": "<xRSL or ADL>",
-#     "site": "<site>"
+#     "clusterlist": "<list of clusters>"
 #   },
 #   {
 #     "desc": "<xRSL or ADL>",
-#     "site": "<site>"
+#     "clusterlist": "<list of clusters>"
 #   },
 #   ...
 # ]
@@ -360,11 +360,13 @@ def confirm_jobs():
             #       are remote resources
             if not os.path.isfile(filepath):
                 continue
+
             jobdescs[0].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(os.path.abspath(filepath))
 
-        # TODO: unparsing ADL at the time of writing didn't work
-        # Unparse modified job description and check its validity
-        desc = jobdescs[0].UnParse('', '')[1]
+        # TODO: ADL unparsing works but it doesn't unparse modified
+        # input files
+        desc = jobdescs[0].UnParse('nordugrid:xrsl')[1]
+        #desc = jobdescs[0].UnParse('emies:adl')[1]
         jobdescs = arc.JobDescriptionList()
         if not arc.JobDescription_Parse(desc, jobdescs):
             print(f'{errpref}Invalid modified job description')
@@ -594,7 +596,6 @@ def uploadFile():
     except Exception as e:
         print(f'error: PUT /data: {e}')
         return {'msg': 'Server error'}, 500
-
 
     try:
         filename = request.args.get('filename', None)
