@@ -8,11 +8,17 @@ import os
 import errno
 import arc
 import shutil
-import fnmatch, re
+import ssl
+import http.client
+from urllib.parse import urlparse
+import fnmatch
+import re
 from threading import Thread
 
 from act.common.aCTProcess import aCTProcess
 from act.common import aCTUtils
+from act.arc.rest import fetchJobs
+from act.common.exceptions import ACTError
 
 class fetchSomeThr(Thread):
     """
@@ -142,91 +148,148 @@ class aCTFetcher(aCTProcess):
 
 
     def fetchJobs(self, arcstate, nextarcstate):
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "jobdesc"]
 
-        # Get list of jobs in the right state
-        jobstofetch = self.db.getArcJobs("arcstate='"+arcstate+"' and cluster='"+self.cluster+"'" + " limit 100")
+        # TODO: hardcoded
+        jobstofetch = self.db.getArcJobsInfo(f"arcstate='{arcstate}' and cluster='{self.cluster}' limit 100", COLUMNS)
 
         if not jobstofetch:
             return
-        self.log.info("Fetching %i jobs" % sum(len(v) for v in jobstofetch.values()))
+        self.log.info(f"Fetching {len(jobstofetch)} jobs")
 
-        fetched = []; notfetched = []; notfetchedretry = []
-        for proxyid, jobs in jobstofetch.items():
-            self.uc.CredentialString(str(self.db.getProxy(proxyid)))
+        url = urlparse(self.cluster)
 
-            # Clean the download dir just in case something was left from previous attempt
+        # aggregate jobs by proxyid
+        jobsdict = {}
+        for row in jobstofetch:
+            if not row["proxyid"] in jobsdict:
+                jobsdict[row["proxyid"]] = []
+            jobsdict[row["proxyid"]].append(row)
+
+        for proxyid, jobs in jobsdict.items():
+
+            # remove existing results, create result dir
             for job in jobs:
-                shutil.rmtree(self.tmpdir + job[2].JobID[job[2].JobID.rfind('/'):], True)
+                resdir = os.path.join(self.tmpdir, job["IDFromEndpoint"])
+                shutil.rmtree(resdir, True)
+                os.makedirs(resdir)
 
-            # Get list of downloadable files for these jobs
-            filestodl = self.db.getArcJobsInfo("arcstate='"+arcstate+"' and cluster='"+self.cluster+"' and proxyid='"+str(proxyid)+"'", ['id', 'downloadfiles'])
-            # id: downloadfiles
-            downloadfiles = dict((row['id'], row['downloadfiles']) for row in filestodl)
-            # jobs to download all files
-            jobs_downloadall = dict((j[0], j[2]) for j in jobs if j[0] in downloadfiles and not downloadfiles[j[0]])
-            # jobs to download specific files
-            jobs_downloadsome = dict((j[0], j[2]) for j in jobs if j[0] in downloadfiles and downloadfiles[j[0]])
+                # add key for fetchJobs
+                job["arcid"] = job["IDFromEndpoint"]
 
-            # We don't know if a failure from JobSupervisor is retryable or not
-            # so always retry
-            (f, r) = self.fetchAll(jobs_downloadall)
-            fetched.extend(f)
-            notfetchedretry.extend(r)
+            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
+            conn = None
+            try:
+                # create proxy authenticated connection
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+                context.load_cert_chain(proxypath, keyfile=proxypath)
+                conn = http.client.HTTPSConnection(url.netloc, context=context)
+                self.log.debug(f"Connected to cluster {url.netloc}")
 
-            nthreads=10
-            jobkeys=list(jobs_downloadsome.keys())
-            # split job list in nthreads sublists
-            jl=[jobkeys[i:i + nthreads] for i in range(0, len(jobkeys), nthreads)]
+                # fetch jobs
+                # TODO: hardcoded workers
+                results = fetchJobs(conn, "/arex/rest/1.0", self.tmpdir, proxypath, jobs, 10, logger=self.log)
 
-            for l in jl:
-                tlist = []
-                # loop over sublist
-                for j in l:
-                    # one job per thread
-                    onejob=dict((k,jobs_downloadsome[k]) for k in [j])
-                    t = fetchSomeThr(self.fetchSome, onejob ,downloadfiles)
-                    tlist.append(t)
-                    t.start()
-                for t in tlist:
-                    t.join()
-                    (f,n,r) = t.result
-                    fetched.extend(f)
-                    notfetched.extend(n)
-                    notfetchedretry.extend(r)
+                for job in results:
+                    # TODO: retry based on error condition
+                    if "msg" in job:
+                        self.log.error(f"Error fetching appjobid({job['appjobid']}), id({job['id']}): {job['msg']}")
+                        jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
+                        self.db.updateArcJobLazy(job["id"], jobdict)
+                    else:
+                        self.log.debug(f"Successfully fetched appjobid({job['appjobid']}), id({job['id']})")
+                        jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
+                        self.db.updateArcJobLazy(job["id"], jobdict)
 
-        # Check for massive failure, and back off before trying again
-        # TODO: downtime awareness
-        if len(notfetched) > 10 and len(notfetched) == len(jobstofetch) or \
-           len(notfetchedretry) > 10 and len(notfetchedretry) == len(jobstofetch):
-            self.log.error("Failed to get any jobs from %s, sleeping for 5 mins" % self.cluster)
-            time.sleep(300)
-            return
+            except ssl.SSLError as e:
+                self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
+            except http.client.HTTPException as e:
+                self.log.error(f"Could not connect to cluster {url.netloc}: {e}")
+            except ACTError as e:
+                self.log.error(f"Error cleaning ARC jobs: {e}")
+            finally:
+                if conn:
+                    conn.close()
 
-        for proxyid, jobs in jobstofetch.items():
-            for (id, appjobid, job, created) in jobs:
-                if job.JobID in notfetchedretry:
-                    self.log.warning("%s: Could not get output from job %s" % (appjobid, job.JobID))
-                    # Remove download directory to allow retry
-                    shutil.rmtree(self.tmpdir + job.JobID[job.JobID.rfind('/'):], True)
-                    # Check if job still exists
-                    fileinfo = arc.FileInfo()
-                    self.uc.CredentialString(str(self.db.getProxy(proxyid)))
-                    dp = aCTUtils.DataPoint(job.JobID, self.uc)
-                    status = dp.h.Stat(fileinfo)
-                    # TODO Check other permanent errors
-                    if not status and status.GetErrno() == errno.ENOENT:
-                        self.log.warning("%s: Job %s no longer exists" % (appjobid, job.JobID))
-                        self.db.updateArcJob(id, {"arcstate": "donefailed",
-                                                  "tarcstate": self.db.getTimeStamp()})
-                    # Otherwise try again next time
-                elif job.JobID in notfetched:
-                    self.log.error("%s: Failed to download job %s" % (appjobid, job.JobID))
-                    self.db.updateArcJob(id, {"arcstate": "donefailed",
-                                              "tarcstate": self.db.getTimeStamp()})
-                else:
-                    self.log.info("%s: Downloaded job %s" % (appjobid, job.JobID))
-                    self.db.updateArcJob(id, {"arcstate": nextarcstate,
-                                              "tarcstate": self.db.getTimeStamp()})
+        #######################################################################
+
+        #fetched = []; notfetched = []; notfetchedretry = []
+        #for proxyid, jobs in jobstofetch.items():
+        #    self.uc.CredentialString(str(self.db.getProxy(proxyid)))
+
+        #    # Clean the download dir just in case something was left from previous attempt
+        #    for job in jobs:
+        #        shutil.rmtree(self.tmpdir + job[2].JobID[job[2].JobID.rfind('/'):], True)
+
+        #    # Get list of downloadable files for these jobs
+        #    filestodl = self.db.getArcJobsInfo("arcstate='"+arcstate+"' and cluster='"+self.cluster+"' and proxyid='"+str(proxyid)+"'", ['id', 'downloadfiles'])
+        #    # id: downloadfiles
+        #    downloadfiles = dict((row['id'], row['downloadfiles']) for row in filestodl)
+        #    # jobs to download all files
+        #    jobs_downloadall = dict((j[0], j[2]) for j in jobs if j[0] in downloadfiles and not downloadfiles[j[0]])
+        #    # jobs to download specific files
+        #    jobs_downloadsome = dict((j[0], j[2]) for j in jobs if j[0] in downloadfiles and downloadfiles[j[0]])
+
+        #    # We don't know if a failure from JobSupervisor is retryable or not
+        #    # so always retry
+        #    (f, r) = self.fetchAll(jobs_downloadall)
+        #    fetched.extend(f)
+        #    notfetchedretry.extend(r)
+
+        #    nthreads=10
+        #    jobkeys=list(jobs_downloadsome.keys())
+        #    # split job list in nthreads sublists
+        #    jl=[jobkeys[i:i + nthreads] for i in range(0, len(jobkeys), nthreads)]
+
+        #    for l in jl:
+        #        tlist = []
+        #        # loop over sublist
+        #        for j in l:
+        #            # one job per thread
+        #            onejob=dict((k,jobs_downloadsome[k]) for k in [j])
+        #            t = fetchSomeThr(self.fetchSome, onejob ,downloadfiles)
+        #            tlist.append(t)
+        #            t.start()
+        #        for t in tlist:
+        #            t.join()
+        #            (f,n,r) = t.result
+        #            fetched.extend(f)
+        #            notfetched.extend(n)
+        #            notfetchedretry.extend(r)
+
+        ## Check for massive failure, and back off before trying again
+        ## TODO: downtime awareness
+        #if len(notfetched) > 10 and len(notfetched) == len(jobstofetch) or \
+        #   len(notfetchedretry) > 10 and len(notfetchedretry) == len(jobstofetch):
+        #    self.log.error("Failed to get any jobs from %s, sleeping for 5 mins" % self.cluster)
+        #    time.sleep(300)
+        #    return
+
+        #for proxyid, jobs in jobstofetch.items():
+        #    for (id, appjobid, job, created) in jobs:
+        #        if job.JobID in notfetchedretry:
+        #            self.log.warning("%s: Could not get output from job %s" % (appjobid, job.JobID))
+        #            # Remove download directory to allow retry
+        #            shutil.rmtree(self.tmpdir + job.JobID[job.JobID.rfind('/'):], True)
+        #            # Check if job still exists
+        #            fileinfo = arc.FileInfo()
+        #            self.uc.CredentialString(str(self.db.getProxy(proxyid)))
+        #            dp = aCTUtils.DataPoint(job.JobID, self.uc)
+        #            status = dp.h.Stat(fileinfo)
+        #            # TODO Check other permanent errors
+        #            if not status and status.GetErrno() == errno.ENOENT:
+        #                self.log.warning("%s: Job %s no longer exists" % (appjobid, job.JobID))
+        #                self.db.updateArcJob(id, {"arcstate": "donefailed",
+        #                                          "tarcstate": self.db.getTimeStamp()})
+        #            # Otherwise try again next time
+        #        elif job.JobID in notfetched:
+        #            self.log.error("%s: Failed to download job %s" % (appjobid, job.JobID))
+        #            self.db.updateArcJob(id, {"arcstate": "donefailed",
+        #                                      "tarcstate": self.db.getTimeStamp()})
+        #        else:
+        #            self.log.info("%s: Downloaded job %s" % (appjobid, job.JobID))
+        #            self.db.updateArcJob(id, {"arcstate": nextarcstate,
+        #                                      "tarcstate": self.db.getTimeStamp()})
 
 
     def process(self):
