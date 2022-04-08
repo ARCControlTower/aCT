@@ -6,6 +6,7 @@ import concurrent.futures
 import queue
 import arc
 import logging
+import threading
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -170,8 +171,6 @@ def getInputUploadJobs(jobid, jobdesc, endpoint, arcID):
 
 # Modifies list of dicts returned by getArcJobsInfo and populated with
 # job descriptions in "descstr" key.
-#
-# If ACTError is returned, all jobs should be put back to "tosubmit"
 #
 # TODO: should delegation be deleted on errors?
 def submitJobs(conn, queue, proxypath, jobs, **kwargs):
@@ -347,7 +346,7 @@ def fileUploader(conn, uploadQueue, resultQueue):
                         "success": False,
                         "msg": f"Upload {upload['path']} to {upload['url']} failed with {resp.status} {text}"
                     })
-            except (http.client.HTTPException, ConnectionError, OSError) as e:
+            except (http.client.HTTPException, ConnectionError, OSError, ACTError) as e:
                 resultQueue.put({
                     "id": upload["id"],
                     "success": False,
@@ -359,6 +358,301 @@ def fileUploader(conn, uploadQueue, resultQueue):
                     "success": True
                 })
         uploadQueue.task_done()
+
+
+# TODO: blocksize is only added in python 3.7!!!!!!!
+def fetchJobs(conn, endpoint, downloadDir, proxypath, jobs, workers, **kwargs):
+    logger = kwargs.get("logger", logging.getLogger(__name__).addHandler(logging.NullHandler()))
+    blocksize = kwargs.get("blocksize", HTTP_BUFFER_SIZE)
+
+    transferQueue = TransferQueue(workers)
+    resultQueue = queue.Queue()
+
+    jobsdict = {}
+    for job in jobs:
+
+        # add cancel event to every job and create a dictionary to access jobs
+        # with their id
+        job["cancel_event"] = threading.Event()
+        jobsdict[job["id"]] = job
+
+        # add all diagnose files to transfer queue and remove them from
+        # downloadfiles string; use a list of download entries rather
+        # than string in the workers
+        patterns, transfers = processDiagnoseDownloads(job["downloadfiles"], job["id"], job["arcid"], endpoint)
+        job["patterns"] = patterns
+        for transfer in transfers:
+            transferQueue.put(transfer)
+
+        # add job session directory as listing transfer
+        transferQueue.put({
+            "jobid": job["id"],
+            "url": f"{endpoint}/jobs/{job['arcid']}/session",
+            "filename": "",
+            "type": "listing"
+        })
+
+    # open connections for thread workers
+    conns = []
+    for i in range(workers):
+        try:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+            context.load_cert_chain(proxypath, keyfile=proxypath)
+            # TODO: python 3.7 blocksize
+            conns.append(http.client.HTTPSConnection(conn.host, conn.port, context=context))
+        except ssl.SSLError as e:
+            raise ACTError(f"Could not create SSL context for proxy {proxypath}: {e}")
+        except (http.client.HTTPException, ConnectionError) as e:
+            raise ACTError(f"Could not connect to cluster {conn.host}:{conn.port}: {e}")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = []
+        for i in range(workers):
+            futures.append(pool.submit(downloadTransferWorker, conns[i], transferQueue, resultQueue, downloadDir, jobsdict, endpoint, logger))
+        concurrent.futures.wait(futures)
+
+    for connection in conns:
+        connection.close()
+
+    while not resultQueue.empty():
+        result = resultQueue.get()
+        jobsdict[result["jobid"]]["msg"] = result["msg"]
+        resultQueue.task_done()
+
+    return jobs
+
+
+def processDiagnoseDownloads(downloadfiles, jobid, arcid, endpoint):
+    DIAG_FILES = [
+        "failed", "local", "errors", "description", "diag", "comment",
+        "status", "acl", "xml", "input", "output", "input_status",
+        "output_status", "statistics"
+    ]
+
+    if not downloadfiles:
+        return [], []
+
+    # add all diagnose files to transfer queue and remove them from
+    # downloadfiles string
+    downloads = downloadfiles.split(";")
+    downloadPatterns = []
+    diagFiles = set()  # to remove any possible duplications
+    for download in downloads:
+        if download.startswith("diagnose="):
+
+            # remove diagnose= part
+            diagnose = download.substring(len("diagnose="))
+            if not diagnose:
+                continue  # TODO: error?
+
+            # add all files if entire log folder is specified
+            if diagnose.endswith("/"):
+                for diagFile in DIAG_FILES:
+                    diagFiles.add(f"{diagnose[:-1]}/{diagFile}")
+
+            else:
+                diagFile = download.split("/")[-1]
+                if diagFile not in DIAG_FILES:
+                    continue  # TODO: error?
+                diagFiles.add(download)
+        else:
+            downloadPatterns.append(download)
+
+    transfers = []
+    for diagFile in diagFiles:
+        diagName = diagFile.split("/")[-1]
+        transfers.append({
+            "jobid": jobid,
+            "url": f"{endpoint}/jobs/{arcid}/diagnose/{diagName}",
+            "filename": diagFile,
+            "type": "diagnose"
+        })
+
+    return downloadPatterns, transfers
+
+
+class TransferQueue():
+
+    def __init__(self, numWorkers):
+        self.queue = queue.Queue()
+        self.lock = threading.Lock()
+        self.barrier = threading.Barrier(numWorkers)
+
+    def put(self, val):
+        with self.lock:
+            self.queue.put(val)
+            self.barrier.reset()
+
+    def get(self):
+        while True:
+            with self.lock:
+                if not self.queue.empty():
+                    return self.queue.get()
+
+            try:
+                self.barrier.wait()
+            except threading.BrokenBarrierError:
+                continue
+            else:
+                raise TransferQueueEmpty()
+
+    def task_done(self):
+        with self.lock:
+            self.queue.task_done()
+
+
+class TransferQueueEmpty(Exception):
+    pass
+
+
+# TODO: add more logging context (job ID?)
+def downloadTransferWorker(conn, transferQueue, resultQueue, downloadDir, jobsdict, endpoint, logger=None):
+    if logger is None:
+        logger = logging.getLogger(__name__).addHandler(logging.NullHandler())
+
+    while True:
+        try:
+            transfer = transferQueue.get()
+        except queue.Empty:
+            break
+        transferQueue.task_done()
+
+        job = jobsdict[transfer["jobid"]]
+
+        if job["cancel_event"].is_set():
+            continue
+
+        if transfer["type"] in ("file", "diagnose"):
+
+            # filter out download files that are not specified
+            if job["patterns"] and not transfer["type"] == "diagnose":
+                toDownload = False
+                for pattern in job["patterns"]:
+                    # direct match
+                    if pattern == transfer["filename"]:
+                        toDownload = True
+                        break
+                    # recursive folder match
+                    elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
+                        toDownload = True
+                        break
+                if not toDownload:
+                    continue
+
+            # download file
+            path = f"{downloadDir}/{job['arcid']}/{transfer['filename']}"
+            try:
+                downloadFile(conn, transfer["url"], path)
+            except ACTError as e:
+                logger.error(str(e))
+                job["cancel_event"].set()
+                resultQueue.put({
+                    "jobid": job["id"],
+                    "msg": str(e)
+                })
+
+            logger.info(f"Successfully downloaded file {transfer['url']} to {path}")
+
+        elif transfer["type"] == "listing":
+
+            # filter out listings that do not match download patterns
+            if job["patterns"]:
+                toDownload = False
+                for pattern in job["patterns"]:
+                    # part of pattern
+                    if pattern.startswith(transfer["filename"]):
+                        toDownload = True
+                    # recursive folder match
+                    elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
+                        toDownload = True
+                if not toDownload:
+                    continue
+
+            # download listing
+            try:
+                listing = downloadListing(conn, transfer["url"])
+            except ACTError as e:
+                logger.error(str(e))
+                job["cancel_event"].set()
+                resultQueue.put({
+                    "jobid": job["id"],
+                    "msg": str(e)
+                })
+
+            logger.info(f"Successfully downloaded listing {transfer['url']}:\n{json.dumps(listing, indent=4)}")
+
+            # create new transfer jobs
+            # duplication except for "type" key
+            if "file" in listing:
+                if not isinstance(listing["file"], list):
+                    listing["file"] = [listing["file"]]
+                for f in listing["file"]:
+                    if transfer["filename"]:
+                        filename = f"{transfer['filename']}/{f}"
+                    else:  # if session root, filename is empty
+                        filename = f
+                    transferQueue.put({
+                        "jobid": job["id"],
+                        "type": "file",
+                        "filename": filename,
+                        "url": f"{endpoint}/jobs/{job['arcid']}/session/{filename}"
+                    })
+                #logger.debug(f"Transfer queue:\n{list(transferQueue.queue)}")
+            elif "dir" in listing:
+                if not isinstance(listing["dir"], list):
+                    listing["dir"] = [listing["dir"]]
+                for d in listing["dir"]:
+                    if transfer["filename"]:
+                        filename = f"{transfer['filename']}/{d}"
+                    else:
+                        filename = d
+                    transferQueue.put({
+                        "jobid": job["id"],
+                        "type": "listing",
+                        "filename": filename,
+                        "url": f"{endpoint}/jobs/{job['arcid']}/session/{filename}"
+                    })
+                #logger.debug(f"Transfer queue:\n{list(transferQueue.queue)}")
+
+
+def downloadFile(conn, url, path):
+    try:
+        resp = httpRequest(conn, "GET", url)
+    except ACTError as e:
+        raise ACTError(f"Error downloading file {url}: {e}")
+
+    if resp.status != 200:
+        text = resp.read()
+        raise ACTError(f"Error downloading file {url}: {resp.status} {text}")
+
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            data = resp.read(HTTP_BUFFER_SIZE)
+            while data:
+                f.write(data)
+                data = resp.read(HTTP_BUFFER_SIZE)
+    # TODO: proper exceptions
+    except Exception as e:
+        raise ACTError(f"Error downloading file {url}: {e}")
+
+
+def downloadListing(conn, url):
+    try:
+        resp = httpRequest(conn, "GET", url, headers={"Accept": "application/json"})
+    except ACTError as e:
+        raise ACTError(f"Error downloading listing {url}: {e}")
+
+    if resp.status != 200:
+        text = resp.read()
+        raise ACTError(f"Error downloading listing {url}: {resp.status} {text}")
+
+    try:
+        listing = json.loads(resp.read().decode())
+    except json.JSONDecodeError as e:
+        raise ACTError(f"Error decoding JSON listing {url}: {e}")
+
+    return listing
 
 
 def getJobsInfo(conn, jobs):
