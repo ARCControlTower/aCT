@@ -14,3 +14,12 @@ class SubmitError(ACTError):
     def __init__(self, arcstate, *args):
         super().__init__(*args)
         self.arcstate = arcstate
+
+
+class ARCHTTPError(ACTError):
+    """ARC REST HTTP status error."""
+
+    def __init__(self, url, status, text):
+        super().__init__(f"{url} {status} {text}")
+        self.status = status
+        self.text = text

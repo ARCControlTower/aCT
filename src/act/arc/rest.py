@@ -14,7 +14,7 @@ from urllib.parse import urlencode, urlparse
 
 from act.client.x509proxy import sign_request
 from act.client.delegate_proxy import parse_issuer_cred
-from act.common.exceptions import ACTError, SubmitError
+from act.common.exceptions import ACTError, SubmitError, ARCHTTPError
 
 
 HTTP_BUFFER_SIZE = 2**23
@@ -565,9 +565,18 @@ def downloadTransferWorker(conn, transferQueue, resultQueue, downloadDir, jobsdi
             path = f"{downloadDir}/{job['arcid']}/{transfer['filename']}"
             try:
                 downloadFile(conn, transfer["url"], path)
-            except ACTError as e:
+            except (ACTError, ARCHTTPError) as e:
+                # don't stop downloading files when files are missing (404)
+                if isinstance(e, ARCHTTPError) and e.status == 404:
+                    # don't signal missing diagnose file as error
+                    if transfer["type"] == "diagnose":
+                        logger.info(f"Missing diagnose file {transfer['url']}")
+                        continue
+                else:
+                    # stop downloading on other errors
+                    job["cancel_event"].set()
+
                 logger.error(str(e))
-                job["cancel_event"].set()
                 resultQueue.put({
                     "jobid": job["id"],
                     "msg": str(e)
@@ -594,9 +603,13 @@ def downloadTransferWorker(conn, transferQueue, resultQueue, downloadDir, jobsdi
             # download listing
             try:
                 listing = downloadListing(conn, transfer["url"])
-            except ACTError as e:
+            except (ACTError, ARCHTTPError) as e:
+                if isinstance(e, ARCHTTPError):
+                    pass
+                else:
+                    job["cancel_event"].set()
+
                 logger.error(str(e))
-                job["cancel_event"].set()
                 resultQueue.put({
                     "jobid": job["id"],
                     "msg": str(e)
@@ -647,7 +660,7 @@ def downloadFile(conn, url, path):
 
     if resp.status != 200:
         text = resp.read()
-        raise ACTError(f"Error downloading file {url}: {resp.status} {text}")
+        raise ARCHTTPError(url, resp.status, text)
 
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
