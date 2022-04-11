@@ -138,6 +138,24 @@ def getProxySSLContext(proxypath):
     return context
 
 
+# When file name is URL this function doesn't care which is not completely
+# conforming to job description standards.
+def isLocalInputFile(name, path):
+    """Return path if local or empty string if remote URL."""
+    if not path:
+        path = name
+
+    try:
+        url = urlparse(path)
+    except ValueError as e:
+        raise ACTError("Error parsing source of file {file.Name}: {e}")
+    if url.scheme not in ("file", None, "") or url.hostname:
+        return ""
+
+    return url.path
+
+
+# TODO: refactor to use isLocalInputFile
 def getInputUploadJobs(jobid, jobdesc, endpoint, arcID):
     """Return a list of upload dicts."""
     uploadJobs = []
@@ -441,7 +459,7 @@ def processDiagnoseDownloads(downloadfiles, jobid, arcid, endpoint):
         if download.startswith("diagnose="):
 
             # remove diagnose= part
-            diagnose = download.substring(len("diagnose="))
+            diagnose = download[len("diagnose="):]
             if not diagnose:
                 continue  # TODO: error?
 
@@ -536,6 +554,10 @@ def downloadTransferWorker(conn, transferQueue, resultQueue, downloadDir, jobsdi
                     elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
                         toDownload = True
                         break
+                    # entire session directory, not matched by above if
+                    elif pattern == "/":
+                        toDownload = True
+                        break
                 if not toDownload:
                     continue
 
@@ -550,6 +572,7 @@ def downloadTransferWorker(conn, transferQueue, resultQueue, downloadDir, jobsdi
                     "jobid": job["id"],
                     "msg": str(e)
                 })
+                continue
 
             logger.info(f"Successfully downloaded file {transfer['url']} to {path}")
 
@@ -578,6 +601,7 @@ def downloadTransferWorker(conn, transferQueue, resultQueue, downloadDir, jobsdi
                     "jobid": job["id"],
                     "msg": str(e)
                 })
+                continue
 
             logger.info(f"Successfully downloaded listing {transfer['url']}:\n{json.dumps(listing, indent=4)}")
 

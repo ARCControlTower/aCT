@@ -56,7 +56,7 @@ class ClientDB(aCTDB):
             modified TIMESTAMP,
             created TIMESTAMP,
             jobname VARCHAR(255),
-            jobdesc integer,
+            jobdesc mediumtext,
             clusterlist VARCHAR(1024),
             arcjobid integer,
             proxyid integer
@@ -82,17 +82,13 @@ class ClientDB(aCTDB):
         else:
             self.Commit()
 
-    def insertJob(self, jobdesc, proxyid, clusterlist, lazy=False):
+    def insertJob(self, proxyid, clusterlist, lazy=False):
         """
         Insert job into clientjobs table.
 
-        This function does not insert job decription in to the database. It
-        has to be inserted separately. However, job description is still needed
-        to determine the name of the job. This function is meant for clients
-        that need to perform additional work on job descriptions.
-
         Args:
             jobdesc: A string with xRSL job description.
+            jobname: Job name string.
             proxyid: ID from proxies table of a proxy that job will
                 be submitted with.
             clusterlist: A string of comma separated URLs of clusters that job
@@ -103,21 +99,13 @@ class ClientDB(aCTDB):
         Returns:
             ID of inserted job.
         """
-        # get job name from xRSL
-        jobdescs = arc.JobDescriptionList()
-        # Error is not checked because caller (actsub.py) already checked
-        # validity of xrsl.
-        arc.JobDescription_Parse(str(jobdesc), jobdescs)
-        jobname = jobdescs[0].Identification.JobName
-
-        # insert job
         query = """
-            INSERT INTO clientjobs (created, jobname, jobdesc, clusterlist, proxyid)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO clientjobs (created, clusterlist, proxyid)
+            VALUES (%s, %s, %s)
         """
         c = self.db.getCursor()
         try:
-            c.execute(query, [self.getTimeStamp(), jobname, None, clusterlist, proxyid])
+            c.execute(query, [self.getTimeStamp(), clusterlist, proxyid])
             c.execute('SELECT LAST_INSERT_ID()')
             jobid = c.fetchone()['LAST_INSERT_ID()']
         except:
@@ -127,22 +115,6 @@ class ClientDB(aCTDB):
             if not lazy:
                 self.Commit()
             return jobid
-
-    def insertDescription(self, jobdesc, lazy=False):
-        c = self.db.getCursor()
-
-        # first, insert job description and retreive the job ID
-        try:
-            query = 'INSERT INTO jobdescriptions (jobdescription) VALUES (%s)'
-            c.execute(query, [jobdesc])
-            c.execute('SELECT LAST_INSERT_ID()')
-            jobdescid = c.fetchone()['LAST_INSERT_ID()']
-        except:
-            self.log.exception('Error inserting job description')
-            raise
-        else:
-            return jobdescid
-
 
     def insertJobAndDescription(self, jobdesc, proxyid, clusterlist, lazy=False):
         """
