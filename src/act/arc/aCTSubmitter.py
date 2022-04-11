@@ -521,8 +521,9 @@ class aCTSubmitter(aCTProcess):
             for job in jobs:
                 jobdict = {}
                 jobdict["arcstate"] = job["arcstate"]
-                # initial offset to 1 minute to force first status check
-                jobdict["tarcstate"] = self.db.getTimeStamp(time.time() - int(self.conf.get(['jobs', 'checkinterval'])) + 120)
+                ## initial offset to 1 minute to force first status check
+                #jobdict["tarcstate"] = self.db.getTimeStamp(time.time() - int(self.conf.get(['jobs', 'checkinterval'])) + 120)
+                jobdict["tarcstate"] = self.db.getTimeStamp()
                 jobdict["tstate"] = self.db.getTimeStamp()
                 jobdict["cluster"] = self.cluster
 
