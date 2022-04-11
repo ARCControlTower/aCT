@@ -10,6 +10,7 @@ import os
 import sys
 import traceback
 import time
+import arc
 
 from act.arc.aCTDBArc import aCTDBArc
 from act.common.aCTConfig import aCTConfigARC
@@ -83,34 +84,6 @@ class Client2Arc(object):
         for proxyid in proxies:
             self.insertNewJobs(proxyid, 100)
 
-    def getJobStateCount(self, select):
-        """
-        Return states and numbers of jobs in those states.
-
-        Args:
-            select: A string with custom WHERE clause for MySQL query.
-
-        Returns:
-            A list of dictionaries where every dictionary has a state name
-            and number of jobs in that state. State name is mapped by
-            'arcstate', number of jobs by 'COUNT(arcstate). For example:
-
-            [{'arcstate': 'toclean', 'COUNT(arcstate)': 10},
-             {'arcstate': 'running', 'COUNT(arcstate)': 58}]
-        """
-        c = self.arcdb.db.getCursor()
-        try:
-            c.execute(
-                f'SELECT arcstate,COUNT(arcstate) \
-                FROM arcjobs \
-                WHERE {select} \
-                GROUP BY arcstate'
-            )
-        except:
-            self.log.exception('Error getting job info from arc table')
-        else:
-            return c.fetchall()
-
     def insertNewJobs(self, proxyid, num):
         """
         Insert new jobs to ARC table.
@@ -127,29 +100,39 @@ class Client2Arc(object):
             order_by_params=['id'],
             limit=num
         )
+        jobdescs = arc.JobDescriptionList()
         for job in jobs:
-            clusterlist = job['clusterlist']
 
-            # get job description, needed for setting priority
-            jobdesc = self.arcdb.getArcJobDescription(job['jobdesc'])
+            # create downloads list
+            arc.JobDescription_Parse(job['jobdesc'], jobdescs)
+            # all files from session dir
+            downloads = ['/']
+            # all diagnose files if log dir is specified
+            logdir = jobdescs[-1].Application.LogDir
+            if logdir:
+                if logdir.endswith('/'):
+                    downloads.append(f'diagnose={logdir}')
+                else:
+                    downloads.append(f'diagnose={logdir}/')
 
             # insert job to ARC table
             try:
-                row = self.clidb.insertArcJob(
-                    jobdesc,
+                row = self.arcdb.insertArcJobDescription(
                     job['jobdesc'],
                     proxyid,
                     0,
-                    clusterlist,
+                    job['clusterlist'],
                     job['id'],
-                    '',
-                    proxyid
+                    ';'.join(downloads)
                 )
             except:
                 self.log.exception(f'Error inserting job {job["id"]} to arc table')
-            else: # create reference to job in client table
-                self.clidb.updateJob(job['id'], {'arcjobid': row['LAST_INSERT_ID()']})
-
+            else:
+                # create a reference to job in client table
+                self.clidb.updateJob(job['id'], {
+                    'arcjobid': row['LAST_INSERT_ID()'],
+                    'modified': self.clidb.getTimeStamp()
+                })
 
     def finish(self):
         """Log stop message."""
@@ -160,5 +143,3 @@ if __name__ == '__main__':
     proc = Client2Arc()
     proc.run()
     proc.finish()
-
-

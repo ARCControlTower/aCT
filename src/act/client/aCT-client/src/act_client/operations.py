@@ -382,16 +382,11 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
     # submit jobs to aCT
     jsonData = []
     for job in jobs:
-        jsonData.append({
-            'desc': job['descstr'],
-            'clusterlist': job['clusterlist']
-        })
+        jsonData.append({'clusterlist': job['clusterlist']})
     jsonData = postJobs(conn, token, jsonData)
 
     # move jobs with errors to results; do it backwards to not mess up index
     for i in range(len(jobs) - 1, -1, -1):
-        if 'name' in jsonData[i]:
-            jobs[i]['name'] = jsonData[i]['name']
         if 'msg' in jsonData[i]:
             jobs[i]['msg'] = jsonData[i]['msg']
             results.append(jobs.pop(i))
@@ -433,7 +428,7 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
         if 'msg' in jobs[i]:
             results.append(jobs.pop(i))
 
-    # job descriptions were modified and have be unparsed
+    # job descriptions were modified and have to be unparsed
     for job in jobs:
         job['descstr'] = job['desc'].UnParse('emies:adl')[1]
         if not job['descstr']:
@@ -456,6 +451,8 @@ def submitJobs(conn, token, descs, clusterlist, webdavConn, webdavUrl):
 
     # process API errors
     for job, result in zip(jobs, jsonData):
+        if 'name' in result:
+            job['name'] = result['name']
         if 'msg' in result:
             job['msg'] = result['msg']
         else:

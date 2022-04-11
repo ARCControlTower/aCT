@@ -12,6 +12,7 @@ from act.client.jobmgr import JobManager, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
 from act.client.x509proxy import create_proxy_csr
 from act.client.errors import InvalidColumnError
+from act.arc.rest import isLocalInputFile
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -112,11 +113,8 @@ def clean():
         jmgr = JobManager()
         deleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
         for jobid in deleted:
-            try:
-                datadir = jmgr.getJobDataDir(jobid)
-                shutil.rmtree(jmgr.getJobDataDir(datadir))
-            except OSError as e:
-                print(f'error: PATCH /jobs: deleting {datadir}: {e}')
+            datadir = jmgr.getJobDataDir(jobid)
+            shutil.rmtree(jmgr.getJobDataDir(datadir), ignore_errors=True)
     except Exception as e:
         print(f'error: DELETE /jobs: {e}')
         return {'msg': 'Server error'}, 500
@@ -181,11 +179,8 @@ def patch():
             jobs = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
             for job in jobs:
                 if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting'):
-                    try:
-                        datadir = jmgr.getJobDataDir(job['c_id'])
-                        shutil.rmtree(jmgr.getJobDataDir(datadir))
-                    except OSError as e:
-                        print(f'error: PATCH /jobs: deleting {datadir}: {e}')
+                    datadir = jmgr.getJobDataDir(job['c_id'])
+                    shutil.rmtree(jmgr.getJobDataDir(datadir), ignore_errors=True)
         elif arcstate == 'toresubmit':
             jobs = jmgr.resubmitJobs(proxyid, jobids, name_filter)
         else:
@@ -199,11 +194,9 @@ def patch():
 # expects a JSON list of job objects in the following form:
 # [
 #   {
-#     "desc": "<xRSL or ADL>",
 #     "clusterlist": "<list of clusters>"
 #   },
 #   {
-#     "desc": "<xRSL or ADL>",
 #     "clusterlist": "<list of clusters>"
 #   },
 #   ...
@@ -231,47 +224,28 @@ def create_jobs():
     results = []
     for job in jobs:
         result = {}
-
-        # check job description
-        if 'desc' not in job:
-            print(f'{errpref}No job description given')
-            result['msg'] = 'No job description given'
-            results.append(result)
-            continue
-        jobdescs = arc.JobDescriptionList()
-        if not arc.JobDescription_Parse(job['desc'], jobdescs):
-            print(f'{errpref}Invalid job description')
-            result['msg'] = 'Invalid job description'
-            results.append(result)
-            continue
-        result['name'] = jobdescs[0].Identification.JobName
+        results.append(result)
 
         try:
             # check clusters
             if 'clusterlist' not in job or not job['clusterlist']:
                 print(f'{errpref}No clusters given')
                 result['msg'] = 'No clusters given'
-                results.append(result)
                 continue
             checkClusters(job['clusterlist'])
 
-            # insert job and create its data directory
-            jobid = jmgr.clidb.insertJob(job['desc'], token['proxyid'], ','.join(job['clusterlist']))
-            jobDataDir = jmgr.getJobDataDir(jobid)
-            os.makedirs(jobDataDir)
+            # insert job
+            jobid = jmgr.clidb.insertJob(token['proxyid'], ','.join(job['clusterlist']))
         except UnknownClusterError as e:
             print(f'{errpref}Unknown cluster {e.name}')
             result['msg'] = f'Unknown cluster {e.name}'
-            results.append(result)
             continue
         except Exception as e:
             print(f'{errpref}{e}')
             result['msg'] = 'Server error'
-            results.append(result)
             continue
 
         result['id'] = jobid
-        results.append(result)
 
     return jsonify(results)
 
@@ -294,7 +268,7 @@ def confirm_jobs():
     try:
         token = getToken()
         proxyid = token['proxyid']
-        jobs = request.get_json()
+        submissions = request.get_json()
         jmgr = JobManager()
     except BadRequest as e:
         print(f'{errpref}{e}')
@@ -306,89 +280,114 @@ def confirm_jobs():
         print(f'{errpref}{e}')
         return {'msg': 'Server error'}, 500
 
-    if not jobs:
+    if not submissions:
         return jsonify([])
+    elif not isinstance(submissions, list):
+        print(f'{errpref}Input JSON is not a list: {submissions}')
+        return {'msg': 'Input JSON is not a list: {submissions}'}, 400
 
-    results = []
-    for job in jobs:
-        result = {}
-        # check job description
+    jobs = []
+    jobids = []
+    tocheck = []
+    for submission in submissions:
+        job = {}
+        jobs.append(job)
+        if not isinstance(submission, dict):
+            print(f'{errpref}Job element is not an object: {submission}')
+            job['msg'] = f'Job element is not an object: {submission}'
+        elif 'id' not in submission:
+            print(f'{errpref}No job ID given')
+            job['msg'] = 'No job ID given'
+        else:
+            job.update(submission)
+            jobids.append(job['id'])
+            tocheck.append(job)
+
+    # get info for all jobs and check which ones don't exist
+    tosubmit = []
+    stats = jmgr.getJobStats(proxyid, jobids, '', '', ['id',], [], '')
+    for job in tocheck:
+        inStats = False
+        for stat in stats:
+            if stat['c_id'] == job['id']:
+                inStats = True
+        if not inStats:
+            print(f'{errpref}Job ID {job["id"]} does not exist')
+            job['msg'] = f'Job ID {job["id"]} does not exist'
+        else:
+            tosubmit.append(job)
+
+    jobdescs = arc.JobDescriptionList()
+
+    for job in tosubmit:
+
+        # parse job description
         if 'desc' not in job:
             print(f'{errpref}No job description given')
-            result['msg'] = 'No job description given'
-            results.append(result)
+            job['msg'] = 'No job description given'
             continue
-        jobdescs = arc.JobDescriptionList()
         if not arc.JobDescription_Parse(job['desc'], jobdescs):
             print(f'{errpref}Invalid job description')
-            result['msg'] = 'Invalid job description'
-            results.append(result)
+            job['msg'] = 'Invalid job description'
             continue
-        result['name'] = jobdescs[0].Identification.JobName
 
-        # check job ID
-        if 'id' not in job:
-            print(f'{errpref}No job ID given')
-            result['msg'] = 'No job ID given'
-            results.append(result)
-            continue
-        result['id'] = job['id']
-        jobid = jmgr.checkJobExists(proxyid, job['id'])
-        if not jobid:
-            print(f'{errpref}Job ID {job["id"]} does not exist')
-            result['msg'] = f'Job ID {job["id"]} does not exist'
-            results.append(result)
-            continue
+        job['name'] = jobdescs[-1].Identification.JobName
 
         # get job's data directory
         try:
-            jobDataDir = jmgr.getJobDataDir(jobid)
+            jobDataDir = jmgr.getJobDataDir(job['id'])
         except ConfigError as e:
             print(f'{errpref}{e}')
-            result['msg'] = 'Server error'
-            results.append(result)
+            job['msg'] = 'Server error'
             continue
 
+        # modify job description for local input files
+        #
         # InputFiles need to be accessed through index otherwise
         # the changes do not survive outside of for loop.
-        for i in range(len(jobdescs[0].DataStaging.InputFiles)):
-            filename = jobdescs[0].DataStaging.InputFiles[i].Name
-            filepath = os.path.join(jobDataDir, filename)
-            # TODO: handle the situation where file that should be
-            #       present is not present (right now we asume all
-            #       files are present and those who fail on this call
-            #       are remote resources
-            if not os.path.isfile(filepath):
+        for i in range(len(jobdescs[-1].DataStaging.InputFiles)):
+            filename = jobdescs[-1].DataStaging.InputFiles[i].Name
+            filepath = isLocalInputFile(
+                jobdescs[-1].DataStaging.InputFiles[i].Name,
+                jobdescs[-1].DataStaging.InputFiles[i].Sources[0].fullstr()
+            )
+            if not filepath:  # remote file
                 continue
 
-            jobdescs[0].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(os.path.abspath(filepath))
+            path = os.path.abspath(os.path.join(jobDataDir, filename))
+            if not os.path.isfile(path):
+                job['msg'] = f'Input file {filepath} missing'
+                break
+
+            jobdescs[-1].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(path)
+
+        # errors on missing input files
+        if 'msg' in job:
+            print(f'{errpref}{job["msg"]}')
+            continue
 
         # TODO: ADL unparsing works but it doesn't unparse modified
         # input files
-        desc = jobdescs[0].UnParse('nordugrid:xrsl')[1]
+        desc = jobdescs[-1].UnParse('nordugrid:xrsl')[1]
         #desc = jobdescs[0].UnParse('emies:adl')[1]
-        jobdescs = arc.JobDescriptionList()
         if not arc.JobDescription_Parse(desc, jobdescs):
             print(f'{errpref}Invalid modified job description')
-            result['msg'] = 'Server error'
-            results.append(result)
+            job['msg'] = 'Server error'
             continue
 
-        # insert modified job description and confirm job for submission
+        # update job entry and confirm job for submission
         try:
-            # inserting job description ID makes job eligible for
-            # pickup by client2arc
-            descid = jmgr.clidb.insertDescription(desc)
-            jmgr.clidb.updateJob(jobid, {'jobdesc': descid})
+            jmgr.clidb.updateJob(job['id'], {
+                'jobdesc': desc,
+                'jobname': job['name'],
+                'modified': jmgr.clidb.getTimeStamp()
+            })
         except Exception as e:
             print(f'{errpref}{e}')
-            result['msg'] = 'Server error'
-            results.append(result)
+            job['msg'] = 'Server error'
             continue
 
-        results.append(result)
-
-    return jsonify(results)
+    return jsonify(jobs)
 
 
 @app.route('/results', methods=['GET'])
@@ -604,6 +603,7 @@ def uploadFile():
             return {'msg': 'File name not given'}, 400
 
         jobDataDir = jmgr.getJobDataDir(jobid)
+        os.makedirs(jobDataDir, exist_ok=True)
         filepath = os.path.join(jobDataDir, filename)
         with open(filepath, 'wb') as f:
             while True:
