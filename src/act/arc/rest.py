@@ -1,21 +1,21 @@
+import concurrent.futures
 import http.client
 import json
-import os
-import ssl
-import concurrent.futures
-import queue
-import arc
 import logging
+import os
+import queue
+import ssl
 import threading
+from urllib.parse import urlencode, urlparse
+
+from act.client.delegate_proxy import parse_issuer_cred
+from act.client.x509proxy import sign_request
+from act.common.exceptions import ACTError, ARCHTTPError, SubmitError
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
-from urllib.parse import urlencode, urlparse
 
-from act.client.x509proxy import sign_request
-from act.client.delegate_proxy import parse_issuer_cred
-from act.common.exceptions import ACTError, SubmitError, ARCHTTPError
-
+import arc
 
 HTTP_BUFFER_SIZE = 2**23
 
