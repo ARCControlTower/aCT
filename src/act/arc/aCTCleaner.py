@@ -4,10 +4,10 @@
 #
 import http.client
 import os
-from act.arc.rest import cleanJobs
 import ssl
 from urllib.parse import urlparse
 
+from act.arc.rest import cleanJobs
 from act.common.aCTProcess import aCTProcess
 from act.common.exceptions import ACTError
 
