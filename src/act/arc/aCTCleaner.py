@@ -70,26 +70,28 @@ class aCTCleaner(aCTProcess):
 
                 # clean jobs and log results
                 toARCClean = cleanJobs(conn, toARCClean)
+                for job in toARCClean:
+                    if "msg" in job:
+                        self.log.error(f"Error cleaning job {job['appjobid']}: {job['msg']}")
+                    else:
+                        self.log.debug(f"Successfully cleaned job {job['appjobid']}")
+
+                for job in toclean:
+                    self.db.deleteArcJob(job["id"])
+
+                self.db.Commit()
+
             except ssl.SSLError as e:
                 self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
             except http.client.HTTPException as e:
                 self.log.error(f"Could not connect to cluster {url.netloc}: {e}")
             except ACTError as e:
                 self.log.error(f"Error cleaning ARC jobs: {e}")
-            else:
-                for job in toARCClean:
-                    if "msg" in job:
-                        self.log.error(f"Error cleaning appjobid({job['appjobid']}), id({job['id']}): {job['msg']}")
-                    else:
-                        self.log.debug(f"Successfully cleaned appjobid({job['appjobid']}), id({job['id']})")
             finally:
                 if conn:
                     conn.close()
 
-            for job in toclean:
-                self.db.deleteArcJob(job["id"])
-
-        self.log.debug("Finished cleaning jobs")
+        self.log.debug("Done")
 
     def process(self):
 

@@ -616,7 +616,7 @@ def downloadTransferWorker(conn, transferQueue, resultQueue, downloadDir, jobsdi
                 })
                 continue
 
-            logger.info(f"Successfully downloaded listing {transfer['url']}:\n{json.dumps(listing, indent=4)}")
+            logger.info(f"Successfully downloaded listing {transfer['url']}")
 
             # create new transfer jobs
             # duplication except for "type" key

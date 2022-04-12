@@ -65,13 +65,15 @@ class aCTFetcher(aCTProcess):
                 for job in results:
                     # TODO: retry based on error condition
                     if "msg" in job:
-                        self.log.error(f"Error fetching appjobid({job['appjobid']}), id({job['id']}): {job['msg']}")
+                        self.log.error(f"Error fetching  job {job['appjobid']}: {job['msg']}")
                         jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
                         self.db.updateArcJobLazy(job["id"], jobdict)
                     else:
-                        self.log.debug(f"Successfully fetched appjobid({job['appjobid']}), id({job['id']})")
+                        self.log.debug(f"Successfully fetched job {job['appjobid']}")
                         jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
                         self.db.updateArcJobLazy(job["id"], jobdict)
+
+                self.db.Commit()
 
             except ssl.SSLError as e:
                 self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
@@ -82,6 +84,8 @@ class aCTFetcher(aCTProcess):
             finally:
                 if conn:
                     conn.close()
+
+        self.log.debug("Done")
 
     def process(self):
 
