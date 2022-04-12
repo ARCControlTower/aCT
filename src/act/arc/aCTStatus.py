@@ -64,7 +64,6 @@
 
 
 import http.client
-import json
 import os
 import ssl
 import time
@@ -95,7 +94,7 @@ class aCTStatus(aCTProcess):
         Query all running jobs
         '''
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "created",
-                   "State", "JobID"]
+                   "State"]
 
         # minimum time between checks
         if time.time() < self.checktime + int(self.conf.get(['jobs', 'checkmintime'])):
@@ -133,7 +132,6 @@ class aCTStatus(aCTProcess):
                     "id": job["id"],
                     "appjobid": job["appjobid"],
                     "State": job["State"],
-                    "JobID": job["JobID"],
                     "created": job["created"],
                 }
                 tocheck.append(jobdict)
@@ -155,13 +153,13 @@ class aCTStatus(aCTProcess):
                 # process jobs and update DB
                 for job in tocheck:
                     if "msg" in job:
-                        self.log.error(f"Failed to get info for appjobid({job['appjobid']}), id({job['id']}): {job['msg']}")
+                        self.log.error(f"Failed to get info for job {job['appjobid']}: {job['msg']}")
                         continue
 
                     if job["State"] == job["state"]:
                         continue
 
-                    self.log.info(f"Job {job['JobID']}: {job['State']} -> {job['state']}")
+                    self.log.info(f"ARC status change for job {job['appjobid']}: {job['State']} -> {job['state']}")
 
                     tstamp = self.db.getTimeStamp()
                     jobdict = {"State": job["state"], "tstate": tstamp}
@@ -181,10 +179,10 @@ class aCTStatus(aCTProcess):
                         jobdict["arcstate"] = "finishing"
 
                     elif job["state"] == "FINISHED":
-                        exitCode = job["info_document"]["ComputingActivity"]["ExitCode"]
+                        exitCode = job["info_document"].get("ComputingActivity", {}).get("ExitCode", -1)
                         if exitCode == -1:
                             # missing exit code, but assume success
-                            self.log.warning(f"Job {job['JobID']} FINISHED but has missing exit code, setting to zero")
+                            self.log.warning(f"Job {job['appjobid']} FINISHED but has missing exit code, setting to zero")
                             jobdict["ExitCode"] = 0
                         else:
                             jobdict["ExitCode"] = exitCode
@@ -192,7 +190,7 @@ class aCTStatus(aCTProcess):
 
                     elif job["state"] == "FAILED":
                         jobdict["arcstate"] = "failed"
-                        self.log.info(f"Job {job['JobID']} failed, dumping info:\n{json.dumps(job['info_document'], indent=4)}")
+                        self.log.info(f"Job {job['appjobid']} failed")
 
                     elif job["state"] == "KILLED":
                         jobdict["arcstate"] = "cancelled"
@@ -214,14 +212,16 @@ class aCTStatus(aCTProcess):
                     if wallTime and slots:
                         wallTime = wallTime // slots
                         if wallTime > fromCreated:
-                            self.log.warning(f"Job {job['JobID']}: Fixing reported walltime {wallTime} to {fromCreated}")
+                            self.log.warning(f"Job {job['appjobid']}: Fixing reported walltime {wallTime} to {fromCreated}")
                             jobdict["UsedTotalWallTime"] = fromCreated
                     cpuTime = int(activityDict.get("UsedTotalCPUTime", 0))
                     if cpuTime and cpuTime > 10 ** 7:
-                        self.log.warning(f"Job {job['JobID']}: Discarding reported CPUtime {cpuTime}")
+                        self.log.warning(f"Job {job['appjobid']}: Discarding reported CPUtime {cpuTime}")
                         jobdict["UsedTotalCPUTime"] = -1
 
                     self.db.updateArcJobLazy(job["id"], jobdict)
+
+                self.db.Commit()
 
             except ssl.SSLError as e:
                 self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
@@ -236,7 +236,7 @@ class aCTStatus(aCTProcess):
         self.log.info('Done')
 
     def checkACTStateTimeouts(self):
-        COLUMNS = ["id", "JobID"]
+        COLUMNS = ["id", "appjobid"]
 
         config = Config()
 
@@ -246,13 +246,13 @@ class aCTStatus(aCTProcess):
         tstampCond = self.db.timeStampLessThan("tarcstate", timeoutDict["cancelling"])
         jobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and arcstate='cancelling' and {tstampCond}", COLUMNS)
         for job in jobs:
-            self.log.warning(f"Job {job['JobID']} too long in \"cancelling\"")
+            self.log.warning(f"Job {job['appjobid']} too long in \"cancelling\"")
             tstamp = self.db.getTimeStamp()
             self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, 'tstate': tstamp})
         self.db.Commit()
 
     def checkARCStateTimeouts(self):
-        COLUMNS = ["id", "JobID", "arcstate", "State"]
+        COLUMNS = ["id", "appjobid", "arcstate", "State", "JobID"]
 
         config = Config()
 
@@ -273,7 +273,7 @@ class aCTStatus(aCTProcess):
                     continue
 
                 # cancel jobs
-                self.log.warning(f"Job {job['JobID']} too long in state {state}")
+                self.log.warning(f"Job {job['appjobid']} too long in state {state}")
                 tstamp = self.db.getTimeStamp()
                 if job["JobID"]:
                     self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp, 'tstate': tstamp})

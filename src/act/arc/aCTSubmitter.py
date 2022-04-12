@@ -132,13 +132,13 @@ class aCTSubmitter(aCTProcess):
             qfraction = float(self.conf.get(['jobs', 'queuefraction'])) if self.conf.get(['jobs', 'queuefraction']) else 0.15
             qoffset = int(self.conf.get(['jobs', 'queueoffset'])) if self.conf.get(['jobs', 'queueoffset']) else 100
 
-            self.log.info("start submitting")
-
             ##################################################################
             #
             # New REST submission code
             #
             ##################################################################
+
+            self.log.info(f"Submitting {len(jobs)} jobs")
 
             # get proxy path
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
@@ -181,10 +181,10 @@ class aCTSubmitter(aCTProcess):
             for job in jobs:
                 if "msg" in job:
                     job["arcstate"] = "tocancel"
-                    self.log.debug(f"Submission failed for appjobid({job['appjobid']}), id({job['id']}): {job['msg']}")
+                    self.log.debug(f"Submission failed for job {job['appjobid']}: {job['msg']}")
                 else:
                     job["arcstate"] = "submitted"
-                    self.log.debug(f"Submission successfull for appjobid({job['appjobid']}), id({job['id']}) with ARC ID {job['arcid']}")
+                    self.log.debug(f"Submission successfull for job {job['appjobid']}: {job['arcid']}")
 
             # update job records in DB
             for job in jobs:
@@ -219,7 +219,7 @@ class aCTSubmitter(aCTProcess):
 
             self.db.Commit()
 
-        self.log.info("end submitting")
+        self.log.info("Done")
 
     def setJobsArcstate(self, jobs, arcstate, commit=False):
         for job in jobs:
@@ -297,10 +297,18 @@ class aCTSubmitter(aCTProcess):
                 toARCKill = killJobs(conn, toARCKill)
                 for job in toARCKill:
                     if "msg" in job:
-                        self.log.error(f"Error canceling appjobid({job['appjobid']}), id({job['id']}): {job['msg']}")
+                        self.log.error(f"Error canceling job {job['appjobid']}: {job['msg']}")
                     else:
                         job["arcstate"] = "cancelling"
-                        self.log.debug(f"ARC will cancel appjobid({job['appjobid']}), id({job['id']})")
+                        self.log.debug(f"ARC will cancel job {job['appjobid']}")
+
+                # update DB
+                for job in tokill:
+                    jobdict = {"arcstate": job["arcstate"], "tarcstate": self.db.getTimeStamp()}
+                    if job["arcstate"] == "cancelling":
+                        jobdict["tstate"] = self.db.getTimeStamp()
+                    self.db.updateArcJobLazy(job["id"], jobdict)
+                self.db.Commit()
 
             except ssl.SSLError as e:
                 self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
@@ -311,14 +319,6 @@ class aCTSubmitter(aCTProcess):
             finally:
                 if conn:
                     conn.close()
-
-            # update DB
-            for job in tokill:
-                jobdict = {"arcstate": job["arcstate"], "tarcstate": self.db.getTimeStamp()}
-                if job["arcstate"] == "cancelling":
-                    jobdict["tstate"] = self.db.getTimeStamp()
-                self.db.updateArcJobLazy(job["id"], jobdict)
-            self.db.Commit()
 
     # This does not handle jobs with empty clusterlist. What about that?
     #
@@ -372,9 +372,18 @@ class aCTSubmitter(aCTProcess):
                 toARCClean = cleanJobs(conn, toARCClean)
                 for job in toARCClean:
                     if "msg" in job:
-                        self.log.error(f"Error cleaning appjobid({job['appjobid']}), id({job['id']}): {job['msg']}")
+                        self.log.error(f"Error cleaning job {job['appjobid']}: {job['msg']}")
                     else:
-                        self.log.debug(f"Successfully cleaned appjobid({job['appjobid']}), id({job['id']})")
+                        self.log.debug(f"Successfully cleaned job {job['appjobid']}")
+
+                # update DB
+                for job in toclean:
+                    tstamp = self.db.getTimeStamp()
+                    # "created" needs to be reset so that it doesn't get understood
+                    # as failing to submit since first insertion.
+                    jobdict = {"arcstate": "tosubmit", "tarcstate": tstamp, "created": tstamp}
+                    self.db.updateArcJobLazy(job["id"], jobdict)
+                self.db.Commit()
 
             except ssl.SSLError as e:
                 self.log.error(f"Could not create SSL context for proxy {proxypath}: {e}")
@@ -385,15 +394,6 @@ class aCTSubmitter(aCTProcess):
             finally:
                 if conn:
                     conn.close()
-
-            # update DB
-            for job in toclean:
-                tstamp = self.db.getTimeStamp()
-                # "created" needs to be reset so that it doesn't get understood
-                # as failing to submit since first insertion.
-                jobdict = {"arcstate": "tosubmit", "tarcstate": tstamp, "created": tstamp}
-                self.db.updateArcJobLazy(job["id"], jobdict)
-            self.db.Commit()
 
     def processToRerun(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
@@ -469,10 +469,10 @@ class aCTSubmitter(aCTProcess):
                 for job in torerun:
                     tstamp = self.db.getTimeStamp()
                     if "msg" in job:
-                        self.log.error(f"Error rerunning appjobid({job['appjobid']}), id({job['id']}): {job['msg']}")
+                        self.log.error(f"Error rerunning job {job['appjobid']}: {job['msg']}")
                         self.db.updateArcJobLazy(job["id"], {"arcstate": "failed", "tarcstate": tstamp})
                     else:
-                        self.log.info("Successfully rerun appjobid(job['appjobid']), id(job['id']")
+                        self.log.info("Successfully rerun job {job['appjobid']}")
                         self.db.updateArcJobLazy(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
                 self.db.Commit()
 
