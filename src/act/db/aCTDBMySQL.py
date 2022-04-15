@@ -35,7 +35,7 @@ class aCTDBMySQL(aCTDBMS):
             self.conn = mysql.connect(unix_socket=self.socket, database=dbname)
         elif self.user and self.passwd:
             if self.host != 'None' and self.port != 'None':
-                self.conn = mysql.connect(user=self.user, password=self.passwd, host=self.host, port=self.port, database=dbname)
+                self.conn = mysql.connect(user=self.user, password=self.passwd, host=self.host, port=self.port, database=dbname, ssl_disabled=True, sql_mode=['TRADITIONAL'])
             else:
                 self.conn = mysql.connect(user=self.user, password=self.passwd, db=dbname)
 
