@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from act.arc.rest import (cleanJobs, getJobsDelegations, killJobs,
                           renewDelegation, restartJobs, submitJobs)
+from act.arc.aCTStatus import ARC_STATE_MAPPING
 from act.common.aCTProcess import aCTProcess
 from act.common.exceptions import ACTError, SubmitError
 
@@ -206,7 +207,7 @@ class aCTSubmitter(aCTProcess):
                     jobdict["IDFromEndpoint"] = job["arcid"]
                     jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job['arcid']}"
                 if "state" in job:
-                    jobdict["State"] = job["state"]
+                    jobdict["State"] = ARC_STATE_MAPPING[job["state"]]
 
                 jobdict["JobManagementInterfaceName"] = "org.nordugrid.arcrest"
                 jobdict["JobManagementURL"] = interface
