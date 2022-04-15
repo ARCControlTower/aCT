@@ -61,7 +61,8 @@ class aCTPanda2Arc(aCTATLASProcess):
                     maxattempts = 0
 
                 # Set the list of files to download at the end of the job
-                downloadfiles = 'gmlog/errors'
+                # new syntax for rest
+                downloadfiles = 'diagnose=gmlog/errors'
                 try:
                     downloadfiles += ';%s' % parser.jobdesc['logFile'][0].replace('.tgz', '')
                 except:
