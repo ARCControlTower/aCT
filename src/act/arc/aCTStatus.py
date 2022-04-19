@@ -173,6 +173,7 @@ class aCTStatus(aCTProcess):
                 tocheck = restClient.getJobsInfo(tocheck)
             except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
+                continue
             finally:
                 restClient.close()
 
