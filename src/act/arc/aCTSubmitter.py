@@ -420,7 +420,7 @@ class aCTSubmitter(aCTProcess):
         if not jobstorerun:
             return
 
-        self.log.info("Resuming {len(jobstorerun)} jobs")
+        self.log.info(f"Resuming {len(jobstorerun)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
