@@ -479,7 +479,7 @@ class aCTSubmitter(aCTProcess):
                         self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error}")
                     self.db.updateArcJobLazy(job["id"], {"arcstate": "torerun", "tarcstate": tstamp})
                 else:
-                    self.log.info("Successfully rerun job {job['appjobid']} {job['id']}")
+                    self.log.info(f"Successfully rerun job {job['appjobid']} {job['id']}")
                     self.db.updateArcJobLazy(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
             self.db.Commit()
 
