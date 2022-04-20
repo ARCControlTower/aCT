@@ -283,10 +283,6 @@ class aCTStatus(aCTProcess):
                     jobdict["ExecutionNode"] = activityDict["ExecutionNode"]
                 if "Queue" in activityDict:
                     jobdict["Queue"] = activityDict["Queue"]
-                if "UsedTotalWallTime" in activityDict:
-                    jobdict["UsedTotalWallTime"] = int(activityDict["UsedTotalWallTime"])
-                if "UsedTotalCPUTime" in activityDict:
-                    jobdict["UsedTotalCPUTime"] = int(activityDict["UsedTotalCPUTime"])
                 if "UsedMainMemory" in activityDict:
                     jobdict["UsedMainMemory"] = int(activityDict["UsedMainMemory"])
                 if "SubmissionTime" in activityDict:
