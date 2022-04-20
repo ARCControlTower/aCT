@@ -223,29 +223,39 @@ class aCTStatus(aCTProcess):
                 elif job["state"] == "KILLED":
                     jobdict["arcstate"] = "cancelled"
 
-                elif job["state"] == "WIPED":  # TODO: which one really?
+                elif job["state"] == "WIPED":
                     jobdict["arcstate"] = "cancelled"
 
                 if "arcstate" in jobdict:
                     jobdict["tarcstate"] = tstamp
 
+                # get activity dictionary from document
+                activityDict = job["info_document"].get("ComputingActivity", {})
+
                 # difference of two datetime objects yields timedelta object
                 # with seconds attribute
                 fromCreated = (datetime.utcnow() - job["created"]).seconds // 60
 
-                # fix reported wall time and cpu time
-                activityDict = job["info_document"].get("ComputingActivity", {})
-                wallTime = int(activityDict.get("UsedTotalWallTime", 0))
-                slots = int(activityDict.get("RequestedSlots", 0))
-                if wallTime and slots:
+                if "UsedTotalWallTime" in activityDict and "RequestedSlots" in activityDict:
+                    wallTime = int(activityDict["UsedTotalWallTime"])
+                    slots = int(activityDict["RequestedSlots"])
                     wallTime = wallTime // slots
                     if wallTime > fromCreated:
                         self.log.warning(f"Job {job['appjobid']}: Fixing reported walltime {wallTime} to {fromCreated}")
                         jobdict["UsedTotalWallTime"] = fromCreated
-                cpuTime = int(activityDict.get("UsedTotalCPUTime", 0))
-                if cpuTime and cpuTime > 10 ** 7:
-                    self.log.warning(f"Job {job['appjobid']}: Discarding reported CPUtime {cpuTime}")
-                    jobdict["UsedTotalCPUTime"] = -1
+                    else:
+                        jobdict["UsedTotalWallTime"] = wallTime
+                else:
+                    self.log.warning(f"Job {job['appjobid']}: No reported walltime, using DB timestamps: {fromCreated}")
+                    jobdict["UsedTotalWallTime"] = fromCreated
+
+                if "UsedTotalCPUTime" in activityDict:
+                    cpuTime = int(activityDict["UsedTotalCPUTime"])
+                    if cpuTime and cpuTime > 10 ** 7:
+                        self.log.warning(f"Job {job['appjobid']}: Discarding reported CPUtime {cpuTime}")
+                        jobdict["UsedTotalCPUTime"] = -1
+                    else:
+                        jobdict["UsedTotalCPUTime"] = cpuTime
 
                 if "Type" in activityDict:
                     jobdict["Type"] = activityDict["Type"]
