@@ -222,6 +222,14 @@ class aCTSubmitter(aCTProcess):
                 jobdict["ServiceInformationInterfaceName"] = "org.nordugrid.arcrest"
                 jobdict["ServiceInformationURL"] = interface
 
+                jobdict["ExecutionNode"] = ""
+                jobdict["Error"] = ""
+                jobdict["UsedTotalWallTime"] = 0
+                jobdict["UsedTotalCPUTime"] = 0
+                jobdict["RequestedTotalWallTime"] = 0
+                jobdict["RequestedTotalCPUTime"] = 0
+                jobdict["RequestedSlots"] = -1
+
                 self.db.updateArcJobLazy(job["id"], jobdict)
 
             self.db.Commit()
