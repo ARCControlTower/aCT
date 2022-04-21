@@ -114,7 +114,7 @@ class aCTStatus(aCTProcess):
         Query all running jobs
         '''
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "created",
-                   "State"]
+                   "State", "attemptsleft"]
 
         # parse cluster URL
         try:
@@ -168,8 +168,6 @@ class aCTStatus(aCTProcess):
 
             try:
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
-                # get jobs' status and info
-                tocheck = restClient.getJobsStatus(tocheck)
                 tocheck = restClient.getJobsInfo(tocheck)
             except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
@@ -179,11 +177,23 @@ class aCTStatus(aCTProcess):
 
             # process jobs and update DB
             for job in tocheck:
-                if "msg" in job:
-                    self.log.error(f"Failed to get info for job {job['appjobid']}: {job['msg']}")
+                if job["errors"]:
+                    for error in job["errors"]:
+                        self.log.error(f"Error checking {job['appjobid']} {job['id']}: {error}")
                     continue
 
-                mappedState = ARC_STATE_MAPPING[job["state"]]
+                # get activity dictionary from document
+                activityDict = job["info_document"].get("ComputingActivity", {})
+
+                # get state from a list of activity states in different systems
+                restState = ""
+                for state in activityDict.get("State", []):
+                    if state.startswith("arcrest:"):
+                        restState = state[len("arcrest:"):]
+                if not restState:
+                    continue
+
+                mappedState = ARC_STATE_MAPPING[restState]
                 if job["State"] == mappedState:
                     continue
 
@@ -192,22 +202,21 @@ class aCTStatus(aCTProcess):
                 tstamp = self.db.getTimeStamp()
                 jobdict = {"State": mappedState, "tstate": tstamp}
 
-                if job["state"] in ("ACCEPTING", "ACCEPTED", "PREPARING",
+                if restState in ("ACCEPTING", "ACCEPTED", "PREPARING",
                                     "PREPARED", "SUBMITTING", "QUEUING"):
                     jobdict["arcstate"] = "submitted"
 
-                elif job["state"] in ("RUNNING", "EXITINGLRMS",
-                                        "EXECUTED"):
+                elif restState in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
                     jobdict["arcstate"] = "running"
 
-                elif job["state"] == "HELD":
+                elif restState == "HELD":
                     jobdict["arcstate"] = "holding"
 
-                elif job["state"] == "FINISHING":
+                elif restState == "FINISHING":
                     jobdict["arcstate"] = "finishing"
 
-                elif job["state"] == "FINISHED":
-                    exitCode = job["info_document"].get("ComputingActivity", {}).get("ExitCode", -1)
+                elif restState == "FINISHED":
+                    exitCode = activityDict.get("ExitCode", -1)
                     if exitCode == -1:
                         # missing exit code, but assume success
                         self.log.warning(f"Job {job['appjobid']} is finished but has missing exit code, setting to zero")
@@ -216,21 +225,18 @@ class aCTStatus(aCTProcess):
                         jobdict["ExitCode"] = exitCode
                     jobdict["arcstate"] = "finished"
 
-                elif job["state"] == "FAILED":
+                elif restState == "FAILED":
                     jobdict["arcstate"] = "failed"
                     self.log.info(f"Job {job['appjobid']} failed")
 
-                elif job["state"] == "KILLED":
+                elif restState == "KILLED":
                     jobdict["arcstate"] = "cancelled"
 
-                elif job["state"] == "WIPED":
+                elif restState == "WIPED":
                     jobdict["arcstate"] = "cancelled"
 
                 if "arcstate" in jobdict:
                     jobdict["tarcstate"] = tstamp
-
-                # get activity dictionary from document
-                activityDict = job["info_document"].get("ComputingActivity", {})
 
                 # difference of two datetime objects yields timedelta object
                 # with seconds attribute
@@ -283,6 +289,8 @@ class aCTStatus(aCTProcess):
                     jobdict["ExecutionNode"] = activityDict["ExecutionNode"]
                 if "Queue" in activityDict:
                     jobdict["Queue"] = activityDict["Queue"]
+                if "Error" in activityDict:
+                    jobdict["Error"] = activityDict["Error"]
                 if "UsedMainMemory" in activityDict:
                     jobdict["UsedMainMemory"] = int(activityDict["UsedMainMemory"])
                 if "SubmissionTime" in activityDict:
@@ -304,6 +312,37 @@ class aCTStatus(aCTProcess):
 
         self.log.info('Done')
 
+    # Returns a dictionary reflecting job changes that should update the final
+    # jobdict for DB
+    def processJobErrors(self, job, activityDict):
+        if "Error" in activityDict:
+            resub = [err for err in self.conf.getList(['errors', 'toresubmit', 'arcerrors', 'item']) if err in activityDict["Error"]]
+            self.log.info(f"Job {job['appjobid']} {job['id']} failed with error: {activityDict['Error']}")
+        else:
+            self.log.info(f"Job {job['appjobid']} {job['id']} failed, no error given")
+
+        tstamp = self.db.getTimeStamp()
+
+        restartState = ""
+        for state in activityDict.get("RestartState", []):
+            if state.startswith("arcrest:"):
+                restartState = state[len("arcrest:"):]
+        if restartState in ("PREPARING", "FINISHING"):
+            # TODO: original code does not restart if error is specifically:
+            # "Error reading user generated output file list"
+            self.log.info(f"Will rerun {job['appjobid']} {job['id']}")
+            return {"State": "Undefined", "tstate": tstamp, "arcstate": "torerun", "tarcstate": tstamp}
+
+        attemptsleft = int(job["attemptsleft"])
+        if resub:
+            if attemptsleft <= 0:
+                self.log.info(f"Job {job['appjobid']} {job['id']} out of retries")
+                return {"arcstate": "failed", "tarcstate": tstamp}
+            attemptsleft -= 1
+            self.log.info(f"Job {job['appjobid']} {job['id']} will be resubmitted, {attemptsleft} attempts left")
+            return {"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "tarcstate": tstamp, "attemptsleft": attemptsleft}
+
+
     def checkACTStateTimeouts(self):
         COLUMNS = ["id", "appjobid"]
 
@@ -315,7 +354,7 @@ class aCTStatus(aCTProcess):
         tstampCond = self.db.timeStampLessThan("tarcstate", timeoutDict["cancelling"])
         jobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and arcstate='cancelling' and {tstampCond}", COLUMNS)
         for job in jobs:
-            self.log.warning(f"Job {job['appjobid']} {job['id']} too long in \"cancelling\"")
+            self.log.warning(f"Job {job['appjobid']} {job['id']} too long in \"cancelling\", setting to \"cancelled\"")
             tstamp = self.db.getTimeStamp()
             self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, 'tstate': tstamp})
         self.db.Commit()
