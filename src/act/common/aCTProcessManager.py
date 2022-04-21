@@ -29,8 +29,8 @@ class aCTProcessManager:
         self.arcsubmitter = 'act/arc/aCTSubmitter'
         self.condorsubmitter = 'act/condor/aCTSubmitter'
         # dictionary of processes:aCTProcessHandler of which to run a single instance
-        self.processes_single = {}#'act/common/aCTProxyHandler': None,
-                                 #'act/common/aCTMonitor': None}
+        self.processes_single = {'act/common/aCTProxyHandler': None,
+                                 'act/common/aCTMonitor': None}
         apps = appconf.getList(["modules", "app"])
         for app in apps:
             try:
