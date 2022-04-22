@@ -290,8 +290,6 @@ class aCTStatus(aCTProcess):
                     jobdict["ExecutionNode"] = activityDict["ExecutionNode"]
                 if "Queue" in activityDict:
                     jobdict["Queue"] = activityDict["Queue"]
-                if "Error" in activityDict:
-                    jobdict["Error"] = activityDict["Error"]
                 if "UsedMainMemory" in activityDict:
                     jobdict["UsedMainMemory"] = int(activityDict["UsedMainMemory"])
                 if "SubmissionTime" in activityDict:
@@ -316,9 +314,16 @@ class aCTStatus(aCTProcess):
     # Returns a dictionary reflecting job changes that should update the final
     # jobdict for DB
     def processJobErrors(self, job, activityDict):
+        patchDict = {}
+        resub = []
         if "Error" in activityDict:
-            resub = [err for err in self.conf.getList(['errors', 'toresubmit', 'arcerrors', 'item']) if err in activityDict["Error"]]
-            self.log.info(f"Job {job['appjobid']} {job['id']} failed with error: {activityDict['Error']}")
+            if isinstance(activityDict["Error"], list):
+                errors = ";".join(activityDict["Error"])
+            else:
+                errors = activityDict["Error"]
+            resub = [err for err in self.conf.getList(['errors', 'toresubmit', 'arcerrors', 'item']) if err in errors]
+            self.log.info(f"Job {job['appjobid']} {job['id']} failed with error: {errors}")
+            patchDict["Error"] = errors
         else:
             self.log.info(f"Job {job['appjobid']} {job['id']} failed, no error given")
 
@@ -328,20 +333,24 @@ class aCTStatus(aCTProcess):
         for state in activityDict.get("RestartState", []):
             if state.startswith("arcrest:"):
                 restartState = state[len("arcrest:"):]
+
         if restartState in ("PREPARING", "FINISHING"):
             # TODO: original code does not restart if error is specifically:
             # "Error reading user generated output file list"
             self.log.info(f"Will rerun {job['appjobid']} {job['id']}")
-            return {"State": "Undefined", "tstate": tstamp, "arcstate": "torerun", "tarcstate": tstamp}
+            patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "torerun", "tarcstate": tstamp})
 
-        attemptsleft = int(job["attemptsleft"])
-        if resub:
+        elif resub:
+            attemptsleft = int(job["attemptsleft"])
             if attemptsleft <= 0:
                 self.log.info(f"Job {job['appjobid']} {job['id']} out of retries")
-                return {"arcstate": "failed", "tarcstate": tstamp}
-            attemptsleft -= 1
-            self.log.info(f"Job {job['appjobid']} {job['id']} will be resubmitted, {attemptsleft} attempts left")
-            return {"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "tarcstate": tstamp, "attemptsleft": attemptsleft}
+                patchDict.update({"arcstate": "failed", "tarcstate": tstamp})
+            else:
+                attemptsleft -= 1
+                self.log.info(f"Job {job['appjobid']} {job['id']} will be resubmitted, {attemptsleft} attempts left")
+                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "tarcstate": tstamp, "attemptsleft": attemptsleft})
+
+        return patchDict
 
 
     def checkACTStateTimeouts(self):
