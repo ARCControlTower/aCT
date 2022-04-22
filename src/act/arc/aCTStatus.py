@@ -227,7 +227,8 @@ class aCTStatus(aCTProcess):
 
                 elif restState == "FAILED":
                     jobdict["arcstate"] = "failed"
-                    self.log.info(f"Job {job['appjobid']} failed")
+                    patchDict = self.processJobErrors(job, activityDict)
+                    jobdict.update(patchDict)
 
                 elif restState == "KILLED":
                     jobdict["arcstate"] = "cancelled"
