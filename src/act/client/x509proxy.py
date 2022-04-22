@@ -170,11 +170,11 @@ def sign_request(csr, proxypath=PROXYPATH, lifetime=24):
                        x509.ObjectIdentifier("1.3.6.1.5.5.7.1.14"),
                        b"0\x0c0\n\x06\x08+\x06\x01\x05\x05\x07\x15\x01"),
                                   critical=True) \
-                   .add_extension(vomsext,
-                                  critical=False) \
                    .sign(private_key=key,
                          algorithm=proxy.signature_hash_algorithm,
                          backend=default_backend())
+                   #.add_extension(vomsext,
+                   #               critical=False) \
     return new_cert.public_bytes(serialization.Encoding.PEM)
 
 
