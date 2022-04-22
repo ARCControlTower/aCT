@@ -483,9 +483,16 @@ class aCTSubmitter(aCTProcess):
             for job in torerun:
                 tstamp = self.db.getTimeStamp()
                 if job["errors"]:
+                    cannotRerun = False
                     for error in job["errors"]:
-                        self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error}")
-                    self.db.updateArcJobLazy(job["id"], {"arcstate": "torerun", "tarcstate": tstamp})
+                        if isinstance(error, ARCHTTPError) and error.status == 505 and error.text == "No more restarts allowed":
+                            self.log.error(f"Restart of job {job['appjobid']} {job['id']} not allowed, setting to failed")
+                            self.db.updateArcJobLazy(job["id"], {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
+                            cannotRerun = True
+                        else:
+                            self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error}")
+                    if not cannotRerun:
+                        self.db.updateArcJobLazy(job["id"], {"arcstate": "torerun", "tarcstate": tstamp})
                 else:
                     self.log.info(f"Successfully rerun job {job['appjobid']} {job['id']}")
                     self.db.updateArcJobLazy(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
