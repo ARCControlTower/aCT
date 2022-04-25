@@ -193,13 +193,15 @@ class aCTStatus(aCTProcess):
                 if not restState:
                     continue
 
+                tstamp = self.db.getTimeStamp()
+
                 mappedState = ARC_STATE_MAPPING[restState]
                 if job["State"] == mappedState:
+                    self.db.updateArcJobLazy(job["id"], {"tarcstate": tstamp, "tstate": tstamp})
                     continue
 
                 self.log.info(f"ARC status change for job {job['appjobid']}: {job['State']} -> {mappedState}")
 
-                tstamp = self.db.getTimeStamp()
                 jobdict = {"State": mappedState, "tstate": tstamp}
 
                 if restState in ("ACCEPTING", "ACCEPTED", "PREPARING",
