@@ -289,7 +289,7 @@ class aCTStatus(aCTProcess):
                 if "LogDir" in activityDict:
                     jobdict["LogDir"] = activityDict["LogDir"]
                 if "ExecutionNode" in activityDict:
-                    jobdict["ExecutionNode"] = activityDict["ExecutionNode"]
+                    jobdict["ExecutionNode"] = ",".join(activityDict["ExecutionNode"])
                 if "Queue" in activityDict:
                     jobdict["Queue"] = activityDict["Queue"]
                 if "UsedMainMemory" in activityDict:
@@ -319,10 +319,7 @@ class aCTStatus(aCTProcess):
         patchDict = {}
         resub = []
         if "Error" in activityDict:
-            if isinstance(activityDict["Error"], list):
-                errors = ";".join(activityDict["Error"])
-            else:
-                errors = activityDict["Error"]
+            errors = ";".join(activityDict["Error"])
             resub = [err for err in self.conf.getList(['errors', 'toresubmit', 'arcerrors', 'item']) if err in errors]
             self.log.info(f"Job {job['appjobid']} {job['id']} failed with error: {errors}")
             patchDict["Error"] = errors
