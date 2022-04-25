@@ -271,10 +271,10 @@ class RESTClient:
         # process errors, prepare and upload files for a sublist of jobs
         toupload = []
         for job, result in zip(tosubmit, results):
-            if int(result["status-code"]) != 201:
+            code, reason = int(result["status-code"]), result["reason"]
+            if code != 201:
                 # TODO: Are there any error cases where this error could be
                 # recovered? In such case a specific exception is needed.
-                code, reason = result["status-code"], result["reason"]
                 job["errors"].append(ARCHTTPError(code, reason, f"Submittion error: {code} {reason}"))
             else:
                 job["arcid"] = result["id"]
@@ -782,16 +782,16 @@ def downloadListing(httpClient, url):
 
 def checkJobOperation(jobs, results):
     for job, result in zip(jobs, results):
-        if int(result["status-code"]) != 202:
-            code, reason = result["status-code"], result["reason"]
+        code, reason = int(result["status-code"]), result["reason"]
+        if code != 202:
             job["errors"].append(ARCHTTPError(code, reason, f"{code} {reason}"))
     return jobs
 
 
 def getJobOperationResults(jobs, results, key):
     for job, result in zip(jobs, results):
-        if int(result["status-code"]) != 200:
-            code, reason = result["status-code"], result["reason"]
+        code, reason = int(result["status-code"]), result["reason"]
+        if code != 200:
             job["errors"].append(ARCHTTPError(code, reason, f"{code} {reason}"))
         else:
             job[key] = result[key]
