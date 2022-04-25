@@ -307,7 +307,11 @@ class aCTStatus(aCTProcess):
                     #jobdict["ProxyExpirationTime"] = datetime.fromisoformat(activityDict["ProxyExpirationTime"])
                     jobdict["ProxyExpirationTime"] = datetime.strptime(activityDict["ProxyExpirationTime"], "%Y-%m-%dT%H:%M:%SZ")
 
-                self.db.updateArcJobLazy(job["id"], jobdict)
+                # AF BUG
+                try:
+                    self.db.updateArcJobLazy(job["id"], jobdict)
+                except:
+                    self.log.error(f"{job['id']} bad dict: {jobdict}")
 
             self.db.Commit()
 
