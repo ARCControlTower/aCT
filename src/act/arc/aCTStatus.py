@@ -177,8 +177,15 @@ class aCTStatus(aCTProcess):
 
             # process jobs and update DB
             for job in tocheck:
+                tstamp = self.db.getTimeStamp()
+
                 if job["errors"]:
                     for error in job["errors"]:
+                        if isinstance(error, ARCHTTPError):
+                            if error.status == 404:
+                                self.log.error(f"Job {job['appjobid']} {job['id']} not found, cancelling")
+                                self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                                continue
                         self.log.error(f"Error checking {job['appjobid']} {job['id']}: {error}")
                     continue
 
@@ -192,8 +199,6 @@ class aCTStatus(aCTProcess):
                         restState = state[len("arcrest:"):]
                 if not restState:
                     continue
-
-                tstamp = self.db.getTimeStamp()
 
                 mappedState = ARC_STATE_MAPPING[restState]
                 if job["State"] == mappedState:

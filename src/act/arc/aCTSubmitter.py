@@ -325,6 +325,11 @@ class aCTSubmitter(aCTProcess):
                     self.log.debug(f"ARC will cancel job {job['appjobid']}")
                 else:
                     for error in job["errors"]:
+                        if isinstance(error, ARCHTTPError):
+                            if error.status == 404:
+                                self.log.error(f"Job {job['appjobid']} {job['id']} not found, setting to cancelled")
+                                self.db.updateArcJobLazy(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
+                                continue
                         self.log.error(f"Error killing job {job['appjobid']} {job['id']}: {error}")
 
             # update DB
@@ -456,7 +461,14 @@ class aCTSubmitter(aCTProcess):
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
 
                 # get delegations for jobs
-                torerun = restClient.getJobsDelegations(torerun)
+                # AF BUG
+                try:
+                    torerun = restClient.getJobsDelegations(torerun)
+                except:
+                    self.log.error("GET JOBS DELEGATIONS EXCEPTION")
+                    import traceback
+                    self.log.debug(traceback.format_exc())
+                    torerun = []
 
                 # renew delegations
                 torestart = []
@@ -485,10 +497,18 @@ class aCTSubmitter(aCTProcess):
                 if job["errors"]:
                     cannotRerun = False
                     for error in job["errors"]:
-                        if isinstance(error, ARCHTTPError) and error.status == 505 and error.text == "No more restarts allowed":
-                            self.log.error(f"Restart of job {job['appjobid']} {job['id']} not allowed, setting to failed")
-                            self.db.updateArcJobLazy(job["id"], {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
-                            cannotRerun = True
+                        if isinstance(error, ARCHTTPError):
+                            if error.status == 505 and error.text == "No more restarts allowed":
+                                self.log.error(f"Restart of job {job['appjobid']} {job['id']} not allowed, setting to failed")
+                                self.db.updateArcJobLazy(job["id"], {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
+                                cannotRerun = True
+                            elif error.status == 404:
+                                self.log.error(f"Job {job['appjobid']} {job['id']} not found, cancelling")
+                                self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                                cannotRerun = True
+                            else:
+                                # TODO: is just using error.__str__() good enough?
+                                self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error.status} {error.text}")
                         else:
                             self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error}")
                     if not cannotRerun:
