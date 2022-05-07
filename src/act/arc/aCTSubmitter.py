@@ -320,6 +320,7 @@ class aCTSubmitter(aCTProcess):
 
             # log results
             for job in toARCKill:
+                tstamp = self.db.getTimeStamp()
                 if not job["errors"]:
                     job["arcstate"] = "cancelling"
                     self.log.debug(f"ARC will cancel job {job['appjobid']}")
