@@ -168,7 +168,7 @@ class aCTSubmitter(aCTProcess):
             try:
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
                 jobs = restClient.submitJobs(queue, jobs, self.log)
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error submitting jobs to ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
                 continue
@@ -311,7 +311,7 @@ class aCTSubmitter(aCTProcess):
             try:
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
                 toARCKill = restClient.killJobs(toARCKill)
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -392,7 +392,7 @@ class aCTSubmitter(aCTProcess):
             try:
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
                 toARCClean = restClient.cleanJobs(toARCClean)
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -485,7 +485,7 @@ class aCTSubmitter(aCTProcess):
                 # restart jobs
                 restClient.restartJobs(torestart)
 
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")

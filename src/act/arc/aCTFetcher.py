@@ -65,7 +65,7 @@ class aCTFetcher(aCTProcess):
                 # TODO: hardcoded workers
                 results = restClient.fetchJobs(self.tmpdir, jobs, workers=10, logger=self.log)
 
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")

@@ -609,6 +609,7 @@ def uploadTransferWorker(httpClient, jobsdict, uploadQueue, resultQueue, logger)
                 "jobid": upload["jobid"],
                 "error": exc
             })
+            continue
 
         with infile:
             try:
