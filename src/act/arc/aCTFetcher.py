@@ -5,6 +5,7 @@
 
 import os
 import shutil
+import datetime
 from http.client import HTTPException
 from json import JSONDecodeError
 from ssl import SSLError
@@ -21,7 +22,7 @@ class aCTFetcher(aCTProcess):
     '''
 
     def fetchJobs(self, arcstate, nextarcstate):
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "jobdesc"]
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "jobdesc", "tarcstate"]
 
         # parse cluster URL
         try:
@@ -76,10 +77,13 @@ class aCTFetcher(aCTProcess):
                 if job["errors"]:
                     for error in job["errors"]:
                         self.log.error(f"Error fetching  job {job['appjobid']} {job['id']}: {error}")
-                    jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
-                    self.db.updateArcJobLazy(job["id"], jobdict)
+                    if job["tarcstate"] + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
+                        jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
+                        self.db.updateArcJobLazy(job["id"], jobdict)
+                    else:
+                        self.log.info(f"Fetch timeout for job {job['appjobid']} {job['id']} not reached, will retry")
                 else:
-                    self.log.debug(f"Successfully fetched job {job['appjobid']}")
+                    self.log.debug(f"Successfully fetched job {job['appjobid']} {job['id']}")
                     jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
                     self.db.updateArcJobLazy(job["id"], jobdict)
 
