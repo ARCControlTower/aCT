@@ -43,3 +43,6 @@ class DescriptionParseError(ACTError):
 
 class DescriptionUnparseError(ACTError):
     pass
+
+class NoValueInARCResult(ACTError):
+    pass

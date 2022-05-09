@@ -13,7 +13,7 @@ from act.client.delegate_proxy import parse_issuer_cred
 from act.client.x509proxy import sign_request
 from act.common.exceptions import (ACTError, ARCHTTPError,
                                    DescriptionParseError,
-                                   DescriptionUnparseError, InputFileError)
+                                   DescriptionUnparseError, InputFileError, NoValueInARCResult)
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -805,6 +805,8 @@ def getJobOperationResults(jobs, results, key):
         code, reason = int(result["status-code"]), result["reason"]
         if code != 200:
             job["errors"].append(ARCHTTPError(code, reason, f"{code} {reason}"))
+        elif key not in result:
+            job["errors"].append(NoValueInARCResult(f"No {key} in positive result!!!"))
         else:
             job[key] = result[key]
     return jobs
