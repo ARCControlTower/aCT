@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from act.arc.rest import RESTClient
 from act.common.exceptions import (ACTError, ARCHTTPError,
                                    DescriptionParseError,
-                                   DescriptionUnparseError, InputFileError)
+                                   DescriptionUnparseError, InputFileError, NoValueInARCResult)
 from act.arc.aCTStatus import ARC_STATE_MAPPING
 from act.common.aCTProcess import aCTProcess
 
@@ -464,7 +464,7 @@ class aCTSubmitter(aCTProcess):
                 # get delegations for jobs
                 # AF BUG
                 try:
-                    torerun = restClient.getJobsDelegations(torerun)
+                    torerun = restClient.getJobsDelegations(torerun, self.log)
                 except:
                     self.log.error("GET JOBS DELEGATIONS EXCEPTION")
                     import traceback
@@ -510,6 +510,10 @@ class aCTSubmitter(aCTProcess):
                             else:
                                 # TODO: is just using error.__str__() good enough?
                                 self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error.status} {error.text}")
+                        elif isinstance(error, NoValueInARCResult):
+                            self.log.error(f"{error}")
+                            self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                            cannotRerun = True
                         else:
                             self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error}")
                     if not cannotRerun:
