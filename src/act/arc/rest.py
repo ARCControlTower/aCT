@@ -708,6 +708,11 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                 listing = downloadListing(httpClient, transfer["url"])
             except ARCHTTPError as exc:
                 logger.error(f"Error downloading listing {transfer['url']}: {exc}")
+                resultQueue.put({
+                    "jobid": job["id"],
+                    "error": exc
+                })
+                continue
             except Exception as exc:
                 job["cancel_event"].set()
                 logger.error(str(exc))
