@@ -491,8 +491,15 @@ class RESTClient:
         return checkJobOperation(jobs, results)
 
 
-    def getJobsDelegations(self, jobs):
-        results = self.manageJobs(jobs, "delegations")
+    def getJobsDelegations(self, jobs, logger=None):
+        # AF BUG
+        try:
+            results = self.manageJobs(jobs, "delegations")
+        except:
+            logger.debug("DELEGATIONS FETCH EXCEPTION")
+            import traceback
+            logger.debug(traceback.format_exc())
+            results = []
         return getJobOperationResults(jobs, results, "delegation_id")
 
     def manageJobs(self, jobs, action):
