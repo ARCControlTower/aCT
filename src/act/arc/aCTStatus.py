@@ -169,7 +169,7 @@ class aCTStatus(aCTProcess):
             try:
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
                 tocheck = restClient.getJobsInfo(tocheck)
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as e:
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
                 continue
             finally:

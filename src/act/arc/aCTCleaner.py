@@ -71,7 +71,7 @@ class aCTCleaner(aCTProcess):
             try:
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
                 toARCClean = restClient.cleanJobs(toARCClean)
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
