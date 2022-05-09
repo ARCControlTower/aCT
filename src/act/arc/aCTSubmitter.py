@@ -503,6 +503,10 @@ class aCTSubmitter(aCTProcess):
                                 self.log.error(f"Restart of job {job['appjobid']} {job['id']} not allowed, setting to failed")
                                 self.db.updateArcJobLazy(job["id"], {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
                                 cannotRerun = True
+                            elif error.status == 505 and error.text == "Job has not failed":
+                                self.log.error(f"Job {job['appjobid']} {job['id']} has not failed, setting to submitted")
+                                self.db.updateArcJobLazy(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
+                                cannotRerun = True
                             elif error.status == 404:
                                 self.log.error(f"Job {job['appjobid']} {job['id']} not found, cancelling")
                                 self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
