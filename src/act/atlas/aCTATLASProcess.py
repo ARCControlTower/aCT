@@ -21,9 +21,6 @@ class aCTATLASProcess:
     '''
 
     def __init__(self, ceflavour=['ARC-CE']):
-        # set up signal handlers
-        self.signal = aCTSignal()
-
         # Get agent name from /path/to/aCTAgent.py
         self.name = os.path.basename(sys.argv[0])[:-3]
 
@@ -32,6 +29,9 @@ class aCTATLASProcess:
         self.log=self.logger()
         self.criticallogger = aCTLogger.aCTLogger('aCTCritical', arclog=False)
         self.criticallog = self.criticallogger()
+
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
 
         # config
         self.conf=aCTConfig.aCTConfigAPP()

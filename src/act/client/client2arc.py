@@ -38,8 +38,6 @@ class Client2Arc(object):
 
     def __init__(self):
         """Initialize all attributes."""
-        # set up signal handlers
-        self.signal = aCTSignal()
 
         # get name, remove .py from the end
         self.name = os.path.basename(sys.argv[0])[:-3]
@@ -48,6 +46,10 @@ class Client2Arc(object):
 
         self.logger = aCTLogger(self.name)
         self.log = self.logger()
+
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
+
         self.clidb = ClientDB(self.log)
         self.arcdb = aCTDBArc(self.log)
 

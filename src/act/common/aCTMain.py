@@ -19,9 +19,6 @@ class aCTMain:
     """
 
     def __init__(self, args):
-        # set up signal handlers
-        self.signal = aCTSignal()
-
         # Check we have the right ARC version
         self.checkARC()
 
@@ -41,6 +38,9 @@ class aCTMain:
         # logger
         self.logger = aCTLogger.aCTLogger("aCTMain")
         self.log = self.logger()
+
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
 
         # Check if we should run
         self.shouldrun = not os.path.exists(os.path.join(self.conf.get(["actlocation","dir"]), "act.stop"))
