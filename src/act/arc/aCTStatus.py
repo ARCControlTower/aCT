@@ -328,7 +328,9 @@ class aCTStatus(aCTProcess):
     # Returns a dictionary reflecting job changes that should update the final
     # jobdict for DB
     def processJobErrors(self, job, activityDict):
-        patchDict = {}
+        tstamp = self.db.getTimeStamp()
+        patchDict = {"arcstate": "failed", "tarcstate": tstamp}
+
         resub = []
         if "Error" in activityDict:
             if isinstance(activityDict["Error"], list):
@@ -341,28 +343,25 @@ class aCTStatus(aCTProcess):
         else:
             self.log.info(f"Job {job['appjobid']} {job['id']} failed, no error given")
 
-        tstamp = self.db.getTimeStamp()
-
         restartState = ""
         for state in activityDict.get("RestartState", []):
             if state.startswith("arcrest:"):
                 restartState = state[len("arcrest:"):]
 
         if restartState in ("PREPARING", "FINISHING"):
-            # TODO: original code does not restart if error is specifically:
-            # "Error reading user generated output file list"
-            self.log.info(f"Will rerun {job['appjobid']} {job['id']}")
-            patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "torerun", "tarcstate": tstamp})
+            if "Error reading user generated output file list" not in resub:
+                self.log.info(f"Will rerun {job['appjobid']} {job['id']}")
+                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "torerun"})
+                return patchDict
 
-        elif resub:
+        if resub:
             attemptsleft = int(job["attemptsleft"])
             if attemptsleft <= 0:
                 self.log.info(f"Job {job['appjobid']} {job['id']} out of retries")
-                patchDict.update({"arcstate": "failed", "tarcstate": tstamp})
             else:
                 attemptsleft -= 1
                 self.log.info(f"Job {job['appjobid']} {job['id']} will be resubmitted, {attemptsleft} attempts left")
-                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "tarcstate": tstamp, "attemptsleft": attemptsleft})
+                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "attemptsleft": attemptsleft})
 
         return patchDict
 
