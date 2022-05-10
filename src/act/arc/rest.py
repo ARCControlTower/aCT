@@ -618,13 +618,13 @@ def uploadTransferWorker(httpClient, jobsdict, uploadQueue, resultQueue, logger)
                 if resp.status != 200:
                     job["cancel_event"].set()
                     resultQueue.put({
-                        "id": upload["jobid"],
+                        "jobid": upload["jobid"],
                         "error": ARCHTTPError(resp.status, text, f"Upload {upload['path']} to {upload['url']} failed: {resp.status} {text}")
                     })
             except Exception as exc:
                 job["cancel_event"].set()
                 resultQueue.put({
-                    "id": upload["jobid"],
+                    "jobid": upload["jobid"],
                     "error": exc
                 })
 
