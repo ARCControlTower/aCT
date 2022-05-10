@@ -7,7 +7,7 @@ from rucio.client import Client
 from act.common import aCTLogger
 from act.common import aCTConfig
 from act.common import aCTUtils
-from act.common import aCTSignal
+from act.common.aCTSignal import aCTSignal
 from act.arc import aCTDBArc
 from act.ldmx import aCTDBLDMX
 
@@ -17,6 +17,8 @@ class aCTLDMXProcess:
     '''
 
     def __init__(self):
+        # set up signal handlers
+        self.signal = aCTSignal()
 
         # Get agent name from /path/to/aCTAgent.py
         self.name = os.path.basename(sys.argv[0])[:-3]
@@ -79,13 +81,19 @@ class aCTLDMXProcess:
                 self.process()
                 # sleep
                 aCTUtils.sleep(2)
-        except aCTSignal.ExceptInterrupt as x:
-            self.log.info("Received interrupt %s, exiting", str(x))
+
+                if self.signal.isInterrupted():
+                    self.log.info("*** Exiting on exit interrupt ***")
+                    break
+
         except:
             self.log.critical("*** Unexpected exception! ***")
             self.log.critical(traceback.format_exc())
             self.log.critical("*** Process exiting ***")
             self.criticallog.critical(traceback.format_exc())
+
+        finally:
+            self.finish()
 
     def finish(self):
         '''

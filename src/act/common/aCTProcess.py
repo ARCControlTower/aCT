@@ -9,7 +9,8 @@ import arc
 from act.arc import aCTDBArc
 from act.condor.aCTDBCondor import aCTDBCondor
 
-from . import aCTConfig, aCTLogger, aCTSignal
+from . import aCTConfig, aCTLogger
+from act.common.aCTSignal import aCTSignal
 
 
 class aCTProcess:
@@ -19,6 +20,8 @@ class aCTProcess:
     '''
 
     def __init__(self):
+        # set up signal handlers
+        self.signal = aCTSignal()
 
         # Get agent name from /path/to/aCTAgent.py
         self.name = os.path.basename(sys.argv[0])[:-3]
@@ -84,13 +87,19 @@ class aCTProcess:
                 if ip and time.time()-self.starttime > ip :
                     self.log.info("%s for %s exited for periodic restart", self.name, self.cluster)
                     return
-        except aCTSignal.ExceptInterrupt as x:
-            self.log.info("Received interrupt %s, exiting", str(x))
+
+                if self.signal.isInterrupted():
+                    self.log.info("*** Exiting on exit interrupt ***")
+                    break
+
         except:
             self.log.critical("*** Unexpected exception! ***")
             self.log.critical(traceback.format_exc())
             self.log.critical("*** Process exiting ***")
             self.criticallog.critical(traceback.format_exc())
+
+        finally:
+            self.finish()
 
     def finish(self):
         '''

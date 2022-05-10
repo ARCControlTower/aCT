@@ -8,8 +8,6 @@ import os
 import shutil
 from urllib.parse import urlparse
 
-from act.common import aCTSignal
-
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
 
