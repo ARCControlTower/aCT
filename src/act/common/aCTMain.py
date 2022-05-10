@@ -9,7 +9,7 @@ import tempfile
 import traceback
 from act.common import aCTConfig
 from act.common import aCTLogger
-from act.common import aCTSignal
+from act.common.aCTSignal import aCTSignal
 from act.common import aCTUtils
 from act.common import aCTProcessManager
 
@@ -19,7 +19,6 @@ class aCTMain:
     """
 
     def __init__(self, args):
-
         # Check we have the right ARC version
         self.checkARC()
 
@@ -39,6 +38,9 @@ class aCTMain:
         # logger
         self.logger = aCTLogger.aCTLogger("aCTMain")
         self.log = self.logger()
+
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
 
         # Check if we should run
         self.shouldrun = not os.path.exists(os.path.join(self.conf.get(["actlocation","dir"]), "act.stop"))
@@ -239,8 +241,10 @@ class aCTMain:
                 # sleep
                 aCTUtils.sleep(10)
 
-            except aCTSignal.ExceptInterrupt:
-                break
+                if self.signal.isInterrupted():
+                    self.log.info("*** Exiting on exit interrupt ***")
+                    break
+
             except:
                 self.log.critical("*** Unexpected exception! ***")
                 self.log.critical(traceback.format_exc())
@@ -250,7 +254,6 @@ class aCTMain:
                 except:
                     self.log.critical(traceback.format_exc())
                 aCTUtils.sleep(10)
-
 
     def finish(self):
         """

@@ -1,7 +1,6 @@
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.common.aCTProxy import aCTProxy
 from act.common import aCTUtils
-from act.common.aCTSignal import ExceptInterrupt
 from act.atlas.aCTPandaJob import aCTPandaJob
 import datetime
 import signal
@@ -718,7 +717,7 @@ class aCTValidator(aCTATLASProcess):
         # Validator suffers from memory leaks in arc bindings, so exit once per day
         if time.time() - self.starttime > 60*60*24:
             self.log.info("%s exited for periodic restart", self.name)
-            raise ExceptInterrupt(signal.SIGTERM)
+            self.finish()
 
 
 if __name__ == '__main__':

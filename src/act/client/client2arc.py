@@ -15,7 +15,7 @@ import arc
 from act.arc.aCTDBArc import aCTDBArc
 from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTLogger import aCTLogger
-from act.common.aCTSignal import ExceptInterrupt
+from act.common.aCTSignal import aCTSignal
 from act.client.clientdb import ClientDB
 
 
@@ -38,6 +38,7 @@ class Client2Arc(object):
 
     def __init__(self):
         """Initialize all attributes."""
+
         # get name, remove .py from the end
         self.name = os.path.basename(sys.argv[0])[:-3]
 
@@ -45,6 +46,10 @@ class Client2Arc(object):
 
         self.logger = aCTLogger(self.name)
         self.log = self.logger()
+
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
+
         self.clidb = ClientDB(self.log)
         self.arcdb = aCTDBArc(self.log)
 
@@ -64,12 +69,18 @@ class Client2Arc(object):
                 self.arcconf.parse()
                 self.process()
                 time.sleep(10)  # TODO: HARDCODED
-        except ExceptInterrupt as x:
-            self.log.info(f'Received interrupt {x}, exiting')
+
+                if self.signal.isInterrupted():
+                    self.log.info("*** Exiting on exit interrupt ***")
+                    break
+
         except:
             self.log.critical('*** Unexpected exception! ***')
             self.log.critical(traceback.format_exc())
             self.log.critical('*** Process exiting ***')
+
+        finally:
+            self.finish()
 
     def process(self):
         """
