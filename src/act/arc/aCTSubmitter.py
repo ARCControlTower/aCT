@@ -187,7 +187,7 @@ class aCTSubmitter(aCTProcess):
                 else:
                     for error in job["errors"]:
                         if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError):
-                            job["arcstate"] = "tocancel"
+                            job["arcstate"] = "cancelled"
                         else:
                             job["arcstate"] = "tosubmit"
                         self.log.debug(f"Error submitting job {job['appjobid']} {job['id']}: {error}")
@@ -323,7 +323,7 @@ class aCTSubmitter(aCTProcess):
                 tstamp = self.db.getTimeStamp()
                 if not job["errors"]:
                     job["arcstate"] = "cancelling"
-                    self.log.debug(f"ARC will cancel job {job['appjobid']}")
+                    self.log.debug(f"ARC will cancel job {job['appjobid']} {job['id']}")
                 else:
                     for error in job["errors"]:
                         if isinstance(error, ARCHTTPError):
@@ -336,8 +336,6 @@ class aCTSubmitter(aCTProcess):
             # update DB
             for job in tokill:
                 jobdict = {"arcstate": job["arcstate"], "tarcstate": self.db.getTimeStamp()}
-                if job["arcstate"] == "cancelling":
-                    jobdict["tstate"] = self.db.getTimeStamp()
                 self.db.updateArcJobLazy(job["id"], jobdict)
             self.db.Commit()
 

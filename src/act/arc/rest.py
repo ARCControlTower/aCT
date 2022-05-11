@@ -293,12 +293,17 @@ class RESTClient:
         """
         uploads = []
         for infile in job["desc"].DataStaging.InputFiles:
-            path = isLocalInputFile(infile.Name, infile.Sources[0].fullstr())
+            try:
+                path = isLocalInputFile(infile.Name, infile.Sources[0].fullstr())
+            except InputFileError as exc:
+                job["errors"].append(exc)
+                continue
             if not path:
                 continue
 
             if path and not os.path.isfile(path):
-                raise InputFileError(f"Input path {path} is not a file")
+                job["errors"].append(InputFileError(f"Input path {path} is not a file"))
+                continue
 
             uploads.append({
                 "jobid": job["id"],
@@ -318,13 +323,15 @@ class RESTClient:
         # put uploads to queue, create cancel events for jobs
         jobsdict = {}
         for job in jobs:
+            # if there is any error with input files do not add the rest
+            # of the input files to queue
+            uploads = self.getInputUploads(job)
+            if job["errors"]:
+                continue
+
             jobsdict[job["id"]] = job
             job["cancel_event"] = threading.Event()
-            try:
-                uploads = self.getInputUploads(job)
-            except InputFileError as exc:
-                job["errors"].append(exc)
-                continue
+
             for upload in uploads:
                 uploadQueue.put(upload)
         if uploadQueue.empty():
