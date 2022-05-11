@@ -114,7 +114,7 @@ class aCTStatus(aCTProcess):
         Query all running jobs
         '''
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "created",
-                   "State", "attemptsleft"]
+                   "State", "attemptsleft", "tstate"]
 
         # parse cluster URL
         try:
@@ -161,6 +161,7 @@ class aCTStatus(aCTProcess):
                     "State": job["State"],
                     "created": job["created"],
                     "errors": [],
+                    "tstate": job["tstate"],
                 }
                 tocheck.append(jobdict)
 
@@ -182,7 +183,7 @@ class aCTStatus(aCTProcess):
 
                 # cancel jobs that are stuck in tstate and not in job list anymore
                 if job["tstate"] + timedelta(days=7) < datetime.utcnow():
-                    if job["IDFromEndpoint"] not in joblist:
+                    if job["arcid"] not in joblist:
                         self.log.error(f"Job {job['appjobid']} {job['id']} not in ARC anymore, cancelling")
                         self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
                         continue
@@ -387,7 +388,7 @@ class aCTStatus(aCTProcess):
         for job in jobs:
             self.log.warning(f"Job {job['appjobid']} {job['id']} too long in \"cancelling\", setting to \"cancelled\"")
             tstamp = self.db.getTimeStamp()
-            self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, 'tstate': tstamp})
+            self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
         self.db.Commit()
 
     def checkARCStateTimeouts(self):
@@ -415,9 +416,9 @@ class aCTStatus(aCTProcess):
                 self.log.warning(f"Job {job['appjobid']} too long in state {state}")
                 tstamp = self.db.getTimeStamp()
                 if job["IDFromEndpoint"]:
-                    self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp, 'tstate': tstamp})
+                    self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
                 else:
-                    self.db.updateArcJobLazy(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, 'tstate': tstamp})
+                    self.db.updateArcJobLazy(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
 
         self.db.Commit()
 
