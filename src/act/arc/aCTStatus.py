@@ -65,7 +65,7 @@
 
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.client import HTTPException
 from ssl import SSLError
 from urllib.parse import urlparse
@@ -168,6 +168,7 @@ class aCTStatus(aCTProcess):
 
             try:
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
+                joblist = {job["id"] for job in restClient.getJobsList()}  # set type for performance
                 tocheck = restClient.getJobsInfo(tocheck)
             except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
@@ -178,6 +179,13 @@ class aCTStatus(aCTProcess):
             # process jobs and update DB
             for job in tocheck:
                 tstamp = self.db.getTimeStamp()
+
+                # cancel jobs that are stuck in tstate and not in job list anymore
+                if job["tstate"] + timedelta(days=7) < datetime.utcnow():
+                    if job["IDFromEndpoint"] not in joblist:
+                        self.log.error(f"Job {job['appjobid']} {job['id']} not in ARC anymore, cancelling")
+                        self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                        continue
 
                 if job["errors"]:
                     for error in job["errors"]:
