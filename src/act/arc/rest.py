@@ -466,6 +466,23 @@ class RESTClient:
 
         return newDownloads
 
+    def getJobsList(self):
+        resp = self.httpClient.request(
+            "GET",
+            f"{self.baseURL}/jobs",
+            headers={"Accept": "application/json"}
+        )
+        respstr = resp.read().decode()
+        if resp.status != 200:
+            raise ARCHTTPError(resp.status, respstr, f"ARC jobs list error: {resp.status} {respstr}")
+        jsonData = json.loads(respstr)
+
+        # convert data to list
+        if isinstance(jsonData["job"], dict):
+            return [jsonData["job"]]
+        else:
+            return jsonData["job"]
+
     def getJobsInfo(self, jobs):
         results = self.manageJobs(jobs, "info")
         return getJobOperationResults(jobs, results, "info_document")
