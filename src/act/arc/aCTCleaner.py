@@ -4,13 +4,12 @@
 #
 import os
 from http.client import HTTPException
+from json import JSONDecodeError
 from ssl import SSLError
 from urllib.parse import urlparse
-from json import JSONDecodeError
 
-from act.arc.rest import RESTClient
+from act.arc.rest import ARCError, ARCHTTPError, RESTClient
 from act.common.aCTProcess import aCTProcess
-from act.common.exceptions import ACTError, ARCHTTPError
 
 
 class aCTCleaner(aCTProcess):
@@ -71,7 +70,7 @@ class aCTCleaner(aCTProcess):
             try:
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
                 toARCClean = restClient.cleanJobs(toARCClean)
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
