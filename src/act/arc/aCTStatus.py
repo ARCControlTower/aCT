@@ -70,7 +70,7 @@ from http.client import HTTPException
 from ssl import SSLError
 from urllib.parse import urlparse
 
-from act.arc.rest import ARCError, ARCHTTPError, RESTClient
+from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTProcess import aCTProcess
 from act.common.config import Config
 
@@ -166,15 +166,17 @@ class aCTStatus(aCTProcess):
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
+            arcrest = None
             try:
-                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
-                joblist = {job["id"] for job in restClient.getJobsList()}  # set type for performance
-                tocheck = restClient.getJobsInfo(tocheck)
+                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
+                tocheck = arcrest.getJobsInfo(tocheck)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
                 continue
             finally:
-                restClient.close()
+                if arcrest:
+                    arcrest.close()
 
             # process jobs and update DB
             for job in tocheck:

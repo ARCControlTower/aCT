@@ -106,7 +106,7 @@ class HTTPClient:
         self.conn.close()
 
 
-class RESTClient:
+class ARCRest:
 
     def __init__(self, host, port=443, baseURL='/arex/rest/1.0', proxypath=None):
         self.baseURL = baseURL

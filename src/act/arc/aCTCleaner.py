@@ -8,7 +8,7 @@ from json import JSONDecodeError
 from ssl import SSLError
 from urllib.parse import urlparse
 
-from act.arc.rest import ARCError, ARCHTTPError, RESTClient
+from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTProcess import aCTProcess
 
 
@@ -67,15 +67,16 @@ class aCTCleaner(aCTProcess):
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
+            arcrest = None
             try:
-                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
-                toARCClean = restClient.cleanJobs(toARCClean)
+                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                toARCClean = arcrest.cleanJobs(toARCClean)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                restClient.close()
+                arcrest.close()
 
             # log results and update DB
             for job in toARCClean:
