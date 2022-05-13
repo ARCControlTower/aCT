@@ -24,7 +24,7 @@ class aCTValidator(aCTATLASProcess):
         # Get DN from configured proxy file
         cred_type = arc.initializeCredentialsType(arc.initializeCredentialsType.SkipCredentials)
         uc = arc.UserConfig(cred_type)
-        uc.ProxyPath(str(self.arcconf.get(['voms', 'proxypath'])))
+        uc.ProxyPath(self.arcconf.voms.proxypath)
         cred = arc.Credential(uc)
         dn = cred.GetIdentityName()
 
@@ -114,7 +114,7 @@ class aCTValidator(aCTATLASProcess):
                 jobinfo.writeToFile(os.path.join(self.tmpdir, "heartbeats", "%s.json" % aj['appjobid']))
 
         # copy to joblog dir files downloaded for the job: gmlog errors and pilot log
-        outd = os.path.join(self.conf.get(['joblog','dir']), date, aj['fairshare'])
+        outd = os.path.join(self.conf.joblog.dir, date, aj['fairshare'])
         try:
             os.makedirs(outd, 0o755)
         except:
@@ -196,7 +196,7 @@ class aCTValidator(aCTATLASProcess):
         of surls passed here all belong to the same SE.
         '''
 
-        if self.arcconf.get(['downtime', 'srmdown']) == 'True':
+        if self.arcconf.downtime.srmdown:
             self.log.info("SRM down, will validate later")
             return dict((k['arcjobid'], self.retry) for k in surldict.values())
 

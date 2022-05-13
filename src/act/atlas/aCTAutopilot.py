@@ -66,7 +66,7 @@ class aCTAutopilot(aCTATLASProcess):
 
         # Get DN from configured proxy file
         uc = arc.UserConfig()
-        uc.ProxyPath(str(self.arcconf.get(['voms', 'proxypath'])))
+        uc.ProxyPath(self.arcconf.voms.proxypath)
         cred = arc.Credential(uc)
         dn = cred.GetIdentityName()
         self.log.info("Running under DN %s" % dn)
@@ -78,7 +78,7 @@ class aCTAutopilot(aCTATLASProcess):
         self.proxymap = {}
 
         actp = aCTProxy.aCTProxy(self.log)
-        for role in self.arcconf.getList(['voms', 'roles', 'item']):
+        for role in self.arcconf.voms.roles:
             attr = '/atlas/Role='+role
             proxyid = actp.getProxyId(dn, attr)
             if not proxyid:
@@ -93,7 +93,7 @@ class aCTAutopilot(aCTATLASProcess):
 
         # queue interval
         self.queuestamp=0
-        self.nthreads=int(self.conf.get(["panda","threads"]))
+        self.nthreads=self.conf.panda.threads
 
         self.sites={}
 
@@ -111,7 +111,7 @@ class aCTAutopilot(aCTATLASProcess):
         Heartbeat status updates.
         """
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount', 'eventranges']
-        jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.get(['panda','heartbeattime']))+" or modified > theartbeat) limit 1000", columns)
+        jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
         if not jobs:
             return
 
@@ -141,7 +141,7 @@ class aCTAutopilot(aCTATLASProcess):
             # location so logs are available in case of lost heartbeat
             if pstatus == 'starting' and not changed_pstatus and self.sites[j['siteName']]['truepilot']:
                 date = time.strftime('%Y-%m-%d', time.gmtime())
-                logurl = '/'.join([self.conf.get(["joblog","urlprefix"]), date, j['siteName'], '%s.out' % j['pandaid']])
+                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], '%s.out' % j['pandaid']])
                 jd['pilotID'] = '%s|Unknown|Unknown|Unknown|Unknown' % logurl
             try:
                 corecount = int(j['corecount']) if j['corecount'] > 0 else self.sites[j['siteName']]['corecount']
@@ -190,7 +190,7 @@ class aCTAutopilot(aCTATLASProcess):
         Heartbeat status updates in bulk.
         """
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount', 'eventranges']
-        jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.get(['panda','heartbeattime']))+" or modified > theartbeat) limit 1000", columns)
+        jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
         #jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", 60)+" or modified > theartbeat) limit 1000", columns)
         if not jobs:
             return
@@ -222,7 +222,7 @@ class aCTAutopilot(aCTATLASProcess):
             # location so logs are available in case of lost heartbeat
             if pstatus == 'starting' and not changed_pstatus and self.sites[j['siteName']]['truepilot']:
                 date = time.strftime('%Y-%m-%d', time.gmtime())
-                logurl = '/'.join([self.conf.get(["joblog","urlprefix"]), date, j['siteName'], '%s.out' % j['pandaid']])
+                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], '%s.out' % j['pandaid']])
                 jd['pilotID'] = '%s|Unknown|Unknown|Unknown|Unknown' % logurl
             try:
                 corecount = int(j['corecount']) if j['corecount'] > 0 else self.sites[j['siteName']]['corecount']

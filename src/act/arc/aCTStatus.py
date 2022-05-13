@@ -52,7 +52,7 @@
 # The aCT states that need to be monitored for timeout are:
 # - tosubmit (done by aCTSubmitter)
 # - cancelling
-# - finishing
+# - finishing (finished?)
 #
 # The ARC states that should not be checked for timeout (or rather, not be
 # cancelled on timeout):
@@ -72,7 +72,7 @@ from urllib.parse import urlparse
 
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTProcess import aCTProcess
-from act.common.config import Config
+from act.common.exceptions import ACTError, ARCHTTPError
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
@@ -123,14 +123,14 @@ class aCTStatus(aCTProcess):
             return
 
         # minimum time between checks
-        if time.time() < self.checktime + int(self.conf.get(['jobs', 'checkmintime'])):
+        if time.time() < self.checktime + self.conf.jobs.checkmintime:
             self.log.debug("mininterval not reached")
             return
         self.checktime = time.time()
 
         # check jobs which were last checked more than checkinterval ago
         # TODO: hardcoded
-        tstampCond = self.db.timeStampLessThan("tarcstate", self.conf.get(['jobs', 'checkinterval']))
+        tstampCond = self.db.timeStampLessThan("tarcstate", self.conf.jobs.checkinterval)
         jobstocheck = self.db.getArcJobsInfo(
             "arcstate in ('submitted', 'running', 'finishing', 'cancelling', "
             f"'holding') and jobid not like '' and cluster='{self.cluster}' "
@@ -347,7 +347,7 @@ class aCTStatus(aCTProcess):
                 errors = ";".join(activityDict["Error"])
             else:
                 errors = activityDict["Error"]
-            resub = [err for err in self.conf.getList(['errors', 'toresubmit', 'arcerrors', 'item']) if err in errors]
+            resub = [err for err in self.conf.errors.toresubmit.arcerrors if err in errors]
             self.log.info(f"Job {job['appjobid']} {job['id']} failed with error: {errors}")
             patchDict["Error"] = errors
         else:
@@ -379,32 +379,29 @@ class aCTStatus(aCTProcess):
     def checkACTStateTimeouts(self):
         COLUMNS = ["id", "appjobid"]
 
-        config = Config()
+        for state, timeout in self.conf.timeouts.aCT_state:
+            tstampCond = self.db.timeStampLessThan("tarcstate", timeout)
+            jobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and arcstate='{state}' and {tstampCond}", COLUMNS)
+            for job in jobs:
+                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in \"{state}\"")
+                tstamp = self.db.getTimeStamp()
 
-        timeoutDict = config["timeouts"]["aCT_state"]
+                if state == "cancelling":
+                    self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
 
-        # mark jobs stuck in cancelling as cancelled
-        tstampCond = self.db.timeStampLessThan("tarcstate", timeoutDict["cancelling"])
-        jobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and arcstate='cancelling' and {tstampCond}", COLUMNS)
-        for job in jobs:
-            self.log.warning(f"Job {job['appjobid']} {job['id']} too long in \"cancelling\", setting to \"cancelled\"")
-            tstamp = self.db.getTimeStamp()
-            self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
+                if state == "finished":
+                    self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+
         self.db.Commit()
 
     def checkARCStateTimeouts(self):
         COLUMNS = ["id", "appjobid", "arcstate", "State", "IDFromEndpoint"]
 
-        config = Config()
-
-        timeoutDict = config["timeouts"]["ARC_state"]
-        for state, timeout in timeoutDict.items():
-
+        for state, timeout in self.conf.timeouts.ARC_state:
             tstampCond = self.db.timeStampLessThan("tstate", timeout)
             jobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and State='{state}' and {tstampCond}", COLUMNS)
 
             for job in jobs:
-
                 # do not cancel already cancelled jobs
                 if job["arcstate"] in ("cancelled", "cancelling"):
                     continue
@@ -414,7 +411,7 @@ class aCTStatus(aCTProcess):
                     continue
 
                 # cancel jobs
-                self.log.warning(f"Job {job['appjobid']} too long in state {state}")
+                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in state {state}")
                 tstamp = self.db.getTimeStamp()
                 if job["IDFromEndpoint"]:
                     self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})

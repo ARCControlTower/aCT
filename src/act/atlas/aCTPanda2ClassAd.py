@@ -45,20 +45,20 @@ class aCTPanda2ClassAd:
         try:
             self.schedulerid = json.loads(metadata)['schedulerid']
         except:
-            self.schedulerid = atlasconf.get(["panda", "schedulerid"])
+            self.schedulerid = atlasconf.panda.schedulerid
 
-        self.wrapper = atlasconf.get(["executable", "wrapperurl"])
+        self.wrapper = atlasconf.executable.wrapperurl
         # Condor out/err/log
         now = time.gmtime() # gmtime() is like localtime() but in UTC
         today = "%04d-%02d-%02d" % (now[0], now[1], now[2])
-        self.logdir = os.path.join(atlasconf.get(['joblog','dir']), today, sitename)
+        self.logdir = os.path.join(atlasconf.joblog.dir, today, sitename)
         try: os.makedirs(self.logdir)
         except: pass
 
-        self.logurl = '%s/%s/%s' % (atlasconf.get(['joblog', 'urlprefix']), today, sitename)
+        self.logurl = f'{atlasconf.joblog.urlprefix}/{today}/{sitename}'
 
         # APFmon
-        self.monitorurl = atlasconf.get(["monitor", "apfmon"])
+        self.monitorurl = atlasconf.monitor.apfmon
 
     def getNCores(self):
 

@@ -42,7 +42,7 @@ class aCTRucioMonitor(aCTLDMXProcess):
     def __init__(self):
         aCTLDMXProcess.__init__(self)
         self.rucio = Client()
-        self.rucio_prometheus_port = int(self.arcconf.get(['monitor', 'rucioprometheusport']) or 0)
+        self.rucio_prometheus_port = self.arcconf.monitor.rucioprometheusport or 0
 
         if self.rucio_prometheus_port:
             start_http_server(self.rucio_prometheus_port)

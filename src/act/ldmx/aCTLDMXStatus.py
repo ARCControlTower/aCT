@@ -258,7 +258,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
             return
 
         self.log.info(f"{arcjob['appjobid']}: error: {arcjob['Error']}")
-        resub = [err for err in self.arcconf.getList(['errors','toresubmit','arcerrors','item']) if err in arcjob['Error']]
+        resub = [err for err in self.arcconf.errors.toresubmit.arcerrors if err in arcjob['Error']]
         if not resub:
             self.log.info(f"{arcjob['appjobid']} failed with permanent error")
             self.cleanInputFiles(arcjob)
@@ -285,7 +285,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         gmlogerrors = os.path.join(localdir, "gmlog", "errors")
         jobstdout = arcjob['stdout']
 
-        outdir = os.path.join(self.conf.get(['joblog','dir']), date)
+        outdir = os.path.join(self.conf.joblog.dir, date)
         outdfailed = os.path.join(outdir, 'failed', arcjob['sitename'] or 'None')
         os.makedirs(outdir, 0o755, exist_ok=True)
         os.makedirs(outdfailed, 0o755, exist_ok=True)

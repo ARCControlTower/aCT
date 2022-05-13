@@ -561,7 +561,7 @@ class JobManager(object):
             ConfigError: tmp directory is not configured in aCT.
             NoJobDirectoryError: Job directory does not exist in aCT.
         """
-        tmpdir = self.arcconf.get(['tmp', 'dir'])
+        tmpdir = self.arcconf.tmp.dir
         if not tmpdir:
             self.logger.error('tmp directory is not in config')
             raise ConfigError("config/tmp/dir")
@@ -573,7 +573,7 @@ class JobManager(object):
             raise NoJobDirectoryError(actJobDir)
 
     def getJobDataDir(self, jobid):
-        datapath = self.arcconf.get(["actlocation", "datman"])
+        datapath = self.arcconf.actlocation.datman
         if not datapath:
             raise ConfigError("config/actlocation/datman")
         return os.path.join(datapath, str(jobid))

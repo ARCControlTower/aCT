@@ -87,8 +87,8 @@ class aCTPanda2Arc(aCTATLASProcess):
                 self.dbpanda.updateJob(job['pandaid'], jd)
 
                 # Dump description for APFMon
-                if self.conf.get(["monitor", "apfmon"]):
-                    logdir = os.path.join(self.conf.get(["joblog", "dir"]),
+                if self.conf.monitor.apfmon:
+                    logdir = os.path.join(self.conf.joblog.dir,
                                           job['created'].strftime('%Y-%m-%d'),
                                           job['siteName'])
                     try: os.makedirs(logdir, 0o755)

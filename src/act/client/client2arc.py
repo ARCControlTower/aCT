@@ -66,7 +66,7 @@ class Client2Arc(object):
         try:
             while True:
                 # TODO: this parsing does not make any difference
-                self.arcconf.parse()
+                self.arcconf = aCTConfigARC()
                 self.process()
                 time.sleep(10)  # TODO: HARDCODED
 
