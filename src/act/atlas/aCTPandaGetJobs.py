@@ -38,7 +38,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
 
         # Get DN from configured proxy file
         uc = arc.UserConfig()
-        uc.ProxyPath(str(self.arcconf.get(['voms', 'proxypath'])))
+        uc.ProxyPath(self.arcconf.voms.proxypath)
         cred = arc.Credential(uc)
         dn = cred.GetIdentityName()
         self.log.info("Running under DN %s" % dn)
@@ -50,7 +50,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
         self.proxymap = {}
 
         actp = aCTProxy.aCTProxy(self.log)
-        for role in self.arcconf.getList(['voms', 'roles', 'item']):
+        for role in self.arcconf.voms.roles:
             attr = '/atlas/Role='+role
             proxyid = actp.getProxyId(dn, attr)
             if not proxyid:
@@ -156,7 +156,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
 
             # Limit number of jobs waiting submission to avoid getting too many
             # jobs from Panda
-            if nsubmitting > int(self.conf.get(["panda","minjobs"])) :
+            if nsubmitting > self.conf.panda.minjobs:
                 self.log.info("Site %s: at limit of sent jobs" % site)
                 continue
 
@@ -164,7 +164,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
                 self.log.info("Site %s: at or above max job limit of %d" % (site, self.sites[site]['maxjobs']))
                 continue
 
-            nthreads = min(int(self.conf.get(['panda','threads'])), self.sites[site]['maxjobs'] - nall)
+            nthreads = min(self.conf.panda.threads, self.sites[site]['maxjobs'] - nall)
             if self.getjob:
                 nthreads = 1
 
@@ -277,7 +277,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
             self.apfmon.registerLabels([k for (k,v) in self.sites.items() if v['maxjobs'] > 0])
 
         # request new jobs
-        num = self.getJobs(int(self.conf.get(['panda','getjobs'])))
+        num = self.getJobs(int(self.conf.panda.getjobs))
         if num:
             self.log.info("Got %i jobs" % num)
         self.getjob = False

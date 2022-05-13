@@ -11,10 +11,10 @@ class aCTCRICFetcher(aCTATLASProcess):
 
     def __init__(self):
         aCTATLASProcess.__init__(self)
-        self.queues = self.conf.get(['cric','server'])
-        self.oses = self.conf.get(['cric','objectstores'])
-        self.queuesfile =self.conf.get(['cric', 'jsonfilename'])
-        self.osesfile =self.conf.get(['cric', 'osfilename'])
+        self.queues = self.conf.cric.server
+        self.oses = self.conf.cric.objectstores
+        self.queuesfile = self.conf.cric.jsonfilename
+        self.osesfile = self.conf.cric.osfilename
 
 
     def fetchFromCRIC(self, url, filename):

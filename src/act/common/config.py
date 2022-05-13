@@ -1,7 +1,7 @@
 import yaml
 
 
-class Config(object):
+class Config:
 
     defaultConfig = {
         "jwt_secret": "aCT JWT secret",

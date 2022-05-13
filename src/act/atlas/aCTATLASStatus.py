@@ -244,7 +244,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 continue
             resubmit=False
             # todo: errors part of aCTConfigARC should probably be moved to aCTConfigAPP.
-            for error in self.arcconf.getList(['errors','toresubmit','arcerrors','item']):
+            for error in self.arcconf.errors.toresubmit.arcerrors:
                 if aj['Error'].find(error) != -1:
                     resubmit=True
             if resubmit:
@@ -328,7 +328,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
             sessionid=jobid[jobid.rfind('/')+1:]
             date = aj['created'].strftime('%Y-%m-%d')
-            outd = os.path.join(self.conf.get(['joblog','dir']), date, aj['siteName'])
+            outd = os.path.join(self.conf.joblog.dir, date, aj['siteName'])
             # Make sure the path to outd exists
             try:
                 os.makedirs(outd, 0o755)
@@ -373,8 +373,8 @@ class aCTATLASStatus(aCTATLASProcess):
             try:
                 pupdate.schedulerID = smeta['schedulerid']
             except:
-                pupdate.schedulerID = self.conf.get(['panda','schedulerid'])
-            pupdate.pilotID = self.conf.get(["joblog","urlprefix"])+"/"+date+"/"+aj['siteName']+'/'+aj['appjobid']+".out|Unknown|Unknown|Unknown|Unknown"
+                pupdate.schedulerID = self.conf.panda.schedulerid
+            pupdate.pilotID = f"{self.conf.joblog.urlprefix}/{date}/{aj['siteName']}/{aj['appjobid']}.out|Unknown|Unknown|Unknown|Unknown"
             if len(aj["ExecutionNode"]) > 255:
                 pupdate.node = aj["ExecutionNode"][:254]
                 self.log.warning("%s: Truncating wn hostname from %s to %s" % (aj['pandaid'], aj['ExecutionNode'], pupdate.node))

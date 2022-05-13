@@ -13,7 +13,7 @@ import psutil
 def main():
 
     conf = aCTConfigARC()
-    criticallog = '%s/aCTCritical.log' % conf.get(["logger", "logdir"])
+    criticallog = f'{conf.logger.logdir}/aCTCritical.log'
     criticalerrors = 0
     lastcritical = ''
     now = datetime.now()

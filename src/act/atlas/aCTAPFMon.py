@@ -13,10 +13,10 @@ class aCTAPFMon:
             self.logger = aCTLogger(self.__class__.__name__, arclog=False)
             self.log = self.logger()
 
-        self.apfmonurl = conf.get(["monitor", "apfmon"])
-        self.sendupdates = conf.get(["monitor", "update"])
-        self.acturl = conf.get(["joblog", "urlprefix"])
-        self.factory = conf.get(["panda", "schedulerid"])
+        self.apfmonurl = conf.monitor.apfmon
+        self.sendupdates = conf.monitor.update
+        self.acturl = conf.joblog.urlprefix
+        self.factory = conf.panda.schedulerid
 
     def registerFactory(self):
         '''Register this instance of aCT'''

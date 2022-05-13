@@ -20,26 +20,28 @@ class aCTSubmitter(aCTProcess):
         Main function to submit jobs.
         """
 
-        # check for stopsubmission flag
-        if self.conf.get(['downtime','stopsubmission']) == "true":
-            self.log.info('Submission suspended due to downtime')
-            return
+        ## check for stopsubmission flag
+        #if self.conf.downtime.stopsubmission:
+        #    self.log.info('Submission suspended due to downtime')
+        #    return
 
-        # check for any site-specific limits or status
-        clusterstatus = self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["status"]) or 'online'
-        if clusterstatus == 'offline':
-            self.log.info('Site status is offline')
-            return
+        ## check for any site-specific limits or status
+        #clusterstatus = self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["status"]) or 'online'
+        #if clusterstatus == 'offline':
+        #    self.log.info('Site status is offline')
+        #    return
 
-        clustermaxjobs = int(self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["maxjobs"]) or 999999)
+        #clustermaxjobs = int(self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["maxjobs"]) or 999999)
+        #nsubmitted = self.db.getNArcJobs(f"cluster='{self.cluster}'")
+        #if nsubmitted >= clustermaxjobs:
+        #    self.log.info(f'{nsubmitted} submitted jobs is greater than or equal to max jobs {clustermaxjobs}')
+        #    return
+        clustermaxjobs = 999999
         nsubmitted = self.db.getNArcJobs(f"cluster='{self.cluster}'")
-        if nsubmitted >= clustermaxjobs:
-            self.log.info(f'{nsubmitted} submitted jobs is greater than or equal to max jobs {clustermaxjobs}')
-            return
 
         # Apply fair-share
         if self.cluster:
-            fairshares = self.db.getArcJobsInfo("arcstate='tosubmit' and clusterlist like '%"+self.cluster+"%'", ['fairshare', 'proxyid'])
+            fairshares = self.db.getArcJobsInfo(f"arcstate='tosubmit' and clusterlist like '%{self.cluster}%'", ['fairshare', 'proxyid'])
         else:
             fairshares = self.db.getArcJobsInfo("arcstate='tosubmit' and clusterlist=''", ['fairshare', 'proxyid'])
 
@@ -52,8 +54,13 @@ class aCTSubmitter(aCTProcess):
         # For proxy bug - see below
         shuffle(fairshares)
 
-        # apply maxjobs limit per submitter (check above should make sure greater than zero)
-        nsubmitters = int(self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["submitters"]) or 1)
+        ## apply maxjobs limit per submitter (check above should make sure greater than zero)
+        #nsubmitters = int(self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["submitters"]) or 1)
+        #limit = min(clustermaxjobs - nsubmitted, 100) // nsubmitters
+        #if limit == 0:
+        #    self.log.info(f'{clustermaxjobs} maxjobs - {nsubmitted} submitted is smaller than {nsubmitters} submitters')
+        #    return
+        nsubmitters = 1
         limit = min(clustermaxjobs - nsubmitted, 100) // nsubmitters
         if limit == 0:
             self.log.info(f'{clustermaxjobs} maxjobs - {nsubmitted} submitted is smaller than {nsubmitters} submitters')
@@ -68,7 +75,7 @@ class aCTSubmitter(aCTProcess):
 
             # Exit loop if above limit
             if nsubmitted >= clustermaxjobs:
-                self.log.info("CE is at limit of %s submitted jobs, exiting" % clustermaxjobs)
+                self.log.info(f"CE is at limit of {clustermaxjobs} submitted jobs, exiting")
                 break
 
             try:
@@ -76,20 +83,24 @@ class aCTSubmitter(aCTProcess):
                 if self.cluster:
                     # Lock row for update in case multiple clusters are specified
                     #jobs=self.db.getArcJobsInfo("arcstate='tosubmit' and ( clusterlist like '%{0}' or clusterlist like '%{0},%' ) and fairshare='{1}' order by priority desc limit 10".format(self.cluster, fairshare),
-                    jobs=self.db.getArcJobsInfo("arcstate='tosubmit' and ( clusterlist like '%{0}' or clusterlist like '%{0},%' ) and fairshare='{1}' and proxyid='{2}' limit {3}".format(self.cluster, fairshare, proxyid, limit),
-                                                columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"], lock=True)
+                    jobs = self.db.getArcJobsInfo(
+                        "arcstate='tosubmit' and ( clusterlist like '%{0}' or clusterlist like '%{0},%' ) and fairshare='{1}' and proxyid='{2}' limit {3}".format(self.cluster, fairshare, proxyid, limit),
+                        columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"], lock=True
+                    )
                     if jobs:
-                        self.log.debug("started lock for writing %d jobs"%len(jobs))
+                        self.log.debug(f"started lock for writing {len(jobs)} jobs")
                 else:
-                    jobs=self.db.getArcJobsInfo("arcstate='tosubmit' and clusterlist='' and fairshare='{0} and proxyid={1}' limit {2}".format(fairshare, proxyid, limit),
-                                                columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"])
+                    jobs = self.db.getArcJobsInfo(
+                        "arcstate='tosubmit' and clusterlist='' and fairshare='{0} and proxyid={1}' limit {2}".format(fairshare, proxyid, limit),
+                        columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"]
+                    )
                 # mark submitting in db
-                jobs_taken=[]
+                jobs_taken = []
                 for j in jobs:
-                    jd={'cluster': self.cluster, 'arcstate': 'submitting', 'tarcstate': self.db.getTimeStamp()}
-                    self.db.updateArcJobLazy(j['id'],jd)
+                    jd = {'cluster': self.cluster, 'arcstate': 'submitting', 'tarcstate': self.db.getTimeStamp()}
+                    self.db.updateArcJobLazy(j['id'], jd)
                     jobs_taken.append(j)
-                jobs=jobs_taken
+                jobs = jobs_taken
 
             finally:
                 if self.cluster:
@@ -104,35 +115,35 @@ class aCTSubmitter(aCTProcess):
             if len(jobs) == 0:
                 #self.log.debug("No jobs to submit")
                 continue
-            self.log.info("Submitting %d jobs for fairshare %s and proxyid %d" % (len(jobs), fairshare, proxyid))
+            self.log.info(f"Submitting {len(jobs)} jobs for fairshare {fairshare} and proxyid {proxyid}")
 
-            # Set UserConfig credential for querying infosys
-            proxystring = str(self.db.getProxy(proxyid))
-            self.uc.CredentialString(proxystring)
-            global usercred
-            usercred = self.uc
+            ## Set UserConfig credential for querying infosys
+            #proxystring = str(self.db.getProxy(proxyid))
+            #self.uc.CredentialString(proxystring)
+            #global usercred
+            #usercred = self.uc
 
             # Filter only sites for this process
-            qjobs=self.db.getArcJobsInfo("cluster='" +str(self.cluster)+ "' and  arcstate='submitted' and fairshare='%s'" % fairshare, ['id','priority'])
-            rjobs=self.db.getArcJobsInfo("cluster='" +str(self.cluster)+ "' and  arcstate='running' and fairshare='%s'" % fairshare, ['id'])
+            qjobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and  arcstate='submitted' and fairshare='{fairshare}'", ['id','priority'])
+            rjobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and  arcstate='running' and fairshare='{fairshare}'", ['id'])
 
             # max waiting priority
             try:
-                maxpriowaiting = max(jobs,key = lambda x : x['priority'])['priority']
+                maxpriowaiting = max(jobs, key=lambda x: x['priority'])['priority']
             except:
                 maxpriowaiting = 0
-            self.log.info("Maximum priority of waiting jobs: %d" % maxpriowaiting)
+            self.log.info(f"Maximum priority of waiting jobs: {maxpriowaiting}")
 
 
             # max queued priority
             try:
-                maxprioqueued = max(qjobs,key = lambda x : x['priority'])['priority']
+                maxprioqueued = max(qjobs, key=lambda x: x['priority'])['priority']
             except:
                 maxprioqueued = 0
-            self.log.info("Max priority queued: %d" % maxprioqueued)
+            self.log.info(f"Max priority queued: {maxprioqueued}")
 
-            qfraction = float(self.conf.get(['jobs', 'queuefraction'])) if self.conf.get(['jobs', 'queuefraction']) else 0.15
-            qoffset = int(self.conf.get(['jobs', 'queueoffset'])) if self.conf.get(['jobs', 'queueoffset']) else 100
+            #qfraction = self.conf.jobs.get("queuefraction", 0.15) / 100.0
+            #qoffset = self.conf.jobs.get("queueoffset", 100)
 
             ##################################################################
             #
@@ -223,12 +234,12 @@ class aCTSubmitter(aCTProcess):
                 jobdict["ServiceInformationURL"] = interface
 
                 jobdict["ExecutionNode"] = ""
-                jobdict["Error"] = ""
                 jobdict["UsedTotalWallTime"] = 0
                 jobdict["UsedTotalCPUTime"] = 0
                 jobdict["RequestedTotalWallTime"] = 0
                 jobdict["RequestedTotalCPUTime"] = 0
                 jobdict["RequestedSlots"] = -1
+                jobdict["Error"] = ""
 
                 self.db.updateArcJobLazy(job["id"], jobdict)
 
@@ -546,6 +557,6 @@ class aCTSubmitter(aCTProcess):
 
 # Main
 if __name__ == '__main__':
-    asb=aCTSubmitter()
+    asb = aCTSubmitter()
     asb.run()
     asb.finish()

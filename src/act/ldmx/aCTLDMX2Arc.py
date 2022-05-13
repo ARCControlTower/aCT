@@ -45,7 +45,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
             self.dbldmx.updateJobLazy(job['id'], desc)
 
             # Dump job description
-            logdir = os.path.join(self.conf.get(["joblog", "dir"]),
+            logdir = os.path.join(self.conf.joblog.dir,
                                   job['created'].strftime('%Y-%m-%d'))
             os.makedirs(logdir, 0o755, exist_ok=True)
             xrslfile = os.path.join(logdir, f'{job["id"]}.xrsl')
@@ -69,13 +69,13 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         xrsl['runtimeenvironment'] = ''
         if 'RunTimeEnvironment' in config:
             xrsl['runtimeenvironment'] = f"(runtimeenvironment = APPS/{config.get('RunTimeEnvironment')})"
-        xrsl['runtimeenvironment'] += f"(runtimeenvironment = APPS/{self.conf.get(['executable', 'simprodrte'])})"
+        xrsl['runtimeenvironment'] += f"(runtimeenvironment = APPS/{self.conf.executable.simprodrte})"
         if config.get('FinalOutputDestination'):
             xrsl['outputfiles'] = '(outputfiles = ("rucio.metadata" "")("@output.files" ""))'
         else:
             xrsl['outputfiles'] = '(outputfiles = ("rucio.metadata" ""))'
 
-        wrapper = self.conf.get(['executable', 'wrapper'])
+        wrapper = self.conf.executable.wrapper
         if 'SimExecutable' in config :
             wpath, wname = os.path.split(wrapper)
             wrapper = os.path.join(wpath, config.get('SimExecutable'))
@@ -85,7 +85,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         inputfiles = f'(ldmxsim.sh {wrapper})\n \
                        (ldmxproduction.config {descriptionfile})\n \
                        (ldmxjob.py {templatefile})\n \
-                       (ldmx-simprod-rte-helper.py {self.conf.get(["executable", "ruciohelper"])})\n'
+                       (ldmx-simprod-rte-helper.py {self.conf.executable.ruciohelper})\n'
 
         if 'InputDataset' in config:
             for inputfile, inputlocal, inputremote in zip(config['InputFile'].split(','),

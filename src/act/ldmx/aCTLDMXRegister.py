@@ -104,10 +104,10 @@ class aCTLDMXRegister(aCTLDMXProcess):
         '''
         sessionid = arcjob['JobID'][arcjob['JobID'].rfind('/')+1:]
         date = arcjob['created'].strftime('%Y-%m-%d')
-        outd = os.path.join(self.conf.get(['joblog','dir']), date)
+        outd = os.path.join(self.conf.joblog.dir, date)
         os.makedirs(outd, 0o755, exist_ok=True)
 
-        if str(self.conf.get(['joblog', 'keepsuccessful'])) == '1' and self.conf.get(['joblog','dir']):
+        if self.conf.joblog.keepsuccessful and self.conf.joblog.dir:
             localdir = os.path.join(self.tmpdir, sessionid)
             gmlogerrors = os.path.join(localdir, "gmlog", "errors")
             arcjoblog = os.path.join(outd, "%s.log" % arcjob['appjobid'])

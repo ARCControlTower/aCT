@@ -8,7 +8,7 @@ class aCTDBArc(aCTDB):
     def __init__(self, log):
         aCTDB.__init__(self, log, 'arcjobs')
 
-        self.proxydir = self.conf.get(["voms","proxystoredir"])
+        self.proxydir = self.conf.voms.proxystoredir
 
         # mapping from Job class attribute types to column types
         self.jobattrmap = {int: 'integer',
