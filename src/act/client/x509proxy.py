@@ -1,145 +1,86 @@
 import os
+import re
 import time
 from datetime import datetime, timedelta
 
-import act.client.delegate_proxy as delegate_proxy
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 
-USERCERT = os.path.expandvars("$HOME/.globus/usercert.pem")
-USERKEY = os.path.expandvars("$HOME/.globus/userkey.pem")
 PROXYPATH = f"/tmp/x509up_u{os.getuid()}"
 
 
-def create_proxy_csr(issuer_cert, proxy_key):
-    """
-    Create proxy certificate signing request.
-    """
+def checkOldProxy(cert):
+    """Check if last CN is \"proxy\" or \"limited proxy\"."""
+    lastCN = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)[-1]
+    return lastCN.value in ("proxy", "limited proxy")
 
-    # check that the issuer certificate is not an old proxy
-    # and is using the keyUsage section as required
-    delegate_proxy.confirm_not_old_proxy(issuer_cert)
-    delegate_proxy.validate_key_usage(issuer_cert)
+
+def checkKeyUsage(cert):
+    """Check if digital signature bit is set in keyUsage extension."""
+    try:
+        keyUsage = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.KEY_USAGE)
+        return bool(keyUsage.value.digital_signature)
+    except x509.ExtensionNotFound:
+        return True
+
+
+def createProxyCSR(issuerCert, proxyKey):
+    """Create proxy certificate signing request."""
+
+    if not checkOldProxy(issuerCert):
+        raise Exception("Proxy format not supported")
+    if not checkKeyUsage(issuerCert):
+        raise Exception("Proxy uses invalid keyUsage extension")
 
     builder = x509.CertificateSigningRequestBuilder()
 
-    ## create a serial number for the new proxy
-    ## Under RFC 3820 there are many ways to generate the serial number. However
-    ## making the number unpredictable has security benefits, e.g. it can make
-    ## this style of attack more difficult:
-    ## http://www.win.tue.nl/hashclash/rogue-ca
-    #serial = struct.unpack("<Q", os.urandom(8))[0]
+    # copy subject to CSR
+    subject = list(issuerCert.subject)
+    builder = builder.subject_name(x509.Name(subject))
 
-    ## set the new proxy's subject
-    ## append a CommonName to the new proxy's subject
-    ## with the serial as the value of the CN
-    #new_atribute = x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, str(serial))
-    subject_attributes = list(issuer_cert.subject)
-    #subject_attributes.append(new_atribute)
-    builder = builder.subject_name(x509.Name(subject_attributes))
-
-    # add proxyCertInfo extension to the new proxy (We opt not to add keyUsage)
-    # For RFC proxies the effective usage is defined as the intersection
-    # of the usage of each cert in the chain. See section 4.2 of RFC 3820.
-
-    # the constants 'oid' and 'value' are gotten from
-    # examining output from a call to the open ssl function:
-    # X509V3_EXT_conf(NULL, ctx, name, value)
-    # ctx set by X509V3_set_nconf(&ctx, NCONF_new(NULL))
-    # name = "proxyCertInfo"
-    # value = "critical,language:Inherit all"
+    # add proxyCertInfo extension
     oid = x509.ObjectIdentifier("1.3.6.1.5.5.7.1.14")
     value = b"0\x0c0\n\x06\x08+\x06\x01\x05\x05\x07\x15\x01"
     extension = x509.extensions.UnrecognizedExtension(oid, value)
     builder = builder.add_extension(extension, critical=True)
 
-    # sign the new proxy with the issuer's private key
+    # sign the proxy CSR with the issuer's private key
     csr = builder.sign(
-        private_key=proxy_key,
+        private_key=proxyKey,
         algorithm=hashes.SHA256(),
         backend=default_backend(),
     )
 
-    # return CSR cryptography object
     return csr
 
 
-def sign_proxy_csr(issuer_cert, issuer_key, csr, lifetime=12):
-    """
-    Sign proxy certificate signing request.
-
-    Function copies information from CSR object to certificate builder and
-    fills in some issuer information.
-    """
-
-    builder = x509.CertificateBuilder()
-
-    # serial is value of the last object in the list of NameAttribute objects
-    serial = int(list(csr.subject)[-1].value)
-    builder = builder.serial_number(serial)
-
-    # set the new proxy as valid from now until lifetime_hours have passed
-    builder = builder.not_valid_before(datetime.datetime.utcnow())
-    builder = builder.not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(hours=lifetime))
-
-    # copy public key from CSR
-    builder = builder.public_key(csr.public_key())
-
-    # set the issuer to the subject of the issuing cert
-    builder = builder.issuer_name(issuer_cert.subject)
-
-    # copy subject from CSR
-    builder = builder.subject_name(csr.subject)
-
-    # copy enxtensions from CSR
-    for extension in csr.extensions:
-        builder = builder.add_extension(extension.value, critical=extension.critical)
-
-    # sign with the issuer's private key
-    proxy_cert = builder.sign(
-        private_key=issuer_key,
-        algorithm=hashes.SHA256(),
-        backend=default_backend(),
-    )
-
-    return proxy_cert
+def checkRFCProxy(proxy):
+    """Check if valid X509 RFC 3820 proxy."""
+    for ext in proxy.extensions:
+        if ext.oid.dotted_string == "1.3.6.1.5.5.7.1.14":
+            return True
+    return False
 
 
-def check_rfc_proxy(proxy):
-        """
-        Check for X509 RFC 3820 proxy.
-        """
-        for ext in proxy.extensions:
-            if ext.oid.dotted_string == "1.3.6.1.5.5.7.1.14":
-                return True
-        raise Exception('Invalid X509 RFC 3820 proxy.')
-
-
-def sign_request(csr, proxypath=PROXYPATH, lifetime=24):
-    """
-    Sign proxy.
-    """
+def signRequest(csr, proxypath=PROXYPATH, lifetime=24):
+    """Sign proxy CSR."""
     now = datetime.utcnow()
     if not csr.is_signature_valid:
-        raise Exception('Invalid request signature')
+        raise Exception("Invalid request signature")
 
-    with open(proxypath, 'rb') as f:
+    with open(proxypath, "rb") as f:
         proxy_pem = f.read()
 
     proxy = x509.load_pem_x509_certificate(proxy_pem, default_backend())
+    if not checkRFCProxy(proxy):
+        raise Exception("Invalid RFC proxy")
 
-    oid = x509.ObjectIdentifier("1.3.6.1.4.1.8005.100.100.5")
-    value = proxy.extensions.get_extension_for_oid(oid).value.value
-    vomsext = x509.extensions.UnrecognizedExtension(oid, value)
-
-    check_rfc_proxy(proxy)
     key = serialization.load_pem_private_key(proxy_pem, password=None, backend=default_backend())
-    key_id = x509.SubjectKeyIdentifier.from_public_key(key.public_key())
-    subject_attributes = list(proxy.subject)
-    subject_attributes.append(
-        x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, str(int(time.time()))))
+    keyID = x509.SubjectKeyIdentifier.from_public_key(key.public_key())
+
+    subject = list(proxy.subject)
+    subject.append(x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, str(int(time.time()))))
 
     new_cert = x509.CertificateBuilder() \
                    .issuer_name(proxy.subject) \
@@ -147,7 +88,7 @@ def sign_request(csr, proxypath=PROXYPATH, lifetime=24):
                    .not_valid_after(now + timedelta(hours=lifetime)) \
                    .serial_number(proxy.serial_number) \
                    .public_key(csr.public_key()) \
-                   .subject_name(x509.Name(subject_attributes)) \
+                   .subject_name(x509.Name(subject)) \
                    .add_extension(x509.BasicConstraints(ca=False, path_length=None),
                                   critical=True) \
                    .add_extension(x509.KeyUsage(digital_signature=True,
@@ -161,7 +102,7 @@ def sign_request(csr, proxypath=PROXYPATH, lifetime=24):
                                                 decipher_only=False),
                                   critical=True) \
                    .add_extension(x509.AuthorityKeyIdentifier(
-                       key_identifier=key_id.digest,
+                       key_identifier=keyID.digest,
                        authority_cert_issuer=[x509.DirectoryName(proxy.issuer)],
                        authority_cert_serial_number=proxy.serial_number
                        ),
@@ -173,64 +114,42 @@ def sign_request(csr, proxypath=PROXYPATH, lifetime=24):
                    .sign(private_key=key,
                          algorithm=proxy.signature_hash_algorithm,
                          backend=default_backend())
-                   #.add_extension(vomsext,
-                   #               critical=False) \
     return new_cert.public_bytes(serialization.Encoding.PEM)
 
 
-def create_proxy_cert(issuer_cert, issuer_key, private_key, lifetime=12):
-    csr = create_proxy_csr(issuer_cert, private_key)
-    proxy_cert = sign_proxy_csr(issuer_cert, issuer_key, csr, lifetime)
-
-    # return in PEM format as a unicode string
-    return proxy_cert.public_bytes(serialization.Encoding.PEM).decode(
-        "ascii")
-
-
-# TODO: current logic only creates a proxy certificate from non proxy certificate
-# and certificates, that don't have additional chain. The path is also hardcoded
-# for source certificate.
-if __name__ == "__main__":
-    private_key = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=1024,
-        backend=default_backend()
+def parsePEM(pem):
+    """Return a tuple of loaded cert, key and chain string from PEM."""
+    sections = re.findall(
+        "-----BEGIN.*?-----.*?-----END.*?-----",
+        pem,
+        flags=re.DOTALL
     )
 
-    #with open(USERCERT, "r") as f:
-    #    issuer_cert = f.read()
+    try:
+        certPEM = sections[0]
+        keyPEM = sections[1]
+        chainPEMs = sections[2:]
+    except IndexError:
+        raise Exception("Invalid PEM")
 
-    #with open(USERKEY, "r") as key_file:
-    #    issuer_key = key_file.read()
-    with open(PROXYPATH, "r") as key_file:
-        issuer_cred = key_file.read()
+    try:
+        cert = x509.load_pem_x509_certificate(
+            certPEM.encode(),
+            default_backend()
+        )
+        key = serialization.load_pem_private_key(
+            keyPEM.encode(),
+            password=None,
+            backend=default_backend()
+        )
+        for chainPEM in chainPEMs:
+            x509.load_pem_x509_certificate(
+                chainPEM.encode(),
+                default_backend()
+            )
+        chain = "\n".join(chainPEMs)
+    except ValueError:
+        raise Exception("Cannot decode PEM")
 
-    ## parse the issuer credential
-    #issuer_cert = x509.load_pem_x509_certificate(issuer.encode("utf-8"), default_backend())
-    #issuer_key = serialization.load_pem_private_key(issuer.encode("utf-8"), password=None, backend=default_backend())
-    issuer_cert, issuer_key, issuer_chains = delegate_proxy.parse_issuer_cred(issuer_cred)
-
-    csr = create_proxy_csr(issuer_cert, private_key)
-    cert = sign_request(csr)
-    #proxy = create_proxy_cert(issuer_cert, issuer_key, private_key)
-    #chain = issuer_cert.public_bytes(serialization.Encoding.PEM).decode()
-
-    key_pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-    )
-
-    #print proxy,
-    #print key_pem,
-    #print chain,
-
-    chain = issuer_cert.public_bytes(serialization.Encoding.PEM).decode() + issuer_chains + "\n"
-    #print(chain)
-
-    with open("proxy.pem", "wb") as f:
-        f.write(cert)
-        f.write(key_pem)
-        f.write(chain.encode())
-
-    os.chmod(PROXYPATH, 0o600)
+    # return loaded cryptography objects and the issuer chain
+    return cert, key, chain

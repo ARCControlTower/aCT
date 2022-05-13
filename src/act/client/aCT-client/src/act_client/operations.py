@@ -13,8 +13,7 @@ from cryptography.hazmat.primitives import serialization
 
 from act_client.common import (HTTP_BUFFER_SIZE, ACTClientError, SignalIgnorer,
                                deleteFile, getHTTPConn, readFile)
-from act_client.delegate_proxy import parse_issuer_cred
-from act_client.x509proxy import sign_request
+from act_client.x509proxy import signRequest, parsePEM
 
 # TODO: use proper data structures for API rather than format expected
 #       on backend; also use kwargs
@@ -332,10 +331,10 @@ def uploadProxy(conn, proxyStr, tokenPath):
 
     # sign CSR
     try:
-        proxyCert, _, issuerChains = parse_issuer_cred(proxyStr)
-        csr = x509.load_pem_x509_csr(jsonDict['csr'].encode('utf-8'), default_backend())
-        cert = sign_request(csr).decode('utf-8')
-        chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode('utf-8') + issuerChains + '\n'
+        proxyCert, _, issuerChains = parsePEM(proxyStr)
+        csr = x509.load_pem_x509_csr(jsonDict['csr'].encode(), default_backend())
+        cert = signRequest(csr).decode()
+        chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode() + issuerChains + '\n'
     except Exception as e:
         deleteProxy(conn, token)
         raise ACTClientError(f'Error generating proxy: {e}')

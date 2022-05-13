@@ -9,8 +9,7 @@ from http.client import (HTTPConnection, HTTPException, HTTPSConnection,
                          RemoteDisconnected)
 from urllib.parse import urlencode, urlparse
 
-from act.client.delegate_proxy import parse_issuer_cred
-from act.client.x509proxy import sign_request
+from act.client.x509proxy import signRequest, parsePEM
 from act.common.exceptions import (ACTError, ARCHTTPError,
                                    DescriptionParseError,
                                    DescriptionUnparseError, InputFileError, NoValueInARCResult)
@@ -149,10 +148,10 @@ class RESTClient:
             with open(self.httpClient.proxypath) as f:
                 proxyStr = f.read()
 
-            proxyCert, _, issuerChains = parse_issuer_cred(proxyStr)
+            proxyCert, _, issuerChains = parsePEM(proxyStr)
             chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode() + issuerChains + '\n'
             csr = x509.load_pem_x509_csr(csrStr.encode(), default_backend())
-            cert = sign_request(csr, self.httpClient.proxypath).decode()
+            cert = signRequest(csr, self.httpClient.proxypath).decode()
             pem = (cert + chain).encode()
 
             resp = self.httpClient.request(
