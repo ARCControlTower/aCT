@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from act.arc.aCTStatus import ARC_STATE_MAPPING
 from act.arc.rest import (ARCError, ARCHTTPError, DescriptionParseError,
                           DescriptionUnparseError, InputFileError,
-                          NoValueInARCResult, RESTClient)
+                          NoValueInARCResult, ARCRest)
 from act.common.aCTProcess import aCTProcess
 
 
@@ -163,9 +163,10 @@ class aCTSubmitter(aCTProcess):
                 job["descstr"] = str(self.db.getArcJobDescription(str(job["jobdesc"])))
 
             # submit jobs to ARC
+            arcrest = None
             try:
-                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
-                jobs = restClient.submitJobs(queue, jobs, self.log)
+                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                jobs = arcrest.submitJobs(queue, jobs, self.log)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error submitting jobs to ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
@@ -175,7 +176,8 @@ class aCTSubmitter(aCTProcess):
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
                 continue
             finally:
-                restClient.close()
+                if arcrest:
+                    arcrest.close()
 
             # log submission results and set job state
             for job in jobs:
@@ -306,15 +308,17 @@ class aCTSubmitter(aCTProcess):
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
+            arcrest = None
             try:
-                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
-                toARCKill = restClient.killJobs(toARCKill)
+                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                toARCKill = arcrest.killJobs(toARCKill)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                restClient.close()
+                if arcrest:
+                    arcrest.close()
 
             # log results
             for job in toARCKill:
@@ -385,15 +389,17 @@ class aCTSubmitter(aCTProcess):
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
+            arcrest = None
             try:
-                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
-                toARCClean = restClient.cleanJobs(toARCClean)
+                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                toARCClean = arcrest.cleanJobs(toARCClean)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                restClient.close()
+                if arcrest:
+                    arcrest.close()
 
             # log results
             for job in toARCClean:
@@ -454,13 +460,14 @@ class aCTSubmitter(aCTProcess):
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
+            arcrest = None
             try:
-                restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
+                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
 
                 # get delegations for jobs
                 # AF BUG
                 try:
-                    torerun = restClient.getJobsDelegations(torerun, self.log)
+                    torerun = arcrest.getJobsDelegations(torerun, self.log)
                 except:
                     self.log.error("GET JOBS DELEGATIONS EXCEPTION")
                     import traceback
@@ -472,21 +479,22 @@ class aCTSubmitter(aCTProcess):
                 for job in torerun:
                     if not job["errors"]:
                         try:
-                            restClient.renewDelegation(job["delegation_id"])
+                            arcrest.renewDelegation(job["delegation_id"])
                         except Exception as exc:
                             job["errors"].append(exc)
                         else:
                             torestart.append(job)
 
                 # restart jobs
-                restClient.restartJobs(torestart)
+                arcrest.restartJobs(torestart)
 
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
             finally:
-                restClient.close()
+                if arcrest:
+                    arcrest.close()
 
             # log results and update DB
             for job in torerun:
