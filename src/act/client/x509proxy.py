@@ -125,7 +125,7 @@ def sign_request(csr, proxypath=PROXYPATH, lifetime=24):
     if not csr.is_signature_valid:
         raise Exception('Invalid request signature')
 
-    with open(proxypath,'rb') as f:
+    with open(proxypath, 'rb') as f:
         proxy_pem = f.read()
 
     proxy = x509.load_pem_x509_certificate(proxy_pem, default_backend())

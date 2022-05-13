@@ -118,7 +118,7 @@ def check_rfc_proxy(proxy):
         raise Exception('Invalid X509 RFC 3820 proxy.')
 
 
-def sign_request(csr, lifetime=24):
+def sign_request(csr, proxypath=PROXYPATH, lifetime=24):
     """
     Sign proxy.
     """
@@ -126,14 +126,14 @@ def sign_request(csr, lifetime=24):
     if not csr.is_signature_valid:
         raise Exception('Invalid request signature')
 
-    with open(PROXYPATH,'rb') as f:
-        proxy_pem=f.read()
+    with open(proxypath, 'rb') as f:
+        proxy_pem = f.read()
 
     proxy = x509.load_pem_x509_certificate(proxy_pem, default_backend())
 
-    oid=x509.ObjectIdentifier("1.3.6.1.4.1.8005.100.100.5")
-    value=proxy.extensions.get_extension_for_oid(oid).value.value
-    vomsext=x509.extensions.UnrecognizedExtension(oid,value)
+    oid = x509.ObjectIdentifier("1.3.6.1.4.1.8005.100.100.5")
+    value = proxy.extensions.get_extension_for_oid(oid).value.value
+    vomsext = x509.extensions.UnrecognizedExtension(oid, value)
 
     check_rfc_proxy(proxy)
     key = serialization.load_pem_private_key(proxy_pem, password=None, backend=default_backend())
@@ -171,11 +171,11 @@ def sign_request(csr, lifetime=24):
                        x509.ObjectIdentifier("1.3.6.1.5.5.7.1.14"),
                        b"0\x0c0\n\x06\x08+\x06\x01\x05\x05\x07\x15\x01"),
                                   critical=True) \
-                   .add_extension(vomsext,
-                                  critical=False) \
                    .sign(private_key=key,
                          algorithm=proxy.signature_hash_algorithm,
                          backend=default_backend())
+                   #.add_extension(vomsext,
+                   #               critical=False) \
     return new_cert.public_bytes(serialization.Encoding.PEM)
 
 
