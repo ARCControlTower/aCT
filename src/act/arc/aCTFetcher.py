@@ -3,17 +3,16 @@
 # Fetches output from finished jobs
 #
 
+import datetime
 import os
 import shutil
-import datetime
 from http.client import HTTPException
 from json import JSONDecodeError
 from ssl import SSLError
 from urllib.parse import urlparse
 
-from act.arc.rest import RESTClient
+from act.arc.rest import ARCError, ARCHTTPError, RESTClient
 from act.common.aCTProcess import aCTProcess
-from act.common.exceptions import ACTError, ARCHTTPError
 
 
 class aCTFetcher(aCTProcess):
@@ -65,7 +64,7 @@ class aCTFetcher(aCTProcess):
                 # TODO: hardcoded workers
                 results = restClient.fetchJobs(self.tmpdir, jobs, workers=10, logger=self.log)
 
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")

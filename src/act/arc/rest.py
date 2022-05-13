@@ -9,10 +9,7 @@ from http.client import (HTTPConnection, HTTPException, HTTPSConnection,
                          RemoteDisconnected)
 from urllib.parse import urlencode, urlparse
 
-from act.client.x509proxy import signRequest, parsePEM
-from act.common.exceptions import (ACTError, ARCHTTPError,
-                                   DescriptionParseError,
-                                   DescriptionUnparseError, InputFileError, NoValueInARCResult)
+from act.client.x509proxy import parsePEM, signRequest
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -177,7 +174,7 @@ class RESTClient:
             # and there is no simple way to encode both errors for now
             except (HTTPException, ConnectionError):
                 pass
-            raise ACTError(f"Error delegating proxy {self.httpClient.proxypath} for delegation {delegationID}: {exc}")
+            raise ARCError(f"Error delegating proxy {self.httpClient.proxypath} for delegation {delegationID}: {exc}")
 
     def createDelegation(self):
         csr, delegationID = self.POSTNewDelegation()
@@ -202,7 +199,7 @@ class RESTClient:
         Submit jobs specified in given list of job dicts.
 
         Raises:
-            - ACTError
+            - ARCError
             - ARCHTTPError
             - http.client.HTTPException
             - ConnectionError
@@ -531,7 +528,7 @@ class RESTClient:
             return jobs
 
         if action not in ACTIONS:
-            raise ACTError(f"Invalid job management operation: {action}")
+            raise ARCError(f"Invalid job management operation: {action}")
 
         # JSON data for request
         tomanage = [{"id": job["arcid"]} for job in jobs]
@@ -811,7 +808,7 @@ def downloadListing(httpClient, url):
     try:
         listing = json.loads(resp.read().decode())
     except json.JSONDecodeError as e:
-        raise ACTError(f"Error decoding JSON listing {url}: {e}")
+        raise ARCError(f"Error decoding JSON listing {url}: {e}")
 
     return listing
 
@@ -891,3 +888,37 @@ def processJobDescription(jobdesc):
         else:
             outfile.Name = logpath
         jobdesc.DataStaging.OutputFiles.append(outfile)
+
+
+class ARCError(Exception):
+
+    def __init__(self, msg=""):
+        self.msg = msg
+
+    def __str__(self):
+        return self.msg
+
+
+class ARCHTTPError(ARCError):
+    """ARC REST HTTP status error."""
+
+    def __init__(self, status, text, msg=""):
+        super().__init__(msg)
+        self.status = status
+        self.text = text
+
+
+class DescriptionParseError(ARCError):
+    pass
+
+
+class DescriptionUnparseError(ARCError):
+    pass
+
+
+class InputFileError(ARCError):
+    pass
+
+
+class NoValueInARCResult(ARCError):
+    pass

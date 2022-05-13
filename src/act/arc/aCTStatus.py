@@ -70,10 +70,9 @@ from http.client import HTTPException
 from ssl import SSLError
 from urllib.parse import urlparse
 
-from act.arc.rest import RESTClient
+from act.arc.rest import ARCError, ARCHTTPError, RESTClient
 from act.common.aCTProcess import aCTProcess
 from act.common.config import Config
-from act.common.exceptions import ACTError, ARCHTTPError
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
@@ -171,7 +170,7 @@ class aCTStatus(aCTProcess):
                 restClient = RESTClient(url.hostname, port=url.port, proxypath=proxypath)
                 joblist = {job["id"] for job in restClient.getJobsList()}  # set type for performance
                 tocheck = restClient.getJobsInfo(tocheck)
-            except (HTTPException, ConnectionError, SSLError, ACTError, ARCHTTPError, TimeoutError) as e:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
                 continue
             finally:
