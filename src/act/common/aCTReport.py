@@ -104,7 +104,7 @@ class aCTReport:
     def ArcJobReport(self):
         rep={}
         rtot={}
-        states = ["Undefined", "Accepted", "Preparing", "Submitting",
+        states = ["Undefined", "Accepting", "Accepted", "Preparing", "Submitting",
                  "Queuing", "Running", "Finishing", "Finished", "Hold", "Killed",
                  "Failed", "Deleted", "Other"]
 

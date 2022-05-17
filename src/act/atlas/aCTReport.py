@@ -111,6 +111,6 @@ def HarvesterReport():
             log += '\n'
         log += f"{'Totals':>28}:  submitted: {rtot['submitted']}  running: {rtot['running']}\n\n"
     except:
-        pass
+        log += "Harvester db lookup error"
 
     return log
