@@ -33,12 +33,12 @@ class aCTDBMS(object):
 
     def __init__(self, log, config):
         self.log = log
-        self.socket = config.db.socket
+        self.socket = config.db.socket or None
         self.dbname = config.db.name
-        self.user = config.db.user
-        self.passwd = config.db.password
-        self.host = config.db.host
-        self.port = config.db.port
+        self.user = config.db.user or None
+        self.passwd = config.db.password or None
+        self.host = config.db.host or None
+        self.port = config.db.port or None
 
     # Each subclass must implement the 6 methods below
     def getCursor(self):

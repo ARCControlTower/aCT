@@ -49,7 +49,7 @@ cad = {
 p=aCTProxy(logging.getLogger(), 1)
 voms="atlas"
 attribute="" # e.g. attribute="/atlas/Role=production"
-proxypath=p.conf.get(["voms", "proxypath"])
+proxypath=p.conf.voms.proxypath
 validHours=5
 proxyid=1 # p.createVOMSAttribute(voms, attribute, proxypath, validHours)
 
