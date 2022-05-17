@@ -31,10 +31,10 @@ class aCTDBMySQL(aCTDBMS):
             self.log.warning("Database session closed")
 
     def _connect(self, dbname=None):
-        if self.socket != 'None':
+        if self.socket:
             self.conn = mysql.connect(unix_socket=self.socket, database=dbname)
         elif self.user and self.passwd:
-            if self.host != 'None' and self.port != 'None':
+            if self.host and self.port:
                 self.conn = mysql.connect(user=self.user, password=self.passwd, host=self.host, port=self.port, database=dbname, ssl_disabled=True)
             else:
                 self.conn = mysql.connect(user=self.user, password=self.passwd, db=dbname)

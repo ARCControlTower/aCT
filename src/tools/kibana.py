@@ -56,10 +56,7 @@ def getPandaDoneFailed():
 def getAvailability():
 
     # Check autopilot is running
-    try:
-        logdir = config.get(["logger", "logdir"])
-    except:
-        logdir = config.logger.logdir
+    logdir = config.logger.logdir
     try:
         mtime = os.stat('%s/aCTAutopilot.log' % logdir).st_mtime
     except:

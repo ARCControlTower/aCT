@@ -178,7 +178,7 @@ class aCTCRICParser:
                 time.sleep(10)
 
         # check if json file or config file changed before parsing
-        if (self.tparse < cricmtime) or (self.tparse < os.stat(self.conf.configfile).st_mtime):
+        if (self.tparse < cricmtime) or (self.tparse < os.stat(self.conf.path).st_mtime):
             self.log.info("CRIC file and/or config modified, reparsing site info")
             pilotmgr = self.conf.cric.pilotmanager
             pilotver = self.conf.cric.pilotversion
