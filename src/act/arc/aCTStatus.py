@@ -72,7 +72,6 @@ from urllib.parse import urlparse
 
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTProcess import aCTProcess
-from act.common.exceptions import ACTError, ARCHTTPError
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
