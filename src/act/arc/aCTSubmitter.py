@@ -407,7 +407,7 @@ class aCTSubmitter(aCTProcess):
                     self.log.debug(f"Successfully cleaned job {job['appjobid']} {job['id']}")
                 else:
                     for error in job["errors"]:
-                        self.log.error(f"Error cleaning job {job['appjobid']} {job['id']}: {job['msg']}")
+                        self.log.error(f"Error cleaning job {job['appjobid']} {job['id']}: {error}")
 
             # update DB
             for job in toclean:
