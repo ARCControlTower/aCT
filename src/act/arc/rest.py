@@ -209,40 +209,44 @@ class ARCRest:
         # get delegation for proxy
         delegationID = self.createDelegation()
 
-        # add delegation and queue to description, unparse to ADL
         jobdescs = arc.JobDescriptionList()
         tosubmit = []  # sublist of jobs that will be submitted
+        bulkdesc = ""
         for job in jobs:
             job["errors"] = []
             job["delegation"] = delegationID
 
-            # parse job description, add queue and delegation, unparse
+            # parse job description
             if not arc.JobDescription_Parse(job["descstr"], jobdescs):
                 job["errors"].append(DescriptionParseError("Failed to parse description"))
                 continue
-            job["desc"] = jobdescs[-1]
-            job["desc"].Resources.QueueName = queue
-            job["desc"].DataStaging.DelegationID = delegationID
-            processJobDescription(job["desc"])
-            unparseResult = job["desc"].UnParse("emies:adl")
-            #unparseResult = job["desc"].UnParse("nordugrid:xrsl")
+
+            # add queue and delegation, modify description as necessary for
+            # ARC client
+            desc = jobdescs[-1]
+            desc.Resources.QueueName = queue
+            desc.DataStaging.DelegationID = delegationID
+            processJobDescription(desc)
+
+            # parse input files and determine uploads
+            job["uploads"] = self.getInputUploads(job, desc)
+            if job["errors"]:
+                continue
+
+            # unparse modified description, remove xml version node because it
+            # is not accepted by ARC CE, add to bulk description
+            unparseResult = desc.UnParse("emies:adl")
             if not unparseResult[0]:
                 job["errors"].append(DescriptionUnparseError("Could not unparse modified description"))
                 continue
-            # throw away xml version node
             descstart = unparseResult[1].find("<ActivityDescription")
-            job["adl"] = unparseResult[1][descstart:]
+            bulkdesc += unparseResult[1][descstart:]
 
             tosubmit.append(job)
 
         # merge into bulk descriptions
-        if len(tosubmit) == 1:
-            bulkdesc = tosubmit[0]["adl"]
-        else:
-            bulkdesc = "<ActivityDescriptions>"
-            for job in tosubmit:
-                bulkdesc += job["adl"]
-            bulkdesc += "</ActivityDescriptions>"
+        if len(tosubmit) > 1:
+            bulkdesc = f"<ActivityDescriptions>{bulkdesc}</ActivityDescriptions>"
 
         # submit jobs to ARC
         resp = self.httpClient.request(
@@ -252,13 +256,11 @@ class ARCRest:
             headers={"Accept": "application/json", "Content-type": "application/xml"}
         )
         respstr = resp.read().decode()
-
         if resp.status != 201:
             raise ARCHTTPError(resp.status, respstr, f"Cannot submit jobs: {resp.status} {respstr}")
 
-        jsonData = json.loads(respstr)
-
         # get a list of submission results
+        jsonData = json.loads(respstr)
         if isinstance(jsonData["job"], dict):
             results = [jsonData["job"]]
         else:
@@ -269,8 +271,6 @@ class ARCRest:
         for job, result in zip(tosubmit, results):
             code, reason = int(result["status-code"]), result["reason"]
             if code != 201:
-                # TODO: Are there any error cases where this error could be
-                # recovered? In such case a specific exception is needed.
                 job["errors"].append(ARCHTTPError(code, reason, f"Submittion error: {code} {reason}"))
             else:
                 job["arcid"] = result["id"]
@@ -280,7 +280,7 @@ class ARCRest:
 
         return jobs
 
-    def getInputUploads(self, job):
+    def getInputUploads(self, job, desc):
         """
         Return a list of upload dicts.
 
@@ -288,7 +288,7 @@ class ARCRest:
             - InputFileError
         """
         uploads = []
-        for infile in job["desc"].DataStaging.InputFiles:
+        for infile in desc.DataStaging.InputFiles:
             try:
                 path = isLocalInputFile(infile.Name, infile.Sources[0].fullstr())
             except InputFileError as exc:
@@ -319,20 +319,14 @@ class ARCRest:
         # put uploads to queue, create cancel events for jobs
         jobsdict = {}
         for job in jobs:
-            # if there is any error with input files do not add the rest
-            # of the input files to queue
-            uploads = self.getInputUploads(job)
-            if job["errors"]:
-                continue
-
             jobsdict[job["id"]] = job
             job["cancel_event"] = threading.Event()
 
-            for upload in uploads:
+            for upload in job["uploads"]:
                 uploadQueue.put(upload)
         if uploadQueue.empty():
             return jobs
-        numWorkers = min(len(uploads), workers)
+        numWorkers = min(len(job["uploads"]), workers)
 
         # create HTTP clients for workers
         httpClients = []
