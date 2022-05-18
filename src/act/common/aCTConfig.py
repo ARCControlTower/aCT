@@ -20,6 +20,15 @@ class DictObj:
         """Implement dict like iteration over attributes and values."""
         return iter(vars(self).items())
 
+    def __getitem__(self, key):
+        """
+        Return attribute or empty DictObj if accessed with index.
+
+        This method makes DictObj subscriptable to avoid exception in cases
+        when nonexistent list attributes are accessed as part of a chain.
+        """
+        return getattr(self, key) if isinstance(key, str) else DictObj({})
+
     def __getattr__(self, attr):
         """Return empty object on missing attribute."""
         return DictObj({})
@@ -66,7 +75,11 @@ class aCTConfig:
 
     def __iter__(self):
         """Proxy conf object iteration."""
-        return iter(vars(self.conf).items())
+        return iter(self.conf)
+
+    def __getitem__(self, key):
+        """Proxy conf object list access."""
+        return self.conf[key]
 
     def __getattr__(self, attr):
         """Proxy conf object attributes."""
@@ -74,11 +87,11 @@ class aCTConfig:
 
     def __bool__(self):
         """Proxy boolean value for conf object."""
-        return bool(vars(self.conf))
+        return bool(self.conf)
 
     def __contains__(self, attr):
         """Proxy existence check with "in" keyword for conf object."""
-        return attr in vars(self.conf)
+        return attr in self.conf
 
     def get(self, attr, default=None):
         """Proxy dict like attr access with attr name and default value."""
@@ -168,3 +181,5 @@ if __name__ == "__main__":
 
     for site in conf.panda.sites:
         print(f"site: {site}")
+
+    print(f'conf.blablabla.blablablabla.voms.roles[10].whatever.somemoreblablabla.get("maxtimerunning", 1234): {conf.blablabla.blablablabla.voms.roles[10].whatever.somemoreblablabla.get("maxtimerunning", 1234)}')
