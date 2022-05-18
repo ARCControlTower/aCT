@@ -525,11 +525,10 @@ class ARCRest:
 
         # JSON data for request
         tomanage = [{"id": job["arcid"]} for job in jobs]
-        jsonData = {}
         if len(tomanage) == 1:
-            jsonData["job"] = tomanage[0]
+            jsonData = {"job": tomanage[0]}
         else:
-            jsonData["job"] = tomanage
+            jsonData = {"job": tomanage}
 
         # execute action and get JSON result
         resp = self.httpClient.request(
