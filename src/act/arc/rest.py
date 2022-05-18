@@ -302,7 +302,7 @@ class ARCRest:
                 continue
 
             uploads.append({
-                "jobid": job["id"],
+                "jobid": job["arcid"],
                 "url": f"{self.baseURL}/jobs/{job['arcid']}/session/{infile.Name}",
                 "path": path
             })
@@ -319,7 +319,7 @@ class ARCRest:
         # put uploads to queue, create cancel events for jobs
         jobsdict = {}
         for job in jobs:
-            jobsdict[job["id"]] = job
+            jobsdict[job["arcid"]] = job
             job["cancel_event"] = threading.Event()
 
             for upload in job["uploads"]:
@@ -375,9 +375,8 @@ class ARCRest:
 
         jobsdict = {}
         for job in jobs:
-            # create cancel event and add to jobsdict
+            jobsdict[job["arcid"]] = job
             job["cancel_event"] = threading.Event()
-            jobsdict[job["id"]] = job
 
             # Add diagnose files to transfer queue and remove them from
             # downloadfiles string. Replace download files with a list of
@@ -386,7 +385,7 @@ class ARCRest:
 
             # add job session directory as a listing transfer
             transferQueue.put({
-                "jobid": job["id"],
+                "jobid": job["arcid"],
                 "url": f"{self.baseURL}/jobs/{job['arcid']}/session",
                 "filename": "",
                 "type": "listing"
@@ -455,7 +454,7 @@ class ARCRest:
         for diagFile in diagFiles:
             diagName = diagFile.split("/")[-1]
             transferQueue.put({
-                "jobid": job["id"],
+                "jobid": job["arcid"],
                 "url": f"{self.baseURL}/jobs/{job['arcid']}/diagnose/{diagName}",
                 "filename": diagFile,
                 "type": "diagnose"
@@ -695,7 +694,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
 
                 logger.error(str(exc))
                 resultQueue.put({
-                    "jobid": job["id"],
+                    "jobid": job["arcid"],
                     "error": exc
                 })
 
@@ -703,7 +702,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                 job["cancel_event"].set()
                 logger.error(str(exc))
                 resultQueue.put({
-                    "jobid": job["id"],
+                    "jobid": job["arcid"],
                     "error": exc
                 })
                 continue
@@ -731,7 +730,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
             except ARCHTTPError as exc:
                 logger.error(f"Error downloading listing {transfer['url']}: {exc}")
                 resultQueue.put({
-                    "jobid": job["id"],
+                    "jobid": job["arcid"],
                     "error": exc
                 })
                 continue
@@ -739,7 +738,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                 job["cancel_event"].set()
                 logger.error(str(exc))
                 resultQueue.put({
-                    "jobid": job["id"],
+                    "jobid": job["arcid"],
                     "error": exc
                 })
                 continue
@@ -756,7 +755,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                     else:  # if session root, slash needs to be skipped
                         filename = f
                     transferQueue.put({
-                        "jobid": job["id"],
+                        "jobid": job["arcid"],
                         "type": "file",
                         "filename": filename,
                         "url": f"{endpoint}/jobs/{job['arcid']}/session/{filename}"
@@ -770,7 +769,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                     else:  # if session root, slash needs to be skipped
                         filename = d
                     transferQueue.put({
-                        "jobid": job["id"],
+                        "jobid": job["arcid"],
                         "type": "listing",
                         "filename": filename,
                         "url": f"{endpoint}/jobs/{job['arcid']}/session/{filename}"
