@@ -33,6 +33,11 @@ class aCTPanda2Xrsl:
         if self.maxwalltime == 0:
             self.maxwalltime = 7*24*60
 
+        self.pilotargs = None
+        params = siteinfo.get("params", None)
+        if params is not None:
+            self.pilotargs = params.get("pilot_args", None)
+
         self.created = pandadbjob['created']
         self.wrapper = atlasconf.executable.wrapperurl
         if self.prodSourceLabel.startswith('rc_'):
@@ -306,7 +311,7 @@ class aCTPanda2Xrsl:
     def setArguments(self):
 
         #pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-d" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s"' \
-        pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s" "--pilotversion" "%s"' \
+        pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-j" "%s" "--pilot-user" "ATLAS" "--harvester-submit-mode" "PUSH" "-w" "generic" "--job-type" "%s" "--resource-type" "%s" "--pilotversion" "%s"' \
                 % (self.schedconfig, self.sitename, self.sitename, self.prodSourceLabel, self.getJobType(), self.getResourceType(), self.pilotversion)
         if self.prodSourceLabel == 'rc_alrb':
             pargs += ' "-i" "ALRB"'
@@ -320,6 +325,9 @@ class aCTPanda2Xrsl:
                 pargs += ' "--piloturl" "%s"' % (self.piloturl)
         else:
             pargs += ' "-z" "-t" "--piloturl" "local" "--mute"'
+
+        if self.pilotargs is not None:
+            pargs += ' "%s"' % self.pilotargs
 
         self.xrsl['arguments'] = '(arguments = %s)' % pargs
 
