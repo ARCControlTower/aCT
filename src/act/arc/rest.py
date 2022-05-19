@@ -223,19 +223,14 @@ class ARCRest:
 
             # add queue and delegation, modify description as necessary for
             # ARC client
-            desc = jobdescs[-1]
-            desc.Resources.QueueName = queue
-            desc.DataStaging.DelegationID = delegationID
-            processJobDescription(desc)
-
-            # parse input files and determine uploads
-            job["uploads"] = self.getInputUploads(job, desc)
-            if job["errors"]:
-                continue
+            job["desc"] = jobdescs[-1]
+            job["desc"].Resources.QueueName = queue
+            job["desc"].DataStaging.DelegationID = delegationID
+            processJobDescription(job["desc"])
 
             # unparse modified description, remove xml version node because it
             # is not accepted by ARC CE, add to bulk description
-            unparseResult = desc.UnParse("emies:adl")
+            unparseResult = job["desc"].UnParse("emies:adl")
             if not unparseResult[0]:
                 job["errors"].append(DescriptionUnparseError("Could not unparse modified description"))
                 continue
@@ -280,7 +275,7 @@ class ARCRest:
 
         return jobs
 
-    def getInputUploads(self, job, desc):
+    def getInputUploads(self, job):
         """
         Return a list of upload dicts.
 
@@ -288,7 +283,7 @@ class ARCRest:
             - InputFileError
         """
         uploads = []
-        for infile in desc.DataStaging.InputFiles:
+        for infile in job["desc"].DataStaging.InputFiles:
             try:
                 path = isLocalInputFile(infile.Name, infile.Sources[0].fullstr())
             except InputFileError as exc:
@@ -319,14 +314,18 @@ class ARCRest:
         # put uploads to queue, create cancel events for jobs
         jobsdict = {}
         for job in jobs:
+            uploads = self.getInputUploads(job)
+            if job["errors"]:
+                continue
+
             jobsdict[job["arcid"]] = job
             job["cancel_event"] = threading.Event()
 
-            for upload in job["uploads"]:
+            for upload in uploads:
                 uploadQueue.put(upload)
         if uploadQueue.empty():
             return jobs
-        numWorkers = min(len(job["uploads"]), workers)
+        numWorkers = min(len(uploads), workers)
 
         # create HTTP clients for workers
         httpClients = []
