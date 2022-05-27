@@ -11,6 +11,7 @@ from act.arc.rest import (ARCError, ARCHTTPError, DescriptionParseError,
                           DescriptionUnparseError, InputFileError,
                           NoValueInARCResult, ARCRest)
 from act.common.aCTProcess import aCTProcess
+from act.common.aCTJob import ACTJob
 
 
 class aCTSubmitter(aCTProcess):
@@ -151,6 +152,9 @@ class aCTSubmitter(aCTProcess):
             #
             ##################################################################
 
+            # For now in case of certain errors (when setJobsArcstate is used)
+            # we don't bother to create job objects from DB dicts.
+
             self.log.info(f"Submitting {len(jobs)} jobs")
 
             # parse cluster URL and queue
@@ -170,14 +174,21 @@ class aCTSubmitter(aCTProcess):
                 continue
 
             # read job descriptions from DB
-            for job in jobs:
-                job["descstr"] = str(self.db.getArcJobDescription(str(job["jobdesc"])))
+            actjobs = []
+            arcjobs = []
+            for dbjob in jobs:
+                job = ACTJob()
+                job.loadARCDBJob(dbjob)
+                job.descstr = str(self.db.getArcJobDescription(str(dbjob["jobdesc"])))
+
+                actjobs.append(job)
+                arcjobs.append(job.arcjob)
 
             # submit jobs to ARC
             arcrest = None
             try:
                 arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
-                jobs = arcrest.submitJobs(queue, jobs, self.log)
+                arcrest.submitJobs(queue, arcjobs, self.log)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error submitting jobs to ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
@@ -191,23 +202,24 @@ class aCTSubmitter(aCTProcess):
                     arcrest.close()
 
             # log submission results and set job state
-            for job in jobs:
-                if not job["errors"]:
-                    job["arcstate"] = "submitted"
-                    self.log.debug(f"Submission successfull for job {job['appjobid']} {job['id']}: {job['arcid']}")
+            for job in actjobs:
+                if not job.arcjob.errors:
+                    job.state = "submitted"
+                    self.log.debug(f"Submission successfull for job {job.appid} {job.arcid}: {job.arcjob.id}")
                 else:
-                    for error in job["errors"]:
+                    for error in job.arcjob.errors:
                         if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError):
-                            job["arcstate"] = "cancelled"
+                            job.state = "cancelled"
                         else:
-                            job["arcstate"] = "tosubmit"
-                        self.log.debug(f"Error submitting job {job['appjobid']} {job['id']}: {error}")
+                            job.state = "tosubmit"
+                        self.log.debug(f"Error submitting job {job.appid} {job.arcid}: {error}")
+
+            tstamp = self.db.getTimeStamp()
 
             # update job records in DB
-            for job in jobs:
+            for job in actjobs:
                 jobdict = {}
-                jobdict["arcstate"] = job["arcstate"]
-                tstamp = self.db.getTimeStamp()
+                jobdict["arcstate"] = job.state
                 jobdict["tarcstate"] = tstamp
                 jobdict["tstate"] = tstamp
                 jobdict["cluster"] = self.cluster
@@ -218,20 +230,13 @@ class aCTSubmitter(aCTProcess):
                     port = url.port
                 interface = f"https://{url.hostname}:{port}/arex"
 
-                if "delegation" in job:
-                    jobdict["DelegationID"] = job["delegation"]
-                if "arcid" in job:
-                    jobdict["IDFromEndpoint"] = job["arcid"]
-                    jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job['arcid']}"
-                if "state" in job:
-                    jobdict["State"] = ARC_STATE_MAPPING[job["state"]]
-
-                jobdict["JobManagementInterfaceName"] = "org.nordugrid.arcrest"
-                jobdict["JobManagementURL"] = interface
-                jobdict["JobStatusInterfaceName"] = "org.nordugrid.arcrest"
-                jobdict["JobStatusURL"] = interface
-                jobdict["ServiceInformationInterfaceName"] = "org.nordugrid.arcrest"
-                jobdict["ServiceInformationURL"] = interface
+                if job.delegid:
+                    jobdict["DelegationID"] = job.delegid
+                if job.arcjob.id:
+                    jobdict["IDFromEndpoint"] = job.arcjob.id
+                    jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job.arcjob.id}"
+                if job.arcjob.state:
+                    jobdict["State"] = ARC_STATE_MAPPING[job.arcjob.state]
 
                 jobdict["ExecutionNode"] = ""
                 jobdict["UsedTotalWallTime"] = 0
@@ -249,8 +254,9 @@ class aCTSubmitter(aCTProcess):
 
     def setJobsArcstate(self, jobs, arcstate, commit=False):
         self.log.debug(f"Setting arcstate of jobs to {arcstate}")
+        tstamp = self.db.getTimeStamp()
         for job in jobs:
-            updateDict = {"arcstate": arcstate, "tarcstate": self.db.getTimeStamp()}
+            updateDict = {"arcstate": arcstate, "tarcstate": tstamp}
             self.db.updateArcJobLazy(job["id"], updateDict)
         if commit:
             self.db.Commit()
@@ -258,9 +264,9 @@ class aCTSubmitter(aCTProcess):
     # jobs that have been in submitting state for more than an hour
     # should be canceled
     def checkFailedSubmissions(self):
-        jobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "jobdesc", "created"])
+        jobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "created"])
         for job in jobs:
-            # TODO: hardcoded
+            # TODO: HARDCODED
             if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
                 self.log.debug(f"Cancelling job {job['appjobid']} {job['id']}")
                 self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
@@ -300,29 +306,24 @@ class aCTSubmitter(aCTProcess):
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)
 
-        for proxyid, jobs in jobsdict.items():
+        for proxyid, dbjobs in jobsdict.items():
 
             # create jobdicts for kill operation
             tokill = []  # all jobs to be killed
             toARCKill = []  # jobs to be killed in ARC
-            for job in jobs:
-                jobdict = {
-                    "arcid": job["IDFromEndpoint"],
-                    "id": job["id"],
-                    "appjobid": job["appjobid"],
-                    "arcstate": "cancelled",
-                    "errors": []
-                }
-                tokill.append(jobdict)
-                if job["IDFromEndpoint"]:
-                    toARCKill.append(jobdict)
+            for dbjob in dbjobs:
+                job = ACTJob()
+                job.loadARCDBJob(dbjob)
+                tokill.append(job)
+                if job.arcjob.id:
+                    toARCKill.append(job.arcjob)
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
             arcrest = None
             try:
                 arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
-                toARCKill = arcrest.killJobs(toARCKill)
+                arcrest.killJobs(toARCKill)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
@@ -331,32 +332,39 @@ class aCTSubmitter(aCTProcess):
                 if arcrest:
                     arcrest.close()
 
-            # log results
-            for job in toARCKill:
-                tstamp = self.db.getTimeStamp()
-                if not job["errors"]:
-                    job["arcstate"] = "cancelling"
-                    self.log.debug(f"ARC will cancel job {job['appjobid']} {job['id']}")
+            tstamp = self.db.getTimeStamp()
+
+            # log results and update DB
+            for job in tokill:
+                state = None
+                if not job.arcjob.errors:
+                    if job.arcjob.id:
+                        state = "cancelling"
+                        self.log.debug(f"ARC will cancel job {job.appid} {job.arcid}")
+                    else:
+                        state = "cancelled"
+                        self.log.debug(f"Job {job.appid} {job.arcid} cancelled")
                 else:
-                    for error in job["errors"]:
+                    for error in job.arcjob.errors:
                         if isinstance(error, ARCHTTPError):
                             if error.status == 404:
-                                self.log.error(f"Job {job['appjobid']} {job['id']} not found, setting to cancelled")
-                                self.db.updateArcJobLazy(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                                continue
-                        self.log.error(f"Error killing job {job['appjobid']} {job['id']}: {error}")
+                                state = "cancelled"
+                                self.log.error(f"Job {job.appid} {job.arcid} not found, setting to cancelled")
+                        self.log.error(f"Error killing job {job.appid} {job.arcid}: {error}")
 
-            # update DB
-            for job in tokill:
-                jobdict = {"arcstate": job["arcstate"], "tarcstate": self.db.getTimeStamp()}
-                self.db.updateArcJobLazy(job["id"], jobdict)
+                if state:
+                    self.db.updateArcJobLazy(
+                        job.arcid,
+                        {"arcstate": state, "tarcstate": tstamp}
+                    )
+
             self.db.Commit()
 
     # This does not handle jobs with empty clusterlist. What about that?
     #
     # This does not kill jobs (before cleaning them)!!!
     def processToResubmit(self):
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "cluster"]
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
         # parse cluster URL
         try:
@@ -382,28 +390,24 @@ class aCTSubmitter(aCTProcess):
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)
 
-        for proxyid, jobs in jobsdict.items():
+        for proxyid, dbjobs in jobsdict.items():
 
             # create job dicts for clean operation
-            toclean = []
+            toresubmit = []
             toARCClean = []
-            for job in jobs:
-                jobdict = {
-                    "arcid": job["IDFromEndpoint"],
-                    "id": job["id"],
-                    "appjobid": job["appjobid"],
-                    "errors": []
-                }
-                toclean.append(jobdict)
-                if "cluster" in job:
-                    toARCClean.append(jobdict)
+            for dbjob in dbjobs:
+                job = ACTJob()
+                job.loadARCDBJob(dbjob)
+                toresubmit.append(job)
+                if job.arcjob.id:
+                    toARCClean.append(job.arcjob)
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
             arcrest = None
             try:
                 arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
-                toARCClean = arcrest.cleanJobs(toARCClean)
+                arcrest.cleanJobs(toARCClean)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
@@ -413,20 +417,21 @@ class aCTSubmitter(aCTProcess):
                     arcrest.close()
 
             # log results
-            for job in toARCClean:
-                if not job["errors"]:
-                    self.log.debug(f"Successfully cleaned job {job['appjobid']} {job['id']}")
+            for job in toresubmit:
+                if not job.arcjob.errors:
+                    if job.arcjob.id:
+                        self.log.debug(f"Successfully cleaned job {job.appid} {job.arcid}")
                 else:
-                    for error in job["errors"]:
-                        self.log.error(f"Error cleaning job {job['appjobid']} {job['id']}: {error}")
+                    for error in job.arcjob.errors:
+                        self.log.error(f"Error cleaning job {job.appid} {job.arcid}: {error}")
 
             # update DB
-            for job in toclean:
+            for job in toresubmit:
                 tstamp = self.db.getTimeStamp()
                 # "created" needs to be reset so that it doesn't get understood
                 # as failing to submit since first insertion.
                 jobdict = {"arcstate": "tosubmit", "tarcstate": tstamp, "created": tstamp}
-                self.db.updateArcJobLazy(job["id"], jobdict)
+                self.db.updateArcJobLazy(job.arcid, jobdict)
             self.db.Commit()
 
     def processToRerun(self):
@@ -456,18 +461,14 @@ class aCTSubmitter(aCTProcess):
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)
 
-        for proxyid, jobs in jobsdict.items():
+        for proxyid, dbjobs in jobsdict.items():
 
             # create a list of jobdicts to be rerun
             torerun = []
-            for job in jobs:
-                jobdict = {
-                    "arcid": job["IDFromEndpoint"],
-                    "id": job["id"],
-                    "appjobid": job["appjobid"],
-                    "errors": []
-                }
-                torerun.append(jobdict)
+            for dbjob in dbjobs:
+                job = ACTJob()
+                job.loadARCDBJob(dbjob)
+                torerun.append(job)
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
@@ -478,23 +479,22 @@ class aCTSubmitter(aCTProcess):
                 # get delegations for jobs
                 # AF BUG
                 try:
-                    torerun = arcrest.getJobsDelegations(torerun, self.log)
+                    arcrest.getJobsDelegations(torerun, self.log)
                 except:
                     self.log.error("GET JOBS DELEGATIONS EXCEPTION")
                     import traceback
                     self.log.debug(traceback.format_exc())
-                    torerun = []
 
                 # renew delegations
                 torestart = []
                 for job in torerun:
-                    if not job["errors"]:
+                    if not job.arcjob.errors:
                         try:
-                            arcrest.renewDelegation(job["delegation_id"])
+                            arcrest.renewDelegation(job.delegid)
                         except Exception as exc:
-                            job["errors"].append(exc)
+                            job.arcjobs.errors.append(exc)
                         else:
-                            torestart.append(job)
+                            torestart.append(job.arcjob)
 
                 # restart jobs
                 arcrest.restartJobs(torestart)
@@ -507,39 +507,40 @@ class aCTSubmitter(aCTProcess):
                 if arcrest:
                     arcrest.close()
 
+            tstamp = self.db.getTimeStamp()
+
             # log results and update DB
             for job in torerun:
-                tstamp = self.db.getTimeStamp()
-                if job["errors"]:
+                if job.arcjobs.errors:
                     cannotRerun = False
-                    for error in job["errors"]:
+                    for error in job.arcjob.errors:
                         if isinstance(error, ARCHTTPError):
                             if error.status == 505 and error.text == "No more restarts allowed":
-                                self.log.error(f"Restart of job {job['appjobid']} {job['id']} not allowed, setting to failed")
-                                self.db.updateArcJobLazy(job["id"], {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
+                                self.log.error(f"Restart of job {job.appid} {job.arcid} not allowed, setting to failed")
+                                self.db.updateArcJobLazy(job.arcid, {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
                                 cannotRerun = True
                             elif error.status == 505 and error.text == "Job has not failed":
-                                self.log.error(f"Job {job['appjobid']} {job['id']} has not failed, setting to submitted")
-                                self.db.updateArcJobLazy(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
+                                self.log.error(f"Job {job.appid} {job.arcid} has not failed, setting to submitted")
+                                self.db.updateArcJobLazy(job.arcid, {"arcstate": "submitted", "tarcstate": tstamp})
                                 cannotRerun = True
                             elif error.status == 404:
-                                self.log.error(f"Job {job['appjobid']} {job['id']} not found, cancelling")
-                                self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                                self.log.error(f"Job {job.appid} {job.arcid} not found, cancelling")
+                                self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
                                 cannotRerun = True
                             else:
                                 # TODO: is just using error.__str__() good enough?
-                                self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error.status} {error.text}")
+                                self.log.error(f"Error rerunning job {job.appid} {job.arcid}: {error.status} {error.text}")
                         elif isinstance(error, NoValueInARCResult):
                             self.log.error(f"{error}")
-                            self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                            self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
                             cannotRerun = True
                         else:
-                            self.log.error(f"Error rerunning job {job['appjobid']} {job['id']}: {error}")
+                            self.log.error(f"Error rerunning job {job.appid} {job.arcid}: {error}")
                     if not cannotRerun:
-                        self.db.updateArcJobLazy(job["id"], {"arcstate": "torerun", "tarcstate": tstamp})
+                        self.db.updateArcJobLazy(job.arcid, {"arcstate": "torerun", "tarcstate": tstamp})
                 else:
-                    self.log.info(f"Successfully rerun job {job['appjobid']} {job['id']}")
-                    self.db.updateArcJobLazy(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
+                    self.log.info(f"Successfully rerun job {job.appid} {job.arcid}")
+                    self.db.updateArcJobLazy(job.arcid, {"arcstate": "submitted", "tarcstate": tstamp})
             self.db.Commit()
 
     def process(self):
