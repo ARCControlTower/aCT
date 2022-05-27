@@ -72,6 +72,7 @@ from urllib.parse import urlparse
 
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTProcess import aCTProcess
+from act.common.aCTJob import ACTJob
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
@@ -128,7 +129,7 @@ class aCTStatus(aCTProcess):
         self.checktime = time.time()
 
         # check jobs which were last checked more than checkinterval ago
-        # TODO: hardcoded
+        # TODO: HARDCODED
         tstampCond = self.db.timeStampLessThan("tarcstate", self.conf.jobs.checkinterval)
         jobstocheck = self.db.getArcJobsInfo(
             "arcstate in ('submitted', 'running', 'finishing', 'cancelling', "
@@ -148,20 +149,16 @@ class aCTStatus(aCTProcess):
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)
 
-        for proxyid, jobs in jobsdict.items():
-
+        for proxyid, dbjobs in jobsdict.items():
+            jobs = []
             tocheck = []
-            for job in jobs:
-                jobdict = {
-                    "arcid": job["IDFromEndpoint"],
-                    "id": job["id"],
-                    "appjobid": job["appjobid"],
-                    "State": job["State"],
-                    "created": job["created"],
-                    "errors": [],
-                    "tstate": job["tstate"],
-                }
-                tocheck.append(jobdict)
+            oldStates = {}
+            for dbjob in dbjobs:
+                job = ACTJob()
+                job.loadARCDBJob(dbjob)
+                jobs.append(job)
+                tocheck.append(job.arcjob)
+                oldStates[job.arcid] = job.arcjob.state
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
@@ -169,7 +166,7 @@ class aCTStatus(aCTProcess):
             try:
                 arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
                 joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
-                tocheck = arcrest.getJobsInfo(tocheck)
+                arcrest.getJobsInfo(tocheck)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
                 continue
@@ -177,79 +174,71 @@ class aCTStatus(aCTProcess):
                 if arcrest:
                     arcrest.close()
 
+            tstamp = self.db.getTimeStamp()
+
             # process jobs and update DB
-            for job in tocheck:
-                tstamp = self.db.getTimeStamp()
+            for job in jobs:
 
                 # cancel jobs that are stuck in tstate and not in job list anymore
-                if job["tstate"] + timedelta(days=7) < datetime.utcnow():
-                    if job["arcid"] not in joblist:
-                        self.log.error(f"Job {job['appjobid']} {job['id']} not in ARC anymore, cancelling")
-                        self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                # TODO: HARDCODED
+                if job.arcjob.tstate + timedelta(days=7) < datetime.utcnow():
+                    if job.arcjob.id not in joblist:
+                        self.log.error(f"Job {job.appid} {job.arcid} not in ARC anymore, cancelling")
+                        self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
                         continue
 
-                if job["errors"]:
-                    for error in job["errors"]:
+                if job.arcjob.errors:
+                    for error in job.arcjob.errors:
                         if isinstance(error, ARCHTTPError):
                             if error.status == 404:
-                                self.log.error(f"Job {job['appjobid']} {job['id']} not found, cancelling")
-                                self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                                self.log.error(f"Job {job.appid} {job.arcid} not found, cancelling")
+                                self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
                                 continue
-                        self.log.error(f"Error checking {job['appjobid']} {job['id']}: {error}")
+                        self.log.error(f"Error checking {job.appid} {job.arcid}: {error}")
                     continue
 
-                # get activity dictionary from document
-                activityDict = job["info_document"].get("ComputingActivity", {})
-
-                # get state from a list of activity states in different systems
-                restState = ""
-                for state in activityDict.get("State", []):
-                    if state.startswith("arcrest:"):
-                        restState = state[len("arcrest:"):]
-                if not restState:
+                if not job.arcjob.state:
                     continue
 
-                mappedState = ARC_STATE_MAPPING[restState]
-                if job["State"] == mappedState:
-                    self.db.updateArcJobLazy(job["id"], {"tarcstate": tstamp})
+                mappedState = ARC_STATE_MAPPING[job.arcjob.state]
+                if oldStates[job.arcid] == mappedState:
+                    self.db.updateArcJobLazy(job.arcid, {"tarcstate": tstamp})
                     continue
 
-                self.log.info(f"ARC status change for job {job['appjobid']}: {job['State']} -> {mappedState}")
+                self.log.info(f"ARC status change for job {job.appid}: {oldStates[job.arcid]} -> {mappedState}")
 
                 jobdict = {"State": mappedState, "tstate": tstamp}
 
-                if restState in ("ACCEPTING", "ACCEPTED", "PREPARING",
-                                    "PREPARED", "SUBMITTING", "QUEUING"):
+                if job.arcjob.state in ("ACCEPTING", "ACCEPTED", "PREPARING", "PREPARED", "SUBMITTING", "QUEUING"):
                     jobdict["arcstate"] = "submitted"
 
-                elif restState in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
+                elif job.arcjob.state in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
                     jobdict["arcstate"] = "running"
 
-                elif restState == "HELD":
+                elif job.arcjob.state == "HELD":
                     jobdict["arcstate"] = "holding"
 
-                elif restState == "FINISHING":
+                elif job.arcjob.state == "FINISHING":
                     jobdict["arcstate"] = "finishing"
 
-                elif restState == "FINISHED":
-                    exitCode = activityDict.get("ExitCode", -1)
-                    if exitCode == -1:
+                elif job.arcjob.state == "FINISHED":
+                    if job.ExitCode is None:
                         # missing exit code, but assume success
-                        self.log.warning(f"Job {job['appjobid']} is finished but has missing exit code, setting to zero")
+                        self.log.warning(f"Job {job.appid} is finished but has missing exit code, setting to zero")
                         jobdict["ExitCode"] = 0
                     else:
-                        jobdict["ExitCode"] = exitCode
+                        jobdict["ExitCode"] = job.ExitCode
                     jobdict["arcstate"] = "finished"
 
-                elif restState == "FAILED":
+                elif job.arcjob.state == "FAILED":
                     jobdict["arcstate"] = "failed"
-                    patchDict = self.processJobErrors(job, activityDict)
+                    patchDict = self.processJobErrors(job)
                     jobdict.update(patchDict)
 
-                elif restState == "KILLED":
+                elif job.arcjob.state == "KILLED":
                     jobdict["arcstate"] = "cancelled"
 
-                elif restState == "WIPED":
+                elif job.arcjob.state == "WIPED":
                     jobdict["arcstate"] = "cancelled"
 
                 if "arcstate" in jobdict:
@@ -257,78 +246,69 @@ class aCTStatus(aCTProcess):
 
                 # difference of two datetime objects yields timedelta object
                 # with seconds attribute
-                fromCreated = (datetime.utcnow() - job["created"]).seconds // 60
+                fromCreated = (datetime.utcnow() - job.tcreated).seconds // 60
 
-                if "UsedTotalWallTime" in activityDict and "RequestedSlots" in activityDict:
-                    wallTime = int(activityDict["UsedTotalWallTime"])
-                    slots = int(activityDict["RequestedSlots"])
-                    wallTime = wallTime // slots
+                if job.UsedTotalWallTime and job.RequestedSlots != -1:
+                    wallTime = job.UsedTotalWallTime // job.RequestedSlots
                     if wallTime > fromCreated:
-                        self.log.warning(f"Job {job['appjobid']}: Fixing reported walltime {wallTime} to {fromCreated}")
+                        self.log.warning(f"Job {job.appid}: Fixing reported walltime {wallTime} to {fromCreated}")
                         jobdict["UsedTotalWallTime"] = fromCreated
                     else:
                         jobdict["UsedTotalWallTime"] = wallTime
                 else:
-                    self.log.warning(f"Job {job['appjobid']}: No reported walltime, using DB timestamps: {fromCreated}")
+                    self.log.warning(f"Job {job.appid}: No reported walltime, using DB timestamps: {fromCreated}")
                     jobdict["UsedTotalWallTime"] = fromCreated
 
-                if "UsedTotalCPUTime" in activityDict:
-                    cpuTime = int(activityDict["UsedTotalCPUTime"])
-                    if cpuTime and cpuTime > 10 ** 7:
-                        self.log.warning(f"Job {job['appjobid']}: Discarding reported CPUtime {cpuTime}")
+                if job.UsedTotalCPUTime:
+                    # TODO: HARDCODED
+                    if job.UsedTotalCPUTime > 10 ** 7:
+                        self.log.warning(f"Job {job.appid}: Discarding reported CPUtime {job.UsedTotalCPUTime}")
                         jobdict["UsedTotalCPUTime"] = -1
                     else:
-                        jobdict["UsedTotalCPUTime"] = cpuTime
+                        jobdict["UsedTotalCPUTime"] = job.UsedTotalCPUTime
 
-                if "Type" in activityDict:
-                    jobdict["Type"] = activityDict["Type"]
-                if "LocalIDFromManager" in activityDict:
-                    jobdict["LocalIDFromManager"] = activityDict["LocalIDFromManager"]
-                if "WaitingPosition" in activityDict:
-                    jobdict["WaitingPosition"] = int(activityDict["WaitingPosition"])
-                if "Owner" in activityDict:
-                    jobdict["Owner"] = activityDict["Owner"]
-                if "LocalOwner" in activityDict:
-                    jobdict["LocalOwner"] = activityDict["LocalOwner"]
-                if "RequestedTotalCPUTime" in activityDict:
-                    jobdict["RequestedTotalCPUTime"] = int(activityDict["RequestedTotalCPUTime"])
-                if "RequestedSlots" in activityDict:
-                    jobdict["RequestedSlots"] = int(activityDict["RequestedSlots"])
-                if "StdIn" in activityDict:
-                    jobdict["StdIn"] = activityDict["StdIn"]
-                if "StdOut" in activityDict:
-                    jobdict["StdOut"] = activityDict["StdOut"]
-                if "StdErr" in activityDict:
-                    jobdict["StdErr"] = activityDict["StdErr"]
-                if "LogDir" in activityDict:
-                    jobdict["LogDir"] = activityDict["LogDir"]
-                if "ExecutionNode" in activityDict:
-                    if isinstance(activityDict["ExecutionNode"], list):
-                        jobdict["ExecutionNode"] = ",".join(activityDict["ExecutionNode"])
-                    else:
-                        jobdict["ExecutionNode"] = activityDict["ExecutionNode"]
-                if "Queue" in activityDict:
-                    jobdict["Queue"] = activityDict["Queue"]
-                if "UsedMainMemory" in activityDict:
-                    jobdict["UsedMainMemory"] = int(activityDict["UsedMainMemory"])
-                if "SubmissionTime" in activityDict:
-                    #jobdict["SubmissionTime"] = datetime.fromisoformat(activityDict["SubmissionTime"])
-                    jobdict["SubmissionTime"] = datetime.strptime(activityDict["SubmissionTime"], "%Y-%m-%dT%H:%M:%SZ")
-                if "EndTime" in activityDict:
-                    #jobdict["EndTime"] = datetime.fromisoformat(activityDict["EndTime"])
-                    jobdict["EndTime"] = datetime.strptime(activityDict["EndTime"], "%Y-%m-%dT%H:%M:%SZ")
-                if "WorkingAreaEraseTime" in activityDict:
-                    #jobdict["WorkingAreaEraseTime"] = datetime.fromisoformat(activityDict["WorkingAreaEraseTime"])
-                    jobdict["WorkingAreaEraseTime"] = datetime.strptime(activityDict["WorkingAreaEraseTime"], "%Y-%m-%dT%H:%M:%SZ")
-                if "ProxyExpirationTime" in activityDict:
-                    #jobdict["ProxyExpirationTime"] = datetime.fromisoformat(activityDict["ProxyExpirationTime"])
-                    jobdict["ProxyExpirationTime"] = datetime.strptime(activityDict["ProxyExpirationTime"], "%Y-%m-%dT%H:%M:%SZ")
+                if job.Type:
+                    jobdict["Type"] = job.Type
+                if job.LocalIDFromManager:
+                    jobdict["LocalIDFromManager"] = job.LocalIDFromManager
+                if job.WaitingPosition:
+                    jobdict["WaitingPosition"] = job.WaitingPosition
+                if job.Owner:
+                    jobdict["Owner"] = job.Owner
+                if job.LocalOwner:
+                    jobdict["LocalOwner"] = job.LocalOwner
+                if job.RequestedTotalCPUTime:
+                    jobdict["RequestedTotalCPUTime"] = job.RequestedTotalCPUTime
+                if job.RequestedSlots:
+                    jobdict["RequestedSlots"] = job.RequestedSlots
+                if job.StdIn:
+                    jobdict["StdIn"] = job.StdIn
+                if job.StdOut:
+                    jobdict["StdOut"] = job.StdOut
+                if job.StdErr:
+                    jobdict["StdErr"] = job.StdErr
+                if job.LogDir:
+                    jobdict["LogDir"] = job.LogDir
+                if job.ExecutionNode:
+                    jobdict["ExecutionNode"] = ",".join(job.ExecutionNode)
+                if job.Queue:
+                    jobdict["Queue"] = job.Queue
+                if job.UsedMainMemory:
+                    jobdict["UsedMainMemory"] = job.UsedMainMemory
+                if job.SubmissionTime:
+                    jobdict["SubmissionTime"] = job.SubmissionTime
+                if job.EndTime:
+                    jobdict["EndTime"] = job.EndTime
+                if job.WorkingAreaEraseTime:
+                    jobdict["WorkingAreaEraseTime"] = job.WorkingAreaEraseTime
+                if job.ProxyExpirationTime:
+                    jobdict["ProxyExpirationTime"] = job.ProxyExpirationTime
 
                 # AF BUG
                 try:
-                    self.db.updateArcJobLazy(job["id"], jobdict)
+                    self.db.updateArcJobLazy(job.arcid, jobdict)
                 except:
-                    self.log.error(f"{job['id']} bad dict: {jobdict}")
+                    self.log.error(f"Bad dict for job {job.appid} {job.arcid}: {jobdict}")
 
             self.db.Commit()
 
@@ -336,41 +316,37 @@ class aCTStatus(aCTProcess):
 
     # Returns a dictionary reflecting job changes that should update the final
     # jobdict for DB
-    def processJobErrors(self, job, activityDict):
+    def processJobErrors(self, job):
         tstamp = self.db.getTimeStamp()
         patchDict = {"arcstate": "failed", "tarcstate": tstamp}
 
         resub = []
-        if "Error" in activityDict:
-            if isinstance(activityDict["Error"], list):
-                errors = ";".join(activityDict["Error"])
-            else:
-                errors = activityDict["Error"]
+        if job.arcjob.errors:
+            errors = ";".join(job.arcjob.errors)
             resub = [err for err in self.conf.errors.toresubmit.arcerrors if err in errors]
-            self.log.info(f"Job {job['appjobid']} {job['id']} failed with error: {errors}")
+            self.log.info(f"Job {job.appid} {job.arcid} failed with error: {errors}")
             patchDict["Error"] = errors
         else:
-            self.log.info(f"Job {job['appjobid']} {job['id']} failed, no error given")
+            self.log.info(f"Job {job.appid} {job.arcid} failed, no error given")
 
         restartState = ""
-        for state in activityDict.get("RestartState", []):
+        for state in job.arcjob.RestartState:
             if state.startswith("arcrest:"):
                 restartState = state[len("arcrest:"):]
 
         if restartState in ("PREPARING", "FINISHING"):
             if "Error reading user generated output file list" not in resub:
-                self.log.info(f"Will rerun {job['appjobid']} {job['id']}")
+                self.log.info(f"Will rerun {job.appid} {job.arcid}")
                 patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "torerun"})
                 return patchDict
 
         if resub:
-            attemptsleft = int(job["attemptsleft"])
-            if attemptsleft <= 0:
-                self.log.info(f"Job {job['appjobid']} {job['id']} out of retries")
+            if job.attemptsLeft <= 0:
+                self.log.info(f"Job {job.appid} {job.arcid} out of retries")
             else:
-                attemptsleft -= 1
-                self.log.info(f"Job {job['appjobid']} {job['id']} will be resubmitted, {attemptsleft} attempts left")
-                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "attemptsleft": attemptsleft})
+                job.attetmptsLeft -= 1
+                self.log.info(f"Job {job.appid} {job.arcid} will be resubmitted, {job.attemptsLeft} attempts left")
+                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "attemptsleft": job.attemptsLeft})
 
         return patchDict
 

@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTProcess import aCTProcess
+from act.common.aCTJob import ACTJob
 
 
 class aCTFetcher(aCTProcess):
@@ -21,7 +22,7 @@ class aCTFetcher(aCTProcess):
     '''
 
     def fetchJobs(self, arcstate, nextarcstate):
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "jobdesc", "tarcstate"]
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "tarcstate"]
 
         # parse cluster URL
         try:
@@ -30,7 +31,7 @@ class aCTFetcher(aCTProcess):
             self.log.error(f"Error parsing cluster URL {url}: {exc}")
             return
 
-        # TODO: hardcoded
+        # TODO: HARDCODED
         jobstofetch = self.db.getArcJobsInfo(f"arcstate='{arcstate}' and cluster='{self.cluster}' limit 100", COLUMNS)
 
         if not jobstofetch:
@@ -44,16 +45,18 @@ class aCTFetcher(aCTProcess):
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)
 
-        for proxyid, jobs in jobsdict.items():
-            # remove existing results, create result dir
-            for job in jobs:
-                resdir = os.path.join(self.tmpdir, job["IDFromEndpoint"])
+        for proxyid, dbjobs in jobsdict.items():
+            jobs = []
+            tofetch = []
+            for dbjob in dbjobs:
+                job = ACTJob()
+                job.loadARCDBJob(dbjob)
+                jobs.append(job)
+                tofetch.append(job.arcjob)
+
+                resdir = os.path.join(self.tmpdir, job.arcjob.id)
                 shutil.rmtree(resdir, True)
                 os.makedirs(resdir)
-
-                # add key for fetchJobs
-                job["arcid"] = job["IDFromEndpoint"]
-                job["errors"] = []
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
@@ -62,8 +65,8 @@ class aCTFetcher(aCTProcess):
                 arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
 
                 # fetch jobs
-                # TODO: hardcoded workers
-                results = arcrest.fetchJobs(self.tmpdir, jobs, workers=10, logger=self.log)
+                # TODO: HARDCODED
+                arcrest.fetchJobs(self.tmpdir, tofetch, workers=10, logger=self.log)
 
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
@@ -72,20 +75,20 @@ class aCTFetcher(aCTProcess):
             finally:
                 arcrest.close()
 
-            for job in results:
+            for job in jobs:
                 # TODO: retry based on error condition
-                if job["errors"]:
-                    for error in job["errors"]:
-                        self.log.error(f"Error fetching  job {job['appjobid']} {job['id']}: {error}")
-                    if job["tarcstate"] + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
+                if job.arcjob.errors:
+                    for error in job.arcjob.errors:
+                        self.log.error(f"Error fetching  job {job.appid} {job.arcid}: {error}")
+                    if job.tstate + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
                         jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
-                        self.db.updateArcJobLazy(job["id"], jobdict)
+                        self.db.updateArcJobLazy(job.arcid, jobdict)
                     else:
-                        self.log.info(f"Fetch timeout for job {job['appjobid']} {job['id']} not reached, will retry")
+                        self.log.info(f"Fetch timeout for job {job.appid} {job.arcid} not reached, will retry")
                 else:
-                    self.log.debug(f"Successfully fetched job {job['appjobid']} {job['id']}")
+                    self.log.debug(f"Successfully fetched job {job.appid} {job.arcid}")
                     jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
-                    self.db.updateArcJobLazy(job["id"], jobdict)
+                    self.db.updateArcJobLazy(job.arcid, jobdict)
 
             self.db.Commit()
 
@@ -99,6 +102,6 @@ class aCTFetcher(aCTProcess):
 
 
 if __name__ == '__main__':
-    st=aCTFetcher()
+    st = aCTFetcher()
     st.run()
     st.finish()

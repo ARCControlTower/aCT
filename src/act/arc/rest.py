@@ -5,6 +5,7 @@ import os
 import queue
 import ssl
 import threading
+import datetime
 from http.client import (HTTPConnection, HTTPException, HTTPSConnection,
                          RemoteDisconnected)
 from urllib.parse import urlencode, urlparse
@@ -196,7 +197,7 @@ class ARCRest:
 
     def submitJobs(self, queue, jobs, logger):
         """
-        Submit jobs specified in given list of job dicts.
+        Submit jobs specified in given list of job objects.
 
         Raises:
             - ARCError
@@ -204,7 +205,6 @@ class ARCRest:
             - http.client.HTTPException
             - ConnectionError
             - json.JSONDecodeError
-            - SSL
         """
         # get delegation for proxy
         delegationID = self.createDelegation()
@@ -213,26 +213,25 @@ class ARCRest:
         tosubmit = []  # sublist of jobs that will be submitted
         bulkdesc = ""
         for job in jobs:
-            job["errors"] = []
-            job["delegation"] = delegationID
+            job.delegid = delegationID
 
             # parse job description
-            if not arc.JobDescription_Parse(job["descstr"], jobdescs):
-                job["errors"].append(DescriptionParseError("Failed to parse description"))
+            if not arc.JobDescription_Parse(job.descstr, jobdescs):
+                job.errors.append(DescriptionParseError("Failed to parse description"))
                 continue
 
             # add queue and delegation, modify description as necessary for
             # ARC client
-            job["desc"] = jobdescs[-1]
-            job["desc"].Resources.QueueName = queue
-            job["desc"].DataStaging.DelegationID = delegationID
-            processJobDescription(job["desc"])
+            job.desc = jobdescs[-1]
+            job.desc.Resources.QueueName = queue
+            job.desc.DataStaging.DelegationID = delegationID
+            processJobDescription(job.desc)
 
             # unparse modified description, remove xml version node because it
             # is not accepted by ARC CE, add to bulk description
-            unparseResult = job["desc"].UnParse("emies:adl")
+            unparseResult = job.desc.UnParse("emies:adl")
             if not unparseResult[0]:
-                job["errors"].append(DescriptionUnparseError("Could not unparse modified description"))
+                job.errors.append(DescriptionUnparseError("Could not unparse modified description"))
                 continue
             descstart = unparseResult[1].find("<ActivityDescription")
             bulkdesc += unparseResult[1][descstart:]
@@ -266,14 +265,12 @@ class ARCRest:
         for job, result in zip(tosubmit, results):
             code, reason = int(result["status-code"]), result["reason"]
             if code != 201:
-                job["errors"].append(ARCHTTPError(code, reason, f"Submittion error: {code} {reason}"))
+                job.errors.append(ARCHTTPError(code, reason, f"Submittion error: {code} {reason}"))
             else:
-                job["arcid"] = result["id"]
-                job["state"] = result["state"]
+                job.id = result["id"]
+                job.state = result["state"]
                 toupload.append(job)
         self.uploadJobFiles(toupload, logger)
-
-        return jobs
 
     def getInputUploads(self, job):
         """
@@ -283,22 +280,22 @@ class ARCRest:
             - InputFileError
         """
         uploads = []
-        for infile in job["desc"].DataStaging.InputFiles:
+        for infile in job.desc.DataStaging.InputFiles:
             try:
                 path = isLocalInputFile(infile.Name, infile.Sources[0].fullstr())
             except InputFileError as exc:
-                job["errors"].append(exc)
+                job.errors.append(exc)
                 continue
             if not path:
                 continue
 
             if path and not os.path.isfile(path):
-                job["errors"].append(InputFileError(f"Input path {path} is not a file"))
+                job.errors.append(InputFileError(f"Input path {path} is not a file"))
                 continue
 
             uploads.append({
-                "jobid": job["arcid"],
-                "url": f"{self.baseURL}/jobs/{job['arcid']}/session/{infile.Name}",
+                "jobid": job.id,
+                "url": f"{self.baseURL}/jobs/{job.id}/session/{infile.Name}",
                 "path": path
             })
 
@@ -315,16 +312,16 @@ class ARCRest:
         jobsdict = {}
         for job in jobs:
             uploads = self.getInputUploads(job)
-            if job["errors"]:
+            if job.errors:
                 continue
 
-            jobsdict[job["arcid"]] = job
-            job["cancel_event"] = threading.Event()
+            jobsdict[job.id] = job
+            job.cancelEvent = threading.Event()
 
             for upload in uploads:
                 uploadQueue.put(upload)
         if uploadQueue.empty():
-            return jobs
+            return
         numWorkers = min(len(uploads), workers)
 
         # create HTTP clients for workers
@@ -359,9 +356,7 @@ class ARCRest:
             result = resultQueue.get()
             resultQueue.task_done()
             job = jobsdict[result["jobid"]]
-            job["errors"].append(result["error"])
-
-        return jobs
+            job.errors.append(result["error"])
 
     # TODO: blocksize is only added in python 3.7!!!!!!!
     # TODO: hardcoded workers
@@ -374,18 +369,18 @@ class ARCRest:
 
         jobsdict = {}
         for job in jobs:
-            jobsdict[job["arcid"]] = job
-            job["cancel_event"] = threading.Event()
+            jobsdict[job.id] = job
+            job.cancelEvent = threading.Event()
 
             # Add diagnose files to transfer queue and remove them from
             # downloadfiles string. Replace download files with a list of
             # remaining download patterns.
-            job["downloadfiles"] = self.processDiagnoseDownloads(job, transferQueue)
+            self.processDiagnoseDownloads(job, transferQueue)
 
             # add job session directory as a listing transfer
             transferQueue.put({
-                "jobid": job["arcid"],
-                "url": f"{self.baseURL}/jobs/{job['arcid']}/session",
+                "jobid": job.id,
+                "url": f"{self.baseURL}/jobs/{job.id}/session",
                 "filename": "",
                 "type": "listing"
             })
@@ -410,10 +405,8 @@ class ARCRest:
 
         while not resultQueue.empty():
             result = resultQueue.get()
-            jobsdict[result["jobid"]]["errors"].append(result["error"])
+            jobsdict[result["jobid"]].errors.append(result["error"])
             resultQueue.task_done()
-
-        return jobs
 
     def processDiagnoseDownloads(self, job, transferQueue):
         DIAG_FILES = [
@@ -422,12 +415,12 @@ class ARCRest:
             "output_status", "statistics"
         ]
 
-        if not job["downloadfiles"]:
+        if not job.downloadFiles:
             return []
 
         # add all diagnose files to transfer queue and create
         # a list of download patterns
-        downloads = job["downloadfiles"].split(";")
+        downloads = job.downloadFiles.split(";")
         newDownloads = []
         diagFiles = set()  # to remove any possible duplications
         for download in downloads:
@@ -453,13 +446,13 @@ class ARCRest:
         for diagFile in diagFiles:
             diagName = diagFile.split("/")[-1]
             transferQueue.put({
-                "jobid": job["arcid"],
-                "url": f"{self.baseURL}/jobs/{job['arcid']}/diagnose/{diagName}",
+                "jobid": job.id,
+                "url": f"{self.baseURL}/jobs/{job.id}/diagnose/{diagName}",
                 "filename": diagFile,
                 "type": "diagnose"
             })
 
-        return newDownloads
+        job.downloadFiles = newDownloads
 
     def getJobsList(self):
         resp = self.httpClient.request(
@@ -480,28 +473,37 @@ class ARCRest:
 
     def getJobsInfo(self, jobs):
         results = self.manageJobs(jobs, "info")
-        return getJobOperationResults(jobs, results, "info_document")
-
+        for job, result in zip(jobs, results):
+            code, reason = int(result["status-code"]), result["reason"]
+            if code != 200:
+                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
+            elif "info_document" not in result:
+                job.errors.append(NoValueInARCResult(f"No info document in successful info response"))
+            else:
+                job.updateFromInfo(result["info_document"])
 
     def getJobsStatus(self, jobs):
         results = self.manageJobs(jobs, "status")
-        return getJobOperationResults(jobs, results, "state")
-
+        for job, result in zip(jobs, results):
+            code, reason = int(result["status-code"]), result["reason"]
+            if code != 200:
+                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
+            elif "state" not in result:
+                job.errors.append(NoValueInARCResult(f"No state in successful status response"))
+            else:
+                job.state = result["state"]
 
     def killJobs(self, jobs):
         results = self.manageJobs(jobs, "kill")
         return checkJobOperation(jobs, results)
 
-
     def cleanJobs(self, jobs):
         results = self.manageJobs(jobs, "clean")
         return checkJobOperation(jobs, results)
 
-
     def restartJobs(self, jobs):
         results = self.manageJobs(jobs, "restart")
         return checkJobOperation(jobs, results)
-
 
     def getJobsDelegations(self, jobs, logger=None):
         # AF BUG
@@ -512,18 +514,25 @@ class ARCRest:
             import traceback
             logger.debug(traceback.format_exc())
             results = []
-        return getJobOperationResults(jobs, results, "delegation_id")
+        for job, result in zip(jobs, results):
+            code, reason = int(result["status-code"]), result["reason"]
+            if code != 200:
+                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
+            elif "delegation_id" not in result:
+                job.errors.append(NoValueInARCResult(f"No delegation ID in successful response"))
+            else:
+                job.delegid = result["delegation_id"]
 
     def manageJobs(self, jobs, action):
         ACTIONS = ("info", "status", "kill", "clean", "restart", "delegations")
         if not jobs:
-            return jobs
+            return []
 
         if action not in ACTIONS:
             raise ARCError(f"Invalid job management operation: {action}")
 
         # JSON data for request
-        tomanage = [{"id": job["arcid"]} for job in jobs]
+        tomanage = [{"id": job.id} for job in jobs]
         if len(tomanage) == 1:
             jsonData = {"job": tomanage[0]}
         else:
@@ -546,6 +555,148 @@ class ARCRest:
             return [jsonData["job"]]
         else:
             return jsonData["job"]
+
+
+class ARCJob:
+
+    def __init__(self):
+        self.id = None
+        self.name = None
+        self.delegid = None
+        self.descstr = None
+        self.desc = None
+        self.state = None
+        self.tstate = None
+        self.cancelEvent = None
+        self.errors = []
+        self.downloadFiles = []
+
+        self.ExecutionNode = None
+        self.UsedTotalWallTime = None
+        self.UsedTotalCPUTime = None
+        self.RequestedTotalWallTime = None
+        self.RequestedTotalCPUTime = None
+        self.RequestedSlots = None
+        self.ExitCode = None
+        self.Type = None
+        self.LocalIDFromManager = None
+        self.WaitingPosition = None
+        self.Owner = None
+        self.LocalOwner = None
+        self.StdIn = None
+        self.StdOut = None
+        self.StdErr = None
+        self.LogDir = None
+        self.Queue = None
+        self.UsedMainMemory = None
+        self.SubmissionTime = None
+        self.EndTime = None
+        self.WorkingAreaEraseTime = None
+        self.ProxyExpirationTime = None
+        self.RestartState = []
+
+    def updateFromInfo(self, infoDocument):
+        infoDict = infoDocument.get("ComputingActivity", {})
+        if not infoDict:
+            return
+
+        if "Name" in infoDict:
+            self.name = infoDict["Name"]
+
+        # get state from a list of activity states in different systems
+        for state in infoDict.get("State", []):
+            if state.startswith("arcrest:"):
+                self.state = state[len("arcrest:"):]
+
+        if "Error" in infoDict:
+            if isinstance(infoDict["Error"], list):
+                self.errors = infoDict["Error"]
+            else:
+                self.errors = [infoDict["Error"]]
+
+        if "ExecutionNode" in infoDict:
+            if isinstance(infoDict["ExecutionNode"], list):
+                self.ExecutionNode = infoDict["ExecutionNode"]
+            else:
+                self.ExecutionNode = [infoDict["ExecutionNode"]]
+
+        if "UsedTotalWallTime" in infoDict:
+            self.UsedTotalWallTime = int(infoDict["UsedTotalWallTime"])
+
+        if "UsedTotalCPUTime" in infoDict:
+            self.UsedTotalCPUTime = int(infoDict["UsedTotalCPUTime"])
+
+        if "RequestedTotalWallTime" in infoDict:
+            self.RequestedTotalWallTime = int(infoDict["RequestedTotalWallTime"])
+
+        if "RequestedTotalCPUTime" in infoDict:
+            self.RequestedTotalCPUTime = int(infoDict["RequestedTotalCPUTime"])
+
+        if "RequestedSlots" in infoDict:
+            self.RequestedSlots = int(infoDict["RequestedSlots"])
+
+        if "ExitCode" in infoDict:
+            self.ExitCode = int(infoDict["ExitCode"])
+
+        if "Type" in infoDict:
+            self.Type = infoDict["Type"]
+
+        if "LocalIDFromManager" in infoDict:
+            self.LocalIDFromManager = infoDict["LocalIDFromManager"]
+
+        if "WaitingPosition" in infoDict:
+            self.WaitingPosition = int(infoDict["WaitingPosition"])
+
+        if "Owner" in infoDict:
+            self.Owner = infoDict["Owner"]
+
+        if "LocalOwner" in infoDict:
+            self.LocalOwner = infoDict["LocalOwner"]
+
+        if "StdIn" in infoDict:
+            self.StdIn = infoDict["StdIn"]
+
+        if "StdOut" in infoDict:
+            self.StdOut = infoDict["StdOut"]
+
+        if "StdErr" in infoDict:
+            self.StdErr = infoDict["StdErr"]
+
+        if "LogDir" in infoDict:
+            self.LogDir = infoDict["LogDir"]
+
+        if "Queue" in infoDict:
+            self.Queue = infoDict["Queue"]
+
+        if "UsedMainMemory" in infoDict:
+            self.UsedMainMemory = int(infoDict["UsedMainMemory"])
+
+        if "SubmissionTime" in infoDict:
+            self.SubmissionTime = datetime.datetime.strptime(
+                infoDict["SubmissionTime"],
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+        if "EndTime" in infoDict:
+            self.EndTime = datetime.datetime.strptime(
+                infoDict["EndTime"],
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+        if "WorkingAreaEraseTime" in infoDict:
+            self.WorkingAreaEraseTime = datetime.datetime.strptime(
+                infoDict["WorkingAreaEraseTime"],
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+        if "ProxyExpirationTime" in infoDict:
+            self.ProxyExpirationTime = datetime.datetime.strptime(
+                infoDict["ProxyExpirationTime"],
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+
+        if "RestartState" in infoDict:
+            self.RestartState = infoDict["RestartState"]
 
 
 class TransferQueue:
@@ -609,13 +760,13 @@ def uploadTransferWorker(httpClient, jobsdict, uploadQueue, resultQueue, logger)
         uploadQueue.task_done()
 
         job = jobsdict[upload["jobid"]]
-        if job["cancel_event"].is_set():
+        if job.cancelEvent.is_set():
             continue
 
         try:
             infile = open(upload["path"], "rb")
         except Exception as exc:
-            job["cancel_event"].set()
+            job.cancelEvent.set()
             resultQueue.put({
                 "jobid": upload["jobid"],
                 "error": exc
@@ -627,13 +778,13 @@ def uploadTransferWorker(httpClient, jobsdict, uploadQueue, resultQueue, logger)
                 resp = httpClient.request("PUT", upload["url"], data=infile)
                 text = resp.read().decode()
                 if resp.status != 200:
-                    job["cancel_event"].set()
+                    job.cancelEvent.set()
                     resultQueue.put({
                         "jobid": upload["jobid"],
                         "error": ARCHTTPError(resp.status, text, f"Upload {upload['path']} to {upload['url']} failed: {resp.status} {text}")
                     })
             except Exception as exc:
-                job["cancel_event"].set()
+                job.cancelEvent.set()
                 resultQueue.put({
                     "jobid": upload["jobid"],
                     "error": exc
@@ -653,14 +804,14 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
 
         job = jobsdict[transfer["jobid"]]
 
-        if job["cancel_event"].is_set():
+        if job.cancelEvent.is_set():
             continue
 
         if transfer["type"] in ("file", "diagnose"):
             # filter out download files that are not specified
-            if job["downloadfiles"] and not transfer["type"] == "diagnose":
+            if job.downloadFiles and not transfer["type"] == "diagnose":
                 toDownload = False
-                for pattern in job["downloadfiles"]:
+                for pattern in job.downloadFiles:
                     # direct match
                     if pattern == transfer["filename"]:
                         toDownload = True
@@ -677,7 +828,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                     continue
 
             # download file
-            path = f"{downloadDir}/{job['arcid']}/{transfer['filename']}"
+            path = f"{downloadDir}/{transfer['jobid']}/{transfer['filename']}"
             try:
                 downloadFile(httpClient, transfer["url"], path)
             except ARCHTTPError as exc:
@@ -688,19 +839,19 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                         logger.info(f"Missing diagnose file {transfer['url']}")
                         continue
                 else:
-                    job["cancel_event"].set()
+                    job.cancelEvent.set()
 
                 logger.error(str(exc))
                 resultQueue.put({
-                    "jobid": job["arcid"],
+                    "jobid": transfer["jobid"],
                     "error": exc
                 })
 
             except Exception as exc:
-                job["cancel_event"].set()
+                job.cancelEvent.set()
                 logger.error(str(exc))
                 resultQueue.put({
-                    "jobid": job["arcid"],
+                    "jobid": transfer["jobid"],
                     "error": exc
                 })
                 continue
@@ -710,9 +861,9 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
         elif transfer["type"] == "listing":
 
             # filter out listings that do not match download patterns
-            if job["downloadfiles"]:
+            if job.downloadFiles:
                 toDownload = False
-                for pattern in job["downloadfiles"]:
+                for pattern in job.downloadFiles:
                     # part of pattern
                     if pattern.startswith(transfer["filename"]):
                         toDownload = True
@@ -728,7 +879,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
             except ARCHTTPError as exc:
                 logger.error(f"Error downloading listing {transfer['url']}: {exc}")
                 resultQueue.put({
-                    "jobid": job["arcid"],
+                    "jobid": transfer["jobid"],
                     "error": exc
                 })
                 continue
@@ -736,7 +887,7 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                 job["cancel_event"].set()
                 logger.error(str(exc))
                 resultQueue.put({
-                    "jobid": job["arcid"],
+                    "jobid": transfer["jobid"],
                     "error": exc
                 })
                 continue
@@ -753,10 +904,10 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                     else:  # if session root, slash needs to be skipped
                         filename = f
                     transferQueue.put({
-                        "jobid": job["arcid"],
+                        "jobid": transfer["jobid"],
                         "type": "file",
                         "filename": filename,
-                        "url": f"{endpoint}/jobs/{job['arcid']}/session/{filename}"
+                        "url": f"{endpoint}/jobs/{transfer['jobid']}/session/{filename}"
                     })
             elif "dir" in listing:
                 if not isinstance(listing["dir"], list):
@@ -767,10 +918,10 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                     else:  # if session root, slash needs to be skipped
                         filename = d
                     transferQueue.put({
-                        "jobid": job["arcid"],
+                        "jobid": transfer["jobid"],
                         "type": "listing",
                         "filename": filename,
-                        "url": f"{endpoint}/jobs/{job['arcid']}/session/{filename}"
+                        "url": f"{endpoint}/jobs/{transfer['jobid']}/session/{filename}"
                     })
 
 
@@ -808,20 +959,7 @@ def checkJobOperation(jobs, results):
     for job, result in zip(jobs, results):
         code, reason = int(result["status-code"]), result["reason"]
         if code != 202:
-            job["errors"].append(ARCHTTPError(code, reason, f"{code} {reason}"))
-    return jobs
-
-
-def getJobOperationResults(jobs, results, key):
-    for job, result in zip(jobs, results):
-        code, reason = int(result["status-code"]), result["reason"]
-        if code != 200:
-            job["errors"].append(ARCHTTPError(code, reason, f"{code} {reason}"))
-        elif key not in result:
-            job["errors"].append(NoValueInARCResult(f"No {key} in positive result!!!"))
-        else:
-            job[key] = result[key]
-    return jobs
+            job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
 
 
 def processJobDescription(jobdesc):
