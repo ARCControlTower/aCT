@@ -1,5 +1,5 @@
 import mysql.connector as mysql
-from _mysql_connector import MySQLInterfaceError # pylint: disable-msg=E0611
+from _mysql_connector import MySQLInterfaceError # pylint: disable-msg=E0401
 from act.common import aCTUtils
 from act.db.aCTDBMS import aCTDBMS
 
