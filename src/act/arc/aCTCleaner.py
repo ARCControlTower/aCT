@@ -19,6 +19,7 @@ class aCTCleaner(aCTProcess):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
         # parse cluster URL
+        url = None
         try:
             url = urlparse(self.cluster)
         except ValueError as exc:
