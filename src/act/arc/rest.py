@@ -600,8 +600,6 @@ class ARCJob:
         if not infoDict:
             return
 
-        self.updateFromDict(infoDict)
-
         if "Name" in infoDict:
             self.name = infoDict["Name"]
 
