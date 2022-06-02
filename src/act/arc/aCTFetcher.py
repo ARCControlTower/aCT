@@ -25,6 +25,7 @@ class aCTFetcher(aCTProcess):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "tarcstate"]
 
         # parse cluster URL
+        url = None
         try:
             url = urlparse(self.cluster)
         except ValueError as exc:

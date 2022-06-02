@@ -158,6 +158,7 @@ class aCTSubmitter(aCTProcess):
             self.log.info(f"Submitting {len(jobs)} jobs")
 
             # parse cluster URL and queue
+            url = None
             try:
                 url = urlparse(self.cluster)
             except ValueError as exc:
@@ -276,6 +277,7 @@ class aCTSubmitter(aCTProcess):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
         # parse cluster URL
+        url = None
         try:
             url = urlparse(self.cluster)
         except ValueError as exc:
@@ -367,6 +369,7 @@ class aCTSubmitter(aCTProcess):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
         # parse cluster URL
+        url = None
         try:
             url = urlparse(self.cluster)
         except ValueError as exc:
@@ -438,6 +441,7 @@ class aCTSubmitter(aCTProcess):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
         # parse cluster URL
+        url = None
         try:
             url = urlparse(self.cluster)
         except ValueError as exc:
