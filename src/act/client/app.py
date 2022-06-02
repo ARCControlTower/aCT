@@ -10,7 +10,7 @@ from act.client.errors import (ConfigError, InvalidJobIDError,
                                UnknownClusterError)
 from act.client.jobmgr import JobManager, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
-from act.client.x509proxy import create_proxy_csr
+from act.client.x509proxy import createProxyCSR
 from act.client.errors import InvalidColumnError
 from act.arc.rest import isLocalInputFile
 from cryptography import x509
@@ -472,7 +472,7 @@ def getCSR():
         )
 
         # generate CSR
-        csr = create_proxy_csr(issuer, private_key)
+        csr = createProxyCSR(issuer, private_key)
         print(f'CSR generated: DN: {dn}, attr: {attr}, expiration: {exptime}')
 
         # put private key into string and store in db
