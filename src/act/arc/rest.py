@@ -1,11 +1,11 @@
 import concurrent.futures
+import datetime
 import json
 import logging
 import os
 import queue
 import ssl
 import threading
-import datetime
 from http.client import (HTTPConnection, HTTPException, HTTPSConnection,
                          RemoteDisconnected)
 from urllib.parse import urlencode, urlparse
@@ -463,7 +463,10 @@ class ARCRest:
         respstr = resp.read().decode()
         if resp.status != 200:
             raise ARCHTTPError(resp.status, respstr, f"ARC jobs list error: {resp.status} {respstr}")
-        jsonData = json.loads(respstr)
+        try:
+            jsonData = json.loads(respstr)
+        except json.JSONDecodeError:
+            return []
 
         # convert data to list
         if isinstance(jsonData["job"], dict):

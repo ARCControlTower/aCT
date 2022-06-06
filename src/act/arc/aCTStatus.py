@@ -63,6 +63,7 @@
 # - WIPED
 
 
+import json
 import os
 import time
 from datetime import datetime, timedelta
@@ -71,8 +72,8 @@ from ssl import SSLError
 from urllib.parse import urlparse
 
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
-from act.common.aCTProcess import aCTProcess
 from act.common.aCTJob import ACTJob
+from act.common.aCTProcess import aCTProcess
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
@@ -170,6 +171,9 @@ class aCTStatus(aCTProcess):
                 arcrest.getJobsInfo(tocheck)
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
+                continue
+            except json.JSONDecodeError as exc:
+                self.log.error(f"Error parsing returned JSON document: {exc.doc}")
                 continue
             finally:
                 if arcrest:
