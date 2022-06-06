@@ -420,10 +420,9 @@ class ARCRest:
 
         # add all diagnose files to transfer queue and create
         # a list of download patterns
-        downloads = job.downloadFiles.split(";")
         newDownloads = []
         diagFiles = set()  # to remove any possible duplications
-        for download in downloads:
+        for download in job.downloadFiles:
             if download.startswith("diagnose="):
                 # remove diagnose= part
                 diagnose = download[len("diagnose="):]
