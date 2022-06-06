@@ -247,7 +247,7 @@ class aCTSubmitter(aCTProcess):
                 jobdict["RequestedSlots"] = -1
                 jobdict["Error"] = ""
 
-                self.db.updateArcJobLazy(job["id"], jobdict)
+                self.db.updateArcJobLazy(job.arcid, jobdict)
 
             self.db.Commit()
 
@@ -270,7 +270,7 @@ class aCTSubmitter(aCTProcess):
             # TODO: HARDCODED
             if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
                 self.log.debug(f"Cancelling job {job['appjobid']} {job['id']}")
-                self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
+                self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
         self.db.Commit()
 
     def processToCancel(self):
