@@ -206,7 +206,11 @@ class aCTStatus(aCTProcess):
                 if not arcjob.state:
                     continue
 
-                mappedState = ARC_STATE_MAPPING[arcjob.state]
+                try:
+                    mappedState = ARC_STATE_MAPPING[arcjob.state]
+                except:
+                    self.log.debug(f"STATE MAPPING KEY ERROR: state: {arcjob.state}")
+                    continue
                 if oldStates[job.arcid] == mappedState:
                     self.db.updateArcJobLazy(job.arcid, {"tarcstate": tstamp})
                     continue
