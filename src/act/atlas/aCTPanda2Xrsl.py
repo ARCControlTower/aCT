@@ -43,7 +43,7 @@ class aCTPanda2Xrsl:
         if self.prodSourceLabel.startswith('rc_'):
             self.wrapper = atlasconf.executable.wrapperurlrc
 
-        self.pilotversion = siteinfo.get('pilot_version', '2')
+        self.pilotversion = siteinfo.get('pilot_version', '3')
         self.piloturl = siteinfo.get('params', {}).get('pilot_url')
         if self.prodSourceLabel.startswith('rc_test'):
             self.piloturl = atlasconf.executable.ptarurlrc
@@ -380,7 +380,7 @@ class aCTPanda2Xrsl:
             x += '(runpilot2-wrapper.sh "%s")' % self.wrapper
 
         # Pilot tarball
-        x += '(pilot2.tar.gz "%s" "cache=check")' % self.piloturl
+        x += '(pilot3.tar.gz "%s" "cache=check")' % self.piloturl
 
         # Special HPCs which cannot get cric files from cvmfs or over network
         if self.cricjsons:
