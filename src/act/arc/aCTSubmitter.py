@@ -180,7 +180,7 @@ class aCTSubmitter(aCTProcess):
             for dbjob in jobs:
                 job = ACTJob()
                 job.loadARCDBJob(dbjob)
-                job.descstr = str(self.db.getArcJobDescription(str(dbjob["jobdesc"])))
+                job.arcjob.descstr = str(self.db.getArcJobDescription(str(dbjob["jobdesc"])))
 
                 actjobs.append(job)
                 arcjobs.append(job.arcjob)
@@ -231,8 +231,8 @@ class aCTSubmitter(aCTProcess):
                     port = url.port
                 interface = f"https://{url.hostname}:{port}/arex"
 
-                if job.delegid:
-                    jobdict["DelegationID"] = job.delegid
+                if job.arcjob.delegid:
+                    jobdict["DelegationID"] = job.arcjob.delegid
                 if job.arcjob.id:
                     jobdict["IDFromEndpoint"] = job.arcjob.id
                     jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job.arcjob.id}"
@@ -247,7 +247,7 @@ class aCTSubmitter(aCTProcess):
                 jobdict["RequestedSlots"] = -1
                 jobdict["Error"] = ""
 
-                self.db.updateArcJobLazy(job["id"], jobdict)
+                self.db.updateArcJobLazy(job.arcid, jobdict)
 
             self.db.Commit()
 
@@ -270,7 +270,7 @@ class aCTSubmitter(aCTProcess):
             # TODO: HARDCODED
             if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
                 self.log.debug(f"Cancelling job {job['appjobid']} {job['id']}")
-                self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
+                self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
         self.db.Commit()
 
     def processToCancel(self):
@@ -494,7 +494,7 @@ class aCTSubmitter(aCTProcess):
                 for job in torerun:
                     if not job.arcjob.errors:
                         try:
-                            arcrest.renewDelegation(job.delegid)
+                            arcrest.renewDelegation(job.arcjob.delegid)
                         except Exception as exc:
                             job.arcjobs.errors.append(exc)
                         else:
