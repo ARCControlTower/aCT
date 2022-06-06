@@ -183,17 +183,18 @@ class aCTStatus(aCTProcess):
 
             # process jobs and update DB
             for job in jobs:
+                arcjob = job.arcjob
 
                 # cancel jobs that are stuck in tstate and not in job list anymore
                 # TODO: HARDCODED
-                if job.arcjob.tstate + timedelta(days=7) < datetime.utcnow():
-                    if job.arcjob.id not in joblist:
+                if arcjob.tstate + timedelta(days=7) < datetime.utcnow():
+                    if arcjob.id not in joblist:
                         self.log.error(f"Job {job.appid} {job.arcid} not in ARC anymore, cancelling")
                         self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
                         continue
 
-                if job.arcjob.errors:
-                    for error in job.arcjob.errors:
+                if arcjob.errors:
+                    for error in arcjob.errors:
                         if isinstance(error, ARCHTTPError):
                             if error.status == 404:
                                 self.log.error(f"Job {job.appid} {job.arcid} not found, cancelling")
@@ -202,10 +203,10 @@ class aCTStatus(aCTProcess):
                         self.log.error(f"Error checking {job.appid} {job.arcid}: {error}")
                     continue
 
-                if not job.arcjob.state:
+                if not arcjob.state:
                     continue
 
-                mappedState = ARC_STATE_MAPPING[job.arcjob.state]
+                mappedState = ARC_STATE_MAPPING[arcjob.state]
                 if oldStates[job.arcid] == mappedState:
                     self.db.updateArcJobLazy(job.arcid, {"tarcstate": tstamp})
                     continue
@@ -214,36 +215,36 @@ class aCTStatus(aCTProcess):
 
                 jobdict = {"State": mappedState, "tstate": tstamp}
 
-                if job.arcjob.state in ("ACCEPTING", "ACCEPTED", "PREPARING", "PREPARED", "SUBMITTING", "QUEUING"):
+                if arcjob.state in ("ACCEPTING", "ACCEPTED", "PREPARING", "PREPARED", "SUBMITTING", "QUEUING"):
                     jobdict["arcstate"] = "submitted"
 
-                elif job.arcjob.state in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
+                elif arcjob.state in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
                     jobdict["arcstate"] = "running"
 
-                elif job.arcjob.state == "HELD":
+                elif arcjob.state == "HELD":
                     jobdict["arcstate"] = "holding"
 
-                elif job.arcjob.state == "FINISHING":
+                elif arcjob.state == "FINISHING":
                     jobdict["arcstate"] = "finishing"
 
-                elif job.arcjob.state == "FINISHED":
-                    if job.ExitCode is None:
+                elif arcjob.state == "FINISHED":
+                    if arcjob.ExitCode is None:
                         # missing exit code, but assume success
                         self.log.warning(f"Job {job.appid} is finished but has missing exit code, setting to zero")
                         jobdict["ExitCode"] = 0
                     else:
-                        jobdict["ExitCode"] = job.ExitCode
+                        jobdict["ExitCode"] = arcjob.ExitCode
                     jobdict["arcstate"] = "finished"
 
-                elif job.arcjob.state == "FAILED":
+                elif arcjob.state == "FAILED":
                     jobdict["arcstate"] = "failed"
                     patchDict = self.processJobErrors(job)
                     jobdict.update(patchDict)
 
-                elif job.arcjob.state == "KILLED":
+                elif arcjob.state == "KILLED":
                     jobdict["arcstate"] = "cancelled"
 
-                elif job.arcjob.state == "WIPED":
+                elif arcjob.state == "WIPED":
                     jobdict["arcstate"] = "cancelled"
 
                 if "arcstate" in jobdict:
@@ -253,8 +254,8 @@ class aCTStatus(aCTProcess):
                 # with seconds attribute
                 fromCreated = (datetime.utcnow() - job.tcreated).seconds // 60
 
-                if job.UsedTotalWallTime and job.RequestedSlots != -1:
-                    wallTime = job.UsedTotalWallTime // job.RequestedSlots
+                if arcjob.UsedTotalWallTime and arcjob.RequestedSlots is not None:
+                    wallTime = arcjob.UsedTotalWallTime // arcjob.RequestedSlots
                     if wallTime > fromCreated:
                         self.log.warning(f"Job {job.appid}: Fixing reported walltime {wallTime} to {fromCreated}")
                         jobdict["UsedTotalWallTime"] = fromCreated
@@ -264,50 +265,50 @@ class aCTStatus(aCTProcess):
                     self.log.warning(f"Job {job.appid}: No reported walltime, using DB timestamps: {fromCreated}")
                     jobdict["UsedTotalWallTime"] = fromCreated
 
-                if job.UsedTotalCPUTime:
+                if arcjob.UsedTotalCPUTime:
                     # TODO: HARDCODED
-                    if job.UsedTotalCPUTime > 10 ** 7:
+                    if arcjob.UsedTotalCPUTime > 10 ** 7:
                         self.log.warning(f"Job {job.appid}: Discarding reported CPUtime {job.UsedTotalCPUTime}")
                         jobdict["UsedTotalCPUTime"] = -1
                     else:
-                        jobdict["UsedTotalCPUTime"] = job.UsedTotalCPUTime
+                        jobdict["UsedTotalCPUTime"] = arcjob.UsedTotalCPUTime
 
-                if job.Type:
-                    jobdict["Type"] = job.Type
-                if job.LocalIDFromManager:
-                    jobdict["LocalIDFromManager"] = job.LocalIDFromManager
-                if job.WaitingPosition:
-                    jobdict["WaitingPosition"] = job.WaitingPosition
-                if job.Owner:
-                    jobdict["Owner"] = job.Owner
-                if job.LocalOwner:
-                    jobdict["LocalOwner"] = job.LocalOwner
-                if job.RequestedTotalCPUTime:
-                    jobdict["RequestedTotalCPUTime"] = job.RequestedTotalCPUTime
-                if job.RequestedSlots:
-                    jobdict["RequestedSlots"] = job.RequestedSlots
-                if job.StdIn:
-                    jobdict["StdIn"] = job.StdIn
-                if job.StdOut:
-                    jobdict["StdOut"] = job.StdOut
-                if job.StdErr:
-                    jobdict["StdErr"] = job.StdErr
-                if job.LogDir:
-                    jobdict["LogDir"] = job.LogDir
-                if job.ExecutionNode:
-                    jobdict["ExecutionNode"] = ",".join(job.ExecutionNode)
-                if job.Queue:
-                    jobdict["Queue"] = job.Queue
-                if job.UsedMainMemory:
-                    jobdict["UsedMainMemory"] = job.UsedMainMemory
-                if job.SubmissionTime:
-                    jobdict["SubmissionTime"] = job.SubmissionTime
-                if job.EndTime:
-                    jobdict["EndTime"] = job.EndTime
-                if job.WorkingAreaEraseTime:
-                    jobdict["WorkingAreaEraseTime"] = job.WorkingAreaEraseTime
-                if job.ProxyExpirationTime:
-                    jobdict["ProxyExpirationTime"] = job.ProxyExpirationTime
+                if arcjob.Type:
+                    jobdict["Type"] = arcjob.Type
+                if arcjob.LocalIDFromManager:
+                    jobdict["LocalIDFromManager"] = arcjob.LocalIDFromManager
+                if arcjob.WaitingPosition:
+                    jobdict["WaitingPosition"] = arcjob.WaitingPosition
+                if arcjob.Owner:
+                    jobdict["Owner"] = arcjob.Owner
+                if arcjob.LocalOwner:
+                    jobdict["LocalOwner"] = arcjob.LocalOwner
+                if arcjob.RequestedTotalCPUTime:
+                    jobdict["RequestedTotalCPUTime"] = arcjob.RequestedTotalCPUTime
+                if arcjob.RequestedSlots:
+                    jobdict["RequestedSlots"] = arcjob.RequestedSlots
+                if arcjob.StdIn:
+                    jobdict["StdIn"] = arcjob.StdIn
+                if arcjob.StdOut:
+                    jobdict["StdOut"] = arcjob.StdOut
+                if arcjob.StdErr:
+                    jobdict["StdErr"] = arcjob.StdErr
+                if arcjob.LogDir:
+                    jobdict["LogDir"] = arcjob.LogDir
+                if arcjob.ExecutionNode:
+                    jobdict["ExecutionNode"] = ",".join(arcjob.ExecutionNode)
+                if arcjob.Queue:
+                    jobdict["Queue"] = arcjob.Queue
+                if arcjob.UsedMainMemory:
+                    jobdict["UsedMainMemory"] = arcjob.UsedMainMemory
+                if arcjob.SubmissionTime:
+                    jobdict["SubmissionTime"] = arcjob.SubmissionTime
+                if arcjob.EndTime:
+                    jobdict["EndTime"] = arcjob.EndTime
+                if arcjob.WorkingAreaEraseTime:
+                    jobdict["WorkingAreaEraseTime"] = arcjob.WorkingAreaEraseTime
+                if arcjob.ProxyExpirationTime:
+                    jobdict["ProxyExpirationTime"] = arcjob.ProxyExpirationTime
 
                 # AF BUG
                 try:
