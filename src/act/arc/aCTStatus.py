@@ -169,7 +169,7 @@ class aCTStatus(aCTProcess):
                 arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
                 joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(tocheck)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as e:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
                 continue
             except json.JSONDecodeError as exc:
