@@ -68,7 +68,7 @@ class aCTCleaner(aCTProcess):
             try:
                 arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
                 arcrest.cleanJobs(toARCClean)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
