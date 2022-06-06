@@ -180,7 +180,7 @@ class aCTSubmitter(aCTProcess):
             for dbjob in jobs:
                 job = ACTJob()
                 job.loadARCDBJob(dbjob)
-                job.descstr = str(self.db.getArcJobDescription(str(dbjob["jobdesc"])))
+                job.arcjob.descstr = str(self.db.getArcJobDescription(str(dbjob["jobdesc"])))
 
                 actjobs.append(job)
                 arcjobs.append(job.arcjob)
