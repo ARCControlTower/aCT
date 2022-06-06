@@ -268,7 +268,7 @@ class aCTStatus(aCTProcess):
                 if arcjob.UsedTotalCPUTime:
                     # TODO: HARDCODED
                     if arcjob.UsedTotalCPUTime > 10 ** 7:
-                        self.log.warning(f"Job {job.appid}: Discarding reported CPUtime {job.UsedTotalCPUTime}")
+                        self.log.warning(f"Job {job.appid}: Discarding reported CPUtime {arcjob.UsedTotalCPUTime}")
                         jobdict["UsedTotalCPUTime"] = -1
                     else:
                         jobdict["UsedTotalCPUTime"] = arcjob.UsedTotalCPUTime

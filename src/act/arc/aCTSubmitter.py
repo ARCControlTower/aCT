@@ -231,8 +231,8 @@ class aCTSubmitter(aCTProcess):
                     port = url.port
                 interface = f"https://{url.hostname}:{port}/arex"
 
-                if job.delegid:
-                    jobdict["DelegationID"] = job.delegid
+                if job.arcjob.delegid:
+                    jobdict["DelegationID"] = job.arcjob.delegid
                 if job.arcjob.id:
                     jobdict["IDFromEndpoint"] = job.arcjob.id
                     jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job.arcjob.id}"
@@ -494,7 +494,7 @@ class aCTSubmitter(aCTProcess):
                 for job in torerun:
                     if not job.arcjob.errors:
                         try:
-                            arcrest.renewDelegation(job.delegid)
+                            arcrest.renewDelegation(job.arcjob.delegid)
                         except Exception as exc:
                             job.arcjobs.errors.append(exc)
                         else:
