@@ -265,11 +265,13 @@ class aCTSubmitter(aCTProcess):
     # jobs that have been in submitting state for more than an hour
     # should be canceled
     def checkFailedSubmissions(self):
-        jobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "created"])
-        for job in jobs:
+        dbjobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "created"])
+        for dbjob in dbjobs:
+            job = ACTJob()
+            job.loadARCDBJob(dbjob)
             # TODO: HARDCODED
-            if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
-                self.log.debug(f"Cancelling job {job['appjobid']} {job['id']}")
+            if job.tcreated + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
+                self.log.debug(f"Cancelling job {job.appid} {job.arcid}")
                 self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
         self.db.Commit()
 
