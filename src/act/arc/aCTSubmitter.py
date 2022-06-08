@@ -517,7 +517,7 @@ class aCTSubmitter(aCTProcess):
 
             # log results and update DB
             for job in torerun:
-                if job.arcjobs.errors:
+                if job.arcjob.errors:
                     cannotRerun = False
                     for error in job.arcjob.errors:
                         if isinstance(error, ARCHTTPError):
