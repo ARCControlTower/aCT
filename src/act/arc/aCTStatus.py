@@ -330,6 +330,18 @@ class aCTStatus(aCTProcess):
         tstamp = self.db.getTimeStamp()
         patchDict = {"arcstate": "failed", "tarcstate": tstamp}
 
+        restartState = ""
+        for state in job.arcjob.RestartState:
+            if state.startswith("arcrest:"):
+                restartState = state[len("arcrest:"):]
+
+        # restart if data staging problem but not output file list problem
+        if restartState in ("PREPARING", "FINISHING"):
+            if "Error reading user generated output file list" not in job.arcjob.errors:
+                self.log.info(f"Will rerun {job.appid} {job.arcid}")
+                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "torerun"})
+                return patchDict
+
         resub = []
         if job.arcjob.errors:
             errors = ";".join(job.arcjob.errors)
@@ -338,17 +350,6 @@ class aCTStatus(aCTProcess):
             patchDict["Error"] = errors
         else:
             self.log.info(f"Job {job.appid} {job.arcid} failed, no error given")
-
-        restartState = ""
-        for state in job.arcjob.RestartState:
-            if state.startswith("arcrest:"):
-                restartState = state[len("arcrest:"):]
-
-        if restartState in ("PREPARING", "FINISHING"):
-            if "Error reading user generated output file list" not in resub:
-                self.log.info(f"Will rerun {job.appid} {job.arcid}")
-                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "torerun"})
-                return patchDict
 
         if resub:
             if job.attemptsLeft <= 0:
