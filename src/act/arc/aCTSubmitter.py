@@ -506,9 +506,11 @@ class aCTSubmitter(aCTProcess):
                 arcrest.restartJobs(torestart)
 
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as exc:
-                self.log.error(f"Error killing jobs in ARC: {exc}")
+                self.log.error(f"Error rerunning jobs in ARC: {exc}")
+                continue
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
+                continue
             finally:
                 if arcrest:
                     arcrest.close()
