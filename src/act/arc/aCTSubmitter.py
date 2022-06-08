@@ -485,7 +485,7 @@ class aCTSubmitter(aCTProcess):
                 # get delegations for jobs
                 # AF BUG
                 try:
-                    arcrest.getJobsDelegations(torerun, self.log)
+                    arcrest.getJobsDelegations([job.arcjob for job in torerun], self.log)
                 except:
                     self.log.error("GET JOBS DELEGATIONS EXCEPTION")
                     import traceback
