@@ -77,6 +77,7 @@ from act.common.aCTProcess import aCTProcess
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
+    "Accepted": "Accepted",
     "ACCEPTED": "Accepted",
     "PREPARING": "Preparing",
     "PREPARED": "Preparing",
