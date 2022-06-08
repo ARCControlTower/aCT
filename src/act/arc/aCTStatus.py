@@ -200,8 +200,7 @@ class aCTStatus(aCTProcess):
                                 self.log.error(f"Job {job.appid} {job.arcid} not found, cancelling")
                                 self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
                                 continue
-                        self.log.error(f"Error checking {job.appid} {job.arcid}: {error}")
-                    continue
+                        self.log.error(f"ARC job error for {job.appid} {job.arcid}: {error}")
 
                 if not arcjob.state:
                     continue
