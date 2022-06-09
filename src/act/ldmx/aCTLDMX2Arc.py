@@ -32,7 +32,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
             arcid = self.dbarc.insertArcJobDescription(xrsl,
                                                        proxyid=job['proxyid'],
                                                        clusterlist=clusterlist,
-                                                       downloadfiles='gmlog/errors;stdout;rucio.metadata',
+                                                       downloadfiles='diagnose=gmlog/errors;stdout;rucio.metadata',
                                                        appjobid=str(job['id']),
                                                        fairshare=job['batchid'][:50])
 
