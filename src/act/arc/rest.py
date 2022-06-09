@@ -621,6 +621,9 @@ class ARCJob:
                 self.ExecutionNode = infoDict["ExecutionNode"]
             else:
                 self.ExecutionNode = [infoDict["ExecutionNode"]]
+            # throw out all non ASCII characters from nodes
+            for i in range(len(self.ExecutionNode)):
+                self.ExecutionNode[i] = ''.join([i for i in self.ExecutionNode[i] if ord(i) < 128])
 
         if "UsedTotalWallTime" in infoDict:
             self.UsedTotalWallTime = int(infoDict["UsedTotalWallTime"])
