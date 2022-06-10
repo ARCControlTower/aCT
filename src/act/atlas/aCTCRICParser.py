@@ -20,7 +20,7 @@ class aCTCRICParser:
     def _parseConfigSites(self):
         sites = {}
 
-        for sitename, site in self.conf.sites:
+        for sitename, site in self.conf.panda.sites:
             siteinfo = {}
             if site.endpoints:
                 siteinfo['endpoints'] = site.endpoints
