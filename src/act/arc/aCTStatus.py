@@ -187,70 +187,6 @@ class aCTStatus(aCTProcess):
                 arcjob = job.arcjob
                 jobdict = {}
 
-                # Add available job info to dict
-
-                # difference of two datetime objects yields timedelta object
-                # with seconds attribute
-                fromCreated = (datetime.utcnow() - job.tcreated).seconds // 60
-
-                if arcjob.UsedTotalWallTime and arcjob.RequestedSlots is not None:
-                    wallTime = arcjob.UsedTotalWallTime // arcjob.RequestedSlots
-                    if wallTime > fromCreated:
-                        self.log.warning(f"Job {job.appid}: Fixing reported walltime {wallTime} to {fromCreated}")
-                        jobdict["UsedTotalWallTime"] = fromCreated
-                    else:
-                        jobdict["UsedTotalWallTime"] = wallTime
-                else:
-                    self.log.warning(f"Job {job.appid}: No reported walltime, using DB timestamps: {fromCreated}")
-                    jobdict["UsedTotalWallTime"] = fromCreated
-
-                if arcjob.UsedTotalCPUTime:
-                    # TODO: HARDCODED
-                    if arcjob.UsedTotalCPUTime > 10 ** 7:
-                        self.log.warning(f"Job {job.appid}: Discarding reported CPUtime {arcjob.UsedTotalCPUTime}")
-                        jobdict["UsedTotalCPUTime"] = -1
-                    else:
-                        jobdict["UsedTotalCPUTime"] = arcjob.UsedTotalCPUTime
-
-                if arcjob.Type:
-                    jobdict["Type"] = arcjob.Type
-                if arcjob.LocalIDFromManager:
-                    jobdict["LocalIDFromManager"] = arcjob.LocalIDFromManager
-                if arcjob.WaitingPosition:
-                    jobdict["WaitingPosition"] = arcjob.WaitingPosition
-                if arcjob.Owner:
-                    jobdict["Owner"] = arcjob.Owner
-                if arcjob.LocalOwner:
-                    jobdict["LocalOwner"] = arcjob.LocalOwner
-                if arcjob.RequestedTotalCPUTime:
-                    jobdict["RequestedTotalCPUTime"] = arcjob.RequestedTotalCPUTime
-                if arcjob.RequestedSlots:
-                    jobdict["RequestedSlots"] = arcjob.RequestedSlots
-                if arcjob.StdIn:
-                    jobdict["StdIn"] = arcjob.StdIn
-                if arcjob.StdOut:
-                    jobdict["StdOut"] = arcjob.StdOut
-                if arcjob.StdErr:
-                    jobdict["StdErr"] = arcjob.StdErr
-                if arcjob.LogDir:
-                    jobdict["LogDir"] = arcjob.LogDir
-                if arcjob.ExecutionNode:
-                    jobdict["ExecutionNode"] = ",".join(arcjob.ExecutionNode)
-                if arcjob.Queue:
-                    jobdict["Queue"] = arcjob.Queue
-                if arcjob.UsedMainMemory:
-                    jobdict["UsedMainMemory"] = arcjob.UsedMainMemory
-                if arcjob.SubmissionTime:
-                    jobdict["SubmissionTime"] = arcjob.SubmissionTime
-                if arcjob.EndTime:
-                    jobdict["EndTime"] = arcjob.EndTime
-                if arcjob.WorkingAreaEraseTime:
-                    jobdict["WorkingAreaEraseTime"] = arcjob.WorkingAreaEraseTime
-                if arcjob.ProxyExpirationTime:
-                    jobdict["ProxyExpirationTime"] = arcjob.ProxyExpirationTime
-                if arcjob.Error:
-                    jobdict["Error"] = ";".join(arcjob.Error)
-
                 # cancel jobs that are stuck in tstate and not in job list anymore
                 # TODO: HARDCODED
                 if arcjob.tstate + timedelta(days=7) < datetime.utcnow():
@@ -325,6 +261,70 @@ class aCTStatus(aCTProcess):
                     jobdict["arcstate"] = "cancelled"
 
                 jobdict["tarcstate"] = tstamp
+
+                # Add available job info to dict
+
+                # difference of two datetime objects yields timedelta object
+                # with seconds attribute
+                fromCreated = (datetime.utcnow() - job.tcreated).seconds // 60
+
+                if arcjob.UsedTotalWallTime and arcjob.RequestedSlots is not None:
+                    wallTime = arcjob.UsedTotalWallTime // arcjob.RequestedSlots
+                    if wallTime > fromCreated:
+                        self.log.warning(f"Job {job.appid}: Fixing reported walltime {wallTime} to {fromCreated}")
+                        jobdict["UsedTotalWallTime"] = fromCreated
+                    else:
+                        jobdict["UsedTotalWallTime"] = wallTime
+                else:
+                    self.log.warning(f"Job {job.appid}: No reported walltime, using DB timestamps: {fromCreated}")
+                    jobdict["UsedTotalWallTime"] = fromCreated
+
+                if arcjob.UsedTotalCPUTime:
+                    # TODO: HARDCODED
+                    if arcjob.UsedTotalCPUTime > 10 ** 7:
+                        self.log.warning(f"Job {job.appid}: Discarding reported CPUtime {arcjob.UsedTotalCPUTime}")
+                        jobdict["UsedTotalCPUTime"] = -1
+                    else:
+                        jobdict["UsedTotalCPUTime"] = arcjob.UsedTotalCPUTime
+
+                if arcjob.Type:
+                    jobdict["Type"] = arcjob.Type
+                if arcjob.LocalIDFromManager:
+                    jobdict["LocalIDFromManager"] = arcjob.LocalIDFromManager
+                if arcjob.WaitingPosition:
+                    jobdict["WaitingPosition"] = arcjob.WaitingPosition
+                if arcjob.Owner:
+                    jobdict["Owner"] = arcjob.Owner
+                if arcjob.LocalOwner:
+                    jobdict["LocalOwner"] = arcjob.LocalOwner
+                if arcjob.RequestedTotalCPUTime:
+                    jobdict["RequestedTotalCPUTime"] = arcjob.RequestedTotalCPUTime
+                if arcjob.RequestedSlots:
+                    jobdict["RequestedSlots"] = arcjob.RequestedSlots
+                if arcjob.StdIn:
+                    jobdict["StdIn"] = arcjob.StdIn
+                if arcjob.StdOut:
+                    jobdict["StdOut"] = arcjob.StdOut
+                if arcjob.StdErr:
+                    jobdict["StdErr"] = arcjob.StdErr
+                if arcjob.LogDir:
+                    jobdict["LogDir"] = arcjob.LogDir
+                if arcjob.ExecutionNode:
+                    jobdict["ExecutionNode"] = ",".join(arcjob.ExecutionNode)
+                if arcjob.Queue:
+                    jobdict["Queue"] = arcjob.Queue
+                if arcjob.UsedMainMemory:
+                    jobdict["UsedMainMemory"] = arcjob.UsedMainMemory
+                if arcjob.SubmissionTime:
+                    jobdict["SubmissionTime"] = arcjob.SubmissionTime
+                if arcjob.EndTime:
+                    jobdict["EndTime"] = arcjob.EndTime
+                if arcjob.WorkingAreaEraseTime:
+                    jobdict["WorkingAreaEraseTime"] = arcjob.WorkingAreaEraseTime
+                if arcjob.ProxyExpirationTime:
+                    jobdict["ProxyExpirationTime"] = arcjob.ProxyExpirationTime
+                if arcjob.Error:
+                    jobdict["Error"] = ";".join(arcjob.Error)
 
                 # AF BUG
                 try:
