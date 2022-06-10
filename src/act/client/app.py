@@ -10,7 +10,7 @@ from act.client.errors import (ConfigError, InvalidJobIDError,
                                UnknownClusterError)
 from act.client.jobmgr import JobManager, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
-from act.client.x509proxy import createProxyCSR
+from act.arc.x509proxy import createProxyCSR
 from act.client.errors import InvalidColumnError
 from act.arc.rest import isLocalInputFile
 from cryptography import x509

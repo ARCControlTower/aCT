@@ -10,7 +10,7 @@ from http.client import (HTTPConnection, HTTPException, HTTPSConnection,
                          RemoteDisconnected)
 from urllib.parse import urlencode, urlparse
 
-from act.client.x509proxy import parsePEM, signRequest
+from act.arc.x509proxy import parsePEM, signRequest
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
