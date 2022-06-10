@@ -185,74 +185,9 @@ class aCTStatus(aCTProcess):
             # process jobs and update DB
             for job in jobs:
                 arcjob = job.arcjob
+                jobdict = {}
 
-                # cancel jobs that are stuck in tstate and not in job list anymore
-                # TODO: HARDCODED
-                if arcjob.tstate + timedelta(days=7) < datetime.utcnow():
-                    if arcjob.id not in joblist:
-                        self.log.error(f"Job {job.appid} {job.arcid} not in ARC anymore, cancelling")
-                        self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
-                        continue
-
-                if arcjob.errors:
-                    for error in arcjob.errors:
-                        if isinstance(error, ARCHTTPError):
-                            if error.status == 404:
-                                self.log.error(f"Job {job.appid} {job.arcid} not found, cancelling")
-                                self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
-                                continue
-                        self.log.error(f"ARC job error for {job.appid} {job.arcid}: {error}")
-
-                if not arcjob.state:
-                    continue
-
-                try:
-                    mappedState = ARC_STATE_MAPPING[arcjob.state]
-                except:
-                    self.log.debug(f"STATE MAPPING KEY ERROR: state: {arcjob.state}")
-                    continue
-                if oldStates[job.arcid] == mappedState:
-                    self.db.updateArcJobLazy(job.arcid, {"tarcstate": tstamp})
-                    continue
-
-                self.log.info(f"ARC status change for job {job.appid}: {oldStates[job.arcid]} -> {mappedState}")
-
-                jobdict = {"State": mappedState, "tstate": tstamp}
-
-                if arcjob.state in ("ACCEPTING", "ACCEPTED", "PREPARING", "PREPARED", "SUBMITTING", "QUEUING"):
-                    jobdict["arcstate"] = "submitted"
-
-                elif arcjob.state in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
-                    jobdict["arcstate"] = "running"
-
-                elif arcjob.state == "HELD":
-                    jobdict["arcstate"] = "holding"
-
-                elif arcjob.state == "FINISHING":
-                    jobdict["arcstate"] = "finishing"
-
-                elif arcjob.state == "FINISHED":
-                    if arcjob.ExitCode is None:
-                        # missing exit code, but assume success
-                        self.log.warning(f"Job {job.appid} is finished but has missing exit code, setting to zero")
-                        jobdict["ExitCode"] = 0
-                    else:
-                        jobdict["ExitCode"] = arcjob.ExitCode
-                    jobdict["arcstate"] = "finished"
-
-                elif arcjob.state == "FAILED":
-                    jobdict["arcstate"] = "failed"
-                    patchDict = self.processJobErrors(job)
-                    jobdict.update(patchDict)
-
-                elif arcjob.state == "KILLED":
-                    jobdict["arcstate"] = "cancelled"
-
-                elif arcjob.state == "WIPED":
-                    jobdict["arcstate"] = "cancelled"
-
-                if "arcstate" in jobdict:
-                    jobdict["tarcstate"] = tstamp
+                # Add available job info to dict
 
                 # difference of two datetime objects yields timedelta object
                 # with seconds attribute
@@ -313,6 +248,83 @@ class aCTStatus(aCTProcess):
                     jobdict["WorkingAreaEraseTime"] = arcjob.WorkingAreaEraseTime
                 if arcjob.ProxyExpirationTime:
                     jobdict["ProxyExpirationTime"] = arcjob.ProxyExpirationTime
+                if arcjob.Error:
+                    jobdict["Error"] = ";".join(arcjob.Error)
+
+                # cancel jobs that are stuck in tstate and not in job list anymore
+                # TODO: HARDCODED
+                if arcjob.tstate + timedelta(days=7) < datetime.utcnow():
+                    if arcjob.id not in joblist:
+                        self.log.error(f"Job {job.appid} {job.arcid} not in ARC anymore, cancelling")
+                        jobdict.update({"arcstate": "tocancel", "tarcstate": tstamp})
+                        self.db.updateArcJobLazy(job.arcid, jobdict)
+                        continue
+
+                # cancel 404 jobs and log errors
+                if arcjob.errors:
+                    cancelled = False
+                    for error in arcjob.errors:
+                        if isinstance(error, ARCHTTPError):
+                            if error.status == 404:
+                                self.log.error(f"Job {job.appid} {job.arcid} not found, cancelling")
+                                jobdict.update({"arcstate": "tocancel", "tarcstate": tstamp})
+                                self.db.updateArcJobLazy(job.arcid, jobdict)
+                                cancelled = True
+                                continue
+                        self.log.error(f"Error for job {job.appid} {job.arcid}: {error}")
+                    if cancelled:
+                        continue
+
+                # process state change
+                try:
+                    mappedState = ARC_STATE_MAPPING[arcjob.state]
+                except KeyError:
+                    self.log.debug(f"STATE MAPPING KEY ERROR: state: {arcjob.state}")
+                    self.db.updateArcJobLazy(job.arcid, jobdict)
+                    continue
+
+                # update and continue early when no state change
+                if oldStates[job.arcid] == mappedState:
+                    jobdict["tarcstate"] = tstamp
+                    self.db.updateArcJobLazy(job.arcid, jobdict)
+                    continue
+
+                self.log.info(f"ARC status change for job {job.appid}: {oldStates[job.arcid]} -> {mappedState}")
+
+                jobdict.update({"State": mappedState, "tstate": tstamp})
+
+                if arcjob.state in ("ACCEPTING", "ACCEPTED", "PREPARING", "PREPARED", "SUBMITTING", "QUEUING"):
+                    jobdict["arcstate"] = "submitted"
+
+                elif arcjob.state in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
+                    jobdict["arcstate"] = "running"
+
+                elif arcjob.state == "HELD":
+                    jobdict["arcstate"] = "holding"
+
+                elif arcjob.state == "FINISHING":
+                    jobdict["arcstate"] = "finishing"
+
+                elif arcjob.state == "FINISHED":
+                    if arcjob.ExitCode is None:
+                        # missing exit code, but assume success
+                        self.log.warning(f"Job {job.appid} is finished but has missing exit code, setting to zero")
+                        jobdict["ExitCode"] = 0
+                    else:
+                        jobdict["ExitCode"] = arcjob.ExitCode
+                    jobdict["arcstate"] = "finished"
+
+                elif arcjob.state == "FAILED":
+                    patchDict = self.processJobErrors(job)
+                    jobdict.update(patchDict)
+
+                elif arcjob.state == "KILLED":
+                    jobdict["arcstate"] = "cancelled"
+
+                elif arcjob.state == "WIPED":
+                    jobdict["arcstate"] = "cancelled"
+
+                jobdict["tarcstate"] = tstamp
 
                 # AF BUG
                 try:
@@ -324,34 +336,33 @@ class aCTStatus(aCTProcess):
 
         self.log.info('Done')
 
-    # Returns a dictionary reflecting job changes that should update the final
+    # Returns a dictionary reflecting job changes that should update the
     # jobdict for DB
     def processJobErrors(self, job):
         tstamp = self.db.getTimeStamp()
         patchDict = {"arcstate": "failed", "tarcstate": tstamp}
 
+        # a list of job errors for job should be resubmission
+        resub = []
+        if job.arcjob.Error:
+            errors = ";".join(job.arcjob.Error)
+            resub = [err for err in self.conf.errors.toresubmit.arcerrors if err in errors]
+            self.log.info(f"Job {job.appid} {job.arcid} failed with error: {errors}")
+        else:
+            self.log.info(f"Job {job.appid} {job.arcid} failed, no error given")
+
+        # restart if data staging problem but not output file list problem
         restartState = ""
         for state in job.arcjob.RestartState:
             if state.startswith("arcrest:"):
                 restartState = state[len("arcrest:"):]
-
-        # restart if data staging problem but not output file list problem
         if restartState in ("PREPARING", "FINISHING"):
-            if "Error reading user generated output file list" not in job.arcjob.errors:
+            if "Error reading user generated output file list" not in job.arcjob.Error:
                 self.log.info(f"Will rerun {job.appid} {job.arcid}")
                 patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "torerun"})
-                return patchDict
 
-        resub = []
-        if job.arcjob.errors:
-            errors = ";".join(job.arcjob.errors)
-            resub = [err for err in self.conf.errors.toresubmit.arcerrors if err in errors]
-            self.log.info(f"Job {job.appid} {job.arcid} failed with error: {errors}")
-            patchDict["Error"] = errors
-        else:
-            self.log.info(f"Job {job.appid} {job.arcid} failed, no error given")
-
-        if resub:
+        # resubmit if certain errors
+        elif resub:
             if job.attemptsLeft <= 0:
                 self.log.info(f"Job {job.appid} {job.arcid} out of retries")
             else:

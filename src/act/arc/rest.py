@@ -596,6 +596,7 @@ class ARCJob:
         self.WorkingAreaEraseTime = None
         self.ProxyExpirationTime = None
         self.RestartState = []
+        self.Error = []
 
     def updateFromInfo(self, infoDocument):
         infoDict = infoDocument.get("ComputingActivity", {})
@@ -612,9 +613,9 @@ class ARCJob:
 
         if "Error" in infoDict:
             if isinstance(infoDict["Error"], list):
-                self.errors = infoDict["Error"]
+                self.Error = infoDict["Error"]
             else:
-                self.errors = [infoDict["Error"]]
+                self.Error = [infoDict["Error"]]
 
         if "ExecutionNode" in infoDict:
             if isinstance(infoDict["ExecutionNode"], list):
