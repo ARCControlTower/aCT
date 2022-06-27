@@ -814,122 +814,132 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
         if job.cancelEvent.is_set():
             continue
 
-        if transfer["type"] in ("file", "diagnose"):
-            # filter out download files that are not specified
-            if job.downloadFiles and not transfer["type"] == "diagnose":
-                toDownload = False
-                for pattern in job.downloadFiles:
-                    # direct match
-                    if pattern == transfer["filename"]:
-                        toDownload = True
-                        break
-                    # recursive folder match
-                    elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
-                        toDownload = True
-                        break
-                    # entire session directory, not matched by above if
-                    elif pattern == "/":
-                        toDownload = True
-                        break
-                if not toDownload:
-                    continue
-
-            # download file
-            path = f"{downloadDir}/{transfer['jobid']}/{transfer['filename']}"
-            try:
-                downloadFile(httpClient, transfer["url"], path)
-            except ARCHTTPError as exc:
-                # don't stop downloading files when files are missing (404)
-                if exc.status == 404:
-                    # don't signal missing diagnose file as error
-                    if transfer["type"] == "diagnose":
-                        logger.info(f"Missing diagnose file {transfer['url']}")
+        try:
+            if transfer["type"] in ("file", "diagnose"):
+                # filter out download files that are not specified
+                if job.downloadFiles and not transfer["type"] == "diagnose":
+                    toDownload = False
+                    for pattern in job.downloadFiles:
+                        # direct match
+                        if pattern == transfer["filename"]:
+                            toDownload = True
+                            break
+                        # recursive folder match
+                        elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
+                            toDownload = True
+                            break
+                        # entire session directory, not matched by above if
+                        elif pattern == "/":
+                            toDownload = True
+                            break
+                    if not toDownload:
                         continue
-                else:
+
+                # download file
+                path = f"{downloadDir}/{transfer['jobid']}/{transfer['filename']}"
+                try:
+                    downloadFile(httpClient, transfer["url"], path)
+                except ARCHTTPError as exc:
+                    # don't stop downloading files when files are missing (404)
+                    if exc.status == 404:
+                        # don't signal missing diagnose file as error
+                        if transfer["type"] == "diagnose":
+                            logger.info(f"Missing diagnose file {transfer['url']}")
+                            continue
+                    else:
+                        job.cancelEvent.set()
+
+                    logger.error(str(exc))
+                    resultQueue.put({
+                        "jobid": transfer["jobid"],
+                        "error": exc
+                    })
+
+                except Exception as exc:
                     job.cancelEvent.set()
-
-                logger.error(str(exc))
-                resultQueue.put({
-                    "jobid": transfer["jobid"],
-                    "error": exc
-                })
-
-            except Exception as exc:
-                job.cancelEvent.set()
-                logger.error(str(exc))
-                resultQueue.put({
-                    "jobid": transfer["jobid"],
-                    "error": exc
-                })
-                continue
-
-            logger.info(f"Successfully downloaded file {transfer['url']} to {path}")
-
-        elif transfer["type"] == "listing":
-
-            # filter out listings that do not match download patterns
-            if job.downloadFiles:
-                toDownload = False
-                for pattern in job.downloadFiles:
-                    # part of pattern
-                    if pattern.startswith(transfer["filename"]):
-                        toDownload = True
-                    # recursive folder match
-                    elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
-                        toDownload = True
-                if not toDownload:
+                    logger.error(str(exc))
+                    resultQueue.put({
+                        "jobid": transfer["jobid"],
+                        "error": exc
+                    })
                     continue
 
-            # download listing
-            try:
-                listing = downloadListing(httpClient, transfer["url"])
-            except ARCHTTPError as exc:
-                logger.error(f"Error downloading listing {transfer['url']}: {exc}")
-                resultQueue.put({
-                    "jobid": transfer["jobid"],
-                    "error": exc
-                })
-                continue
-            except Exception as exc:
-                job["cancel_event"].set()
-                logger.error(str(exc))
-                resultQueue.put({
-                    "jobid": transfer["jobid"],
-                    "error": exc
-                })
-                continue
+                logger.info(f"Successfully downloaded file {transfer['url']} to {path}")
 
-            logger.info(f"Successfully downloaded listing {transfer['url']}")
+            elif transfer["type"] == "listing":
 
-            # create new transfer jobs; duplication except for "type" key
-            if "file" in listing:
-                if not isinstance(listing["file"], list):
-                    listing["file"] = [listing["file"]]
-                for f in listing["file"]:
-                    if transfer["filename"]:
-                        filename = f"{transfer['filename']}/{f}"
-                    else:  # if session root, slash needs to be skipped
-                        filename = f
-                    transferQueue.put({
+                # filter out listings that do not match download patterns
+                if job.downloadFiles:
+                    toDownload = False
+                    for pattern in job.downloadFiles:
+                        # part of pattern
+                        if pattern.startswith(transfer["filename"]):
+                            toDownload = True
+                        # recursive folder match
+                        elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
+                            toDownload = True
+                    if not toDownload:
+                        continue
+
+                # download listing
+                try:
+                    listing = downloadListing(httpClient, transfer["url"])
+                except ARCHTTPError as exc:
+                    logger.error(f"Error downloading listing {transfer['url']}: {exc}")
+                    resultQueue.put({
                         "jobid": transfer["jobid"],
-                        "type": "file",
-                        "filename": filename,
-                        "url": f"{endpoint}/jobs/{transfer['jobid']}/session/{filename}"
+                        "error": exc
                     })
-            elif "dir" in listing:
-                if not isinstance(listing["dir"], list):
-                    listing["dir"] = [listing["dir"]]
-                for d in listing["dir"]:
-                    if transfer["filename"]:
-                        filename = f"{transfer['filename']}/{d}"
-                    else:  # if session root, slash needs to be skipped
-                        filename = d
-                    transferQueue.put({
+                    continue
+                except Exception as exc:
+                    job.cancelEvent.set()
+                    logger.error(str(exc))
+                    resultQueue.put({
                         "jobid": transfer["jobid"],
-                        "type": "listing",
-                        "filename": filename,
-                        "url": f"{endpoint}/jobs/{transfer['jobid']}/session/{filename}"
+                        "error": exc
                     })
+                    continue
+
+                logger.info(f"Successfully downloaded listing {transfer['url']}")
+
+                # create new transfer jobs; duplication except for "type" key
+                if "file" in listing:
+                    if not isinstance(listing["file"], list):
+                        listing["file"] = [listing["file"]]
+                    for f in listing["file"]:
+                        if transfer["filename"]:
+                            filename = f"{transfer['filename']}/{f}"
+                        else:  # if session root, slash needs to be skipped
+                            filename = f
+                        transferQueue.put({
+                            "jobid": transfer["jobid"],
+                            "type": "file",
+                            "filename": filename,
+                            "url": f"{endpoint}/jobs/{transfer['jobid']}/session/{filename}"
+                        })
+                elif "dir" in listing:
+                    if not isinstance(listing["dir"], list):
+                        listing["dir"] = [listing["dir"]]
+                    for d in listing["dir"]:
+                        if transfer["filename"]:
+                            filename = f"{transfer['filename']}/{d}"
+                        else:  # if session root, slash needs to be skipped
+                            filename = d
+                        transferQueue.put({
+                            "jobid": transfer["jobid"],
+                            "type": "listing",
+                            "filename": filename,
+                            "url": f"{endpoint}/jobs/{transfer['jobid']}/session/{filename}"
+                        })
+        except:
+            import traceback
+            excstr = traceback.format_exc()
+            job.cancelEvent.set()
+            logger.error(excstr)
+            resultQueue.put({
+                "jobid": transfer["jobid"],
+                "error": excstr
+            })
 
 
 def downloadFile(httpClient, url, path):
