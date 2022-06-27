@@ -95,7 +95,8 @@ class HTTPClient:
         try:
             self.conn.request(method, url, body=body, headers=headers)
             resp = self.conn.getresponse()
-        except (RemoteDisconnected, ConnectionError):
+        # TODO: should the request be retried for aborted connection by peer?
+        except (RemoteDisconnected, BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
             # retry request
             self.conn.request(method, url, body=body, headers=headers)
             resp = self.conn.getresponse()
@@ -238,7 +239,7 @@ class ARCRest:
 
             tosubmit.append(job)
 
-        # merge into bulk descriptions
+        # merge into bulk description
         if len(tosubmit) > 1:
             bulkdesc = f"<ActivityDescriptions>{bulkdesc}</ActivityDescriptions>"
 
