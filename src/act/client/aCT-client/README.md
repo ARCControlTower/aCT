@@ -10,9 +10,9 @@ See [instructions](http://www.nordugrid.org/arc/arc6/users/client_install.html).
 
 ## Notes on install locations
 aCT client is currently meant to be installed using Python's `pip` package manager.
-By default, `pip` tries to install packages to system directory which should never
-be done. Users should either install it in their home directory using
-`pip install --user` or in a virtual environment.
+By default, `pip` tries to install packages to system directory which is not advised
+to do. Users should either install it using `pip install --user` or in a virtual
+environment.
 
 ## Installation to virtual environment
 Virtual environmet is a directory structure that includes all programs and libraries
@@ -21,7 +21,7 @@ of the system or other virtual environments.
 
 To create a virtual environment, the user needs to choose the location of the
 environment and then run:  
-`$ python3 -m venv --system-site-packages /path/to/act-venv`  
+`$ python3 -m venv --system-site-packages /path/to/act-venv`
 
 `--system-site-packages` flag is necessary to copy ARC client's python bindings
 that are not available in PyPI package repository. `act-venv` is the name of this
