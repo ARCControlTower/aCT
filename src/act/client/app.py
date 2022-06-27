@@ -447,12 +447,16 @@ def getCSR():
         if not issuer_pem:
             print('error: POST /proxies: missing issuer certificate')
             return {'msg': 'Missing issuer certificate'}, 400
+        chain_pem = jsonData.get('chain', None)
+        if not chain_pem:
+            print('error: POST /proxies: missing certificate chain')
+            return {'msg': 'Missing certificate chain'}, 400
 
     dn, exptime = pmgr.readProxyString(issuer_pem)
     if datetime.now() >= exptime:
         print('error: POST /proxies: expired certificate')
         return {'msg': 'Given certificate is expired'}, 400
-    attr = getVOMSProxyAttributes(issuer_pem)
+    attr = getVOMSProxyAttributes(issuer_pem, chain_pem)
     if not attr or not dn:
         print('error: POST /proxies: DN or VOMS attribute extraction failure')
         return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
@@ -531,7 +535,7 @@ def uploadSignedProxy():
     dn, exptime = pmgr.readProxyString(cert_pem)
     if datetime.now() >= exptime:
         return {'msg': 'Given certificate is expired'}, 400
-    attr = getVOMSProxyAttributes(cert_pem)
+    attr = getVOMSProxyAttributes(cert_pem, chain_pem)
     if not attr or not dn:
         return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
     proxy_pem = cert_pem + key_pem.decode('utf-8') + chain_pem
