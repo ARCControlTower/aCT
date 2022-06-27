@@ -323,7 +323,7 @@ class ARCRest:
                 uploadQueue.put(upload)
         if uploadQueue.empty():
             return
-        numWorkers = min(len(uploads), workers)
+        numWorkers = min(uploadQueue.qsize(), workers)
 
         # create HTTP clients for workers
         httpClients = []
