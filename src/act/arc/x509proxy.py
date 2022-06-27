@@ -10,13 +10,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 PROXYPATH = f"/tmp/x509up_u{os.getuid()}"
 
 
-def checkOldProxy(cert):
-    """Check if last CN is \"proxy\" or \"limited proxy\"."""
+def isOldProxy(cert):
+    r"""Check if last CN is "proxy" or "limited proxy"."""
     lastCN = cert.subject.get_attributes_for_oid(x509.oid.NameOID.COMMON_NAME)[-1]
     return lastCN.value in ("proxy", "limited proxy")
 
 
-def checkKeyUsage(cert):
+def validKeyUsage(cert):
     """Check if digital signature bit is set in keyUsage extension."""
     try:
         keyUsage = cert.extensions.get_extension_for_oid(x509.oid.ExtensionOID.KEY_USAGE)
@@ -28,9 +28,9 @@ def checkKeyUsage(cert):
 def createProxyCSR(issuerCert, proxyKey):
     """Create proxy certificate signing request."""
 
-    if not checkOldProxy(issuerCert):
+    if isOldProxy(issuerCert):
         raise Exception("Proxy format not supported")
-    if not checkKeyUsage(issuerCert):
+    if not validKeyUsage(issuerCert):
         raise Exception("Proxy uses invalid keyUsage extension")
 
     builder = x509.CertificateSigningRequestBuilder()
