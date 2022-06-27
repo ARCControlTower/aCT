@@ -404,7 +404,7 @@ class JobManager(object):
         where, where_params = self._addIDFilter(jobids, where, where_params)
         where = where.rstrip('AND ')
 
-        res = self.arcdb.db.getMutexLock('arcjobs', timeout=2)
+        res = self.arcdb.db.getMutexLock('arcjobs')
         if not res:
             raise Exception("Could not lock table for killing jobs")
 
