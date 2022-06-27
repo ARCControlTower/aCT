@@ -949,14 +949,16 @@ def downloadFile(httpClient, url, path):
 
 def downloadListing(httpClient, url):
     resp = httpClient.request("GET", url, headers={"Accept": "application/json"})
+    text = resp.read().decode()
 
     if resp.status != 200:
-        text = resp.read()
         raise ARCHTTPError(resp.status, text, f"Error downloading listing {url}: {resp.status} {text}")
 
     try:
-        listing = json.loads(resp.read().decode())
+        listing = json.loads(text)
     except json.JSONDecodeError as e:
+        if text == '':  # due to invalid JSON returned by ARC REST
+            return {}
         raise ARCError(f"Error decoding JSON listing {url}: {e}")
 
     return listing
