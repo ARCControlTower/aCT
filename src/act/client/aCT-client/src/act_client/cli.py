@@ -1,14 +1,10 @@
 import argparse
 import sys
 
-from act_client.common import (ACTClientError, disableSIGINT, getHTTPConn,
-                               getJobParams, getWebDAVBase, getWebDAVConn,
-                               readFile)
+from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
+                               getWebDAVBase, readFile)
 from act_client.config import checkConf, expandPaths, loadConf
-from act_client.operations import (aCTJSONRequest, cleanJobs, cleanWebDAV,
-                                   fetchJobs, filterJobsToDownload, getJob,
-                                   getJobStats, killJobs, resubmitJobs,
-                                   submitJobs, uploadProxy)
+from act_client.operations import getACTRestClient, getWebDAVClient
 
 
 def addCommonArgs(parser):
@@ -41,12 +37,12 @@ def addCommonJobFilterArgs(parser):
     )
     parser.add_argument(
         '--id',
-        default=None,
+        default=[],
         help='a list of IDs of jobs that should be queried'
     )
     parser.add_argument(
         '--name',
-        default=None,
+        default='',
         help='substring that jobs should have in name'
     )
 
@@ -54,7 +50,7 @@ def addCommonJobFilterArgs(parser):
 def addStateArg(parser):
     parser.add_argument(
         '--state',
-        default=None,
+        default='',
         help='perform command only on jobs in given state'
     )
 
@@ -173,25 +169,25 @@ def runSubcommand(args):
     expandPaths(conf)
 
     if args.command == 'info':
-        asyncfun = subcommandInfo
+        commandFun = subcommandInfo
     elif args.command == 'clean':
-        asyncfun = subcommandClean
+        commandFun = subcommandClean
     elif args.command == 'fetch':
-        asyncfun = subcommandFetch
+        commandFun = subcommandFetch
     elif args.command == 'get':
-        asyncfun = subcommandGet
+        commandFun = subcommandGet
     elif args.command == 'kill':
-        asyncfun = subcommandKill
+        commandFun = subcommandKill
     elif args.command == 'proxy':
-        asyncfun = subcommandProxy
+        commandFun = subcommandProxy
     elif args.command == 'resub':
-        asyncfun = subcommandResub
+        commandFun = subcommandResub
     elif args.command == 'stat':
-        asyncfun = subcommandStat
+        commandFun = subcommandStat
     elif args.command == 'sub':
-        asyncfun = subcommandSub
+        commandFun = subcommandSub
 
-    asyncfun(args, conf)
+    commandFun(args, conf)
 
 
 def main():
@@ -202,119 +198,104 @@ def main():
         parser.print_help()
         return
 
-    #runSubcommand(args)
     try:
         runSubcommand(args)
-    except ACTClientError as e:
-        print(e)
+    except KeyboardInterrupt:
+        sys.exit(1)
+    except ACTClientError as exc:
+        print(exc)
         sys.exit(1)
 
 
 def subcommandInfo(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    token = readFile(conf['token'])
-
-    disableSIGINT()
-
-    conn = getHTTPConn(conf['server'])
+    actrest = getACTRestClient(args, conf)
     try:
-        jsonDict = aCTJSONRequest(conn, 'GET', '/info', token=token)
+        jsonData, status = actrest.getInfo()
+        if status != 200:
+            raise ACTClientError(jsonData["msg"])
+    except Exception as exc:
+        raise ACTClientError(f"Error fetching info from aCT server: {exc}")
+    else:
+        print(f'aCT server URL: {conf["server"]}')
+        print('Clusters:')
+        for cluster in jsonData['clusters']:
+            print(cluster)
     finally:
-        conn.close()
-
-    print(f'aCT server URL: {conf["server"]}')
-    print('Clusters:')
-    for cluster in jsonDict['clusters']:
-        print(cluster)
+        actrest.close()
 
 
 def subcommandClean(args, conf):
     checkConf(conf, ['server', 'token', 'proxy'])
 
-    token = readFile(conf['token'])
-
-    params = {}
-    ids = getJobParams(args)
-    if ids:
-        params['id'] = ids
-    if args.state:
-        params['state'] = args.state
-    if args.name:
-        params['name'] = args.name
-
-    disableSIGINT()
-
-    conn = getHTTPConn(conf['server'])
+    actrest = getACTRestClient(args, conf)
+    ids = getIDParam(args)
     try:
-        jobids = cleanJobs(conn, token, params)
+        disableSIGINT()
+        jobids = actrest.cleanJobs(jobids=ids, name=args.name, state=args.state)
         print(f'Cleaned {len(jobids)} jobs')
-        webdavCleanup(args, conf, jobids)
+    except Exception as exc:
+        raise ACTClientError(f'Error cleaning jobs: {exc}')
     finally:
-        conn.close()
+        actrest.close()
+
+    webdavCleanup(args, conf, jobids)
 
 
-# also closes connections given as params
-def webdavCleanup(args, conf, jobids, webdavConn=None, webdavUrl=None):
-    if not webdavUrl:
-        webdavUrl = getWebDAVBase(args, conf)
-    if jobids and webdavUrl:
-        print('Cleaning WebDAV directories ...')
-        if not webdavConn:
-            webdavConn = getWebDAVConn(conf['proxy'], conf['webdav'])
-        try:
-            errors = cleanWebDAV(webdavConn, webdavUrl, jobids)
-            for error in errors:
-                print(error)
-        finally:
-            webdavConn.close()
+def webdavCleanup(args, conf, jobids, webdavClient=None, webdavBase=None):
+    if not jobids:
+        return
+    if not webdavBase:
+        webdavBase = getWebDAVBase(args, conf)
+        if not webdavBase:
+            return
+
+    print('Cleaning WebDAV directories ...')
+    try:
+        if webdavClient:
+            closeWebDAV = False
+        else:
+            webdavClient = getWebDAVClient(conf, webdavBase)
+            closeWebDAV = True
+
+        errors = webdavClient.cleanJobDirs(webdavBase, jobids)
+        for error in errors:
+            print(error)
+    except Exception as exc:
+        raise ACTClientError(f'Error cleaning up WebDAV dirs: {exc}')
+    finally:
+        if closeWebDAV:
+            webdavClient.close()
 
 
 def subcommandFetch(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    token = readFile(conf['token'])
-
-    params = {}
-    ids = getJobParams(args)
-    if ids:
-        params['id'] = ids
-    if args.name:
-        params['name'] = args.name
-
-    disableSIGINT()
-
-    conn = getHTTPConn(conf['server'])
+    actrest = getACTRestClient(args, conf)
+    ids = getIDParam(args)
     try:
-        jsonDict = fetchJobs(conn, token, params)
+        jsonData = actrest.fetchJobs(jobids=ids, name=args.name)
+    except Exception as exc:
+        raise ACTClientError(f'Error fetching jobs: {exc}')
     finally:
-        conn.close()
+        actrest.close()
 
-    print(f'Will fetch {len(jsonDict)} jobs')
+    print(f'Will fetch {len(jsonData)} jobs')
 
 
 def subcommandGet(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    token = readFile(conf['token'])
-
-    kwargs = {}
-    ids = getJobParams(args)
-    if ids:
-        kwargs['id'] = ids
-    if args.name:
-        kwargs['name'] = args.name
-    if args.state:
-        kwargs['state'] = args.state
-
-    conn = getHTTPConn(conf['server'])
+    actrest = getACTRestClient(args, conf)
+    ids = getIDParam(args)
     toclean = []
     try:
-        jobs = filterJobsToDownload(conn, token, **kwargs)
+        jobs = actrest.getDownloadableJobs(jobids=ids, name=args.name, state=args.state)
         for job in jobs:
             try:
-                dirname = getJob(conn, token, job['c_id'])
-            except ACTClientError as e:
+                dirname = actrest.downloadJobResults(job['c_id'])
+            except Exception as e:
                 print('Error downloading job {job["c_jobname"]}: {e}')
                 continue
 
@@ -323,26 +304,23 @@ def subcommandGet(args, conf):
             else:
                 print(f'Results for job {job["c_jobname"]} stored in {dirname}')
             toclean.append(job["c_id"])
-
+    except Exception as exc:
+        raise ACTClientError(f'Error downloading jobs: {exc}')
     except KeyboardInterrupt:
         print('Stopping job download ...')
-
     finally:
         disableSIGINT()
 
         # reconnect in case KeyboardInterrupt left connection in a weird state
-        conn._connect()
+        actrest.close()
 
         if toclean:
-            # clean from aCT
-            params = {'id': toclean}
             try:
-                toclean = cleanJobs(conn, token, params)
-            except ACTClientError as e:
-                print(e)
-                return
+                toclean = actrest.cleanJobs(jobids=toclean)
+            except Exception as exc:
+                raise ACTClientError(f'Error cleaning up downloaded jobs: {exc}')
             finally:
-                conn.close()
+                actrest.close()
 
             webdavCleanup(args, conf, toclean)
 
@@ -350,44 +328,34 @@ def subcommandGet(args, conf):
 def subcommandKill(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    token = readFile(conf['token'])
-
-    params = {}
-    ids = getJobParams(args)
-    if ids:
-        params['id'] = ids
-    if args.state:
-        params['state'] = args.state
-    if args.name:
-        params['name'] = args.name
-
-    disableSIGINT()
-
-    # kill in aCT
-    conn = getHTTPConn(conf['server'])
+    actrest = getACTRestClient(args, conf)
+    ids = getIDParam(args)
     try:
-        jsonDict = killJobs(conn, token, params)
+        disableSIGINT()
+        jsonData = actrest.killJobs(jobids=ids, name=args.name, state=args.state)
+    except Exception as exc:
+        raise ACTClientError(f'Error killing jobs: {exc}')
     finally:
-        conn.close()
-    print(f'Will kill {len(jsonDict)} jobs')
+        actrest.close()
+    print(f'Will kill {len(jsonData)} jobs')
 
     # clean in WebDAV
-    tokill = [job['c_id'] for job in jsonDict if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting')]
+    tokill = [job['c_id'] for job in jsonData if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting')]
     webdavCleanup(args, conf, tokill)
 
 
 def subcommandProxy(args, conf):
     checkConf(conf, ['server', 'token', 'proxy'])
 
+    actrest = getACTRestClient(args, conf, useToken=False)
     proxyStr = readFile(conf['proxy'])
-
-    disableSIGINT()
-
-    conn = getHTTPConn(conf['server'])
     try:
-        uploadProxy(conn, proxyStr, conf['token'])
+        disableSIGINT()
+        actrest.uploadProxy(proxyStr, conf['token'])
+    except Exception as exc:
+        raise ACTClientError(f'Error uploading proxy: {exc}')
     finally:
-        conn.close()
+        actrest.close()
 
     print(f'Successfully inserted proxy. Access token stored in {conf["token"]}')
 
@@ -395,69 +363,58 @@ def subcommandProxy(args, conf):
 def subcommandResub(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    token = readFile(conf['token'])
-
-    params = {}
-    ids = getJobParams(args)
-    if ids:
-        params['id'] = ids
-    if args.name:
-        params['name'] = args.name
-
-    disableSIGINT()
-
-    conn = getHTTPConn(conf['server'])
+    actrest = getACTRestClient(args, conf)
+    ids = getIDParam(args)
     try:
-        json = resubmitJobs(conn, token, params)
+        jsonData = actrest.resubmitJobs(jobids=ids, name=args.name)
+    except Exception as exc:
+        raise ACTClientError(f'Error resubmitting jobs: {exc}')
     finally:
-        conn.close()
+        actrest.close()
 
-    print(f'Will resubmit {len(json)} jobs')
+    print(f'Will resubmit {len(jsonData)} jobs')
 
 
 def subcommandStat(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    token = readFile(conf['token'])
-
-    disableSIGINT()
-
-    conn = getHTTPConn(conf['server'])
+    actrest = getACTRestClient(args, conf)
     try:
         if args.get_cols:
-            getCols(conn, token)
+            getCols(actrest)
         else:
-            getStats(args, conn, token)
+            getStats(args, actrest)
     finally:
-        conn.close()
+        actrest.close()
 
 
-def getCols(conn, token):
-    jsonDict = aCTJSONRequest(conn, 'GET', '/info', token=token)
+def getCols(actrest):
+    try:
+        jsonData = actrest.getInfo()
+    except Exception as exc:
+        raise ACTClientError(f"Error fetching info from aCT server: {exc}")
+
     print('arc columns:')
-    print(f'{",".join(jsonDict["arc"])}')
+    print(f'{",".join(jsonData["arc"])}')
     print()
     print('client columns:')
-    print(f'{",".join(jsonDict["client"])}')
+    print(f'{",".join(jsonData["client"])}')
 
 
-def getStats(args, conn, token):
-    params = {}
-    ids = getJobParams(args)
-    if ids:
-        params['id'] = ids
-    if args.arc:
-        params['arctab'] = args.arc.split(',')
-    if args.client:
-        params['clienttab'] = args.client.split(',')
-    if args.state:
-        params['state'] = args.state
-    if args.name:
-        params['name'] = args.name
+def getStats(args, actrest):
+    ids = getIDParam(args)
+    try:
+        jsonData = actrest.getJobStats(
+            jobids=ids,
+            name=args.name,
+            state=args.state,
+            clienttab=args.client.split(','),
+            arctab=args.arc.split(',')
+        )
+    except Exception as exc:
+        raise ACTClientError(f'Error fetching job status: {exc}')
 
-    jsonDict = getJobStats(conn, token, **params)
-
-    if not jsonDict:
+    if not jsonData:
         return
 
     if args.arc:
@@ -472,7 +429,7 @@ def getStats(args, conn, token):
     # For each column, determine biggest sized value so that output can
     # be nicely formatted.
     colsizes = {}
-    for job in jsonDict:
+    for job in jsonData:
         for key, value in job.items():
             # All keys have a letter and underscore prepended, which is not
             # used when printing
@@ -496,7 +453,7 @@ def getStats(args, conn, token):
     print(line)
 
     # Print jobs
-    for job in jsonDict:
+    for job in jsonData:
         for col in clicols:
             fullKey = 'c_' + col
             txt = job.get(fullKey)
@@ -515,8 +472,6 @@ def getStats(args, conn, token):
 def subcommandSub(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    token = readFile(conf['token'])
-
     if 'clusters' in conf:
         if args.clusterlist in conf['clusters']:
             clusterlist = conf['clusters'][args.clusterlist]
@@ -525,24 +480,24 @@ def subcommandSub(args, conf):
     else:
         clusterlist = args.clusterlist.split(',')
 
-    conn = getHTTPConn(conf['server'])
-    webdavConn = None
-    webdavUrl = None
+    actrest = getACTRestClient(args, conf)
+    webdavClient = None
+    webdavBase = None
     jobs = []
     try:
         if args.webdav:
-            webdavConn = getWebDAVConn(conf['proxy'], conf['webdav'])
-            webdavUrl = getWebDAVBase(args, conf)
-        jobs = submitJobs(conn, token, args.xRSL, clusterlist, webdavConn, webdavUrl)
-    except ACTClientError as e:
-        print(f'Error submitting jobs: {e}')
+            webdavBase = getWebDAVBase(args, conf)
+            webdavClient = getWebDAVClient(conf, webdavBase)
+        jobs = actrest.submitJobs(args.xRSL, clusterlist, webdavClient, webdavBase)
+    except Exception as exc:
+        raise ACTClientError(f'Error submitting jobs: {exc}')
     finally:
         disableSIGINT()
 
         # reconnect in case KeyboardInterrupt left connection in a weird state
-        conn._connect()
-        if webdavConn:
-            webdavConn._connect()
+        actrest.close()
+        if webdavClient:
+            webdavClient.close()
 
         # print results
         for job in jobs:
@@ -554,21 +509,23 @@ def subcommandSub(args, conf):
             elif not job['cleanup']:
                 print(f'Inserted job {job["name"]} with ID {job["id"]}')
 
+        # cleanup failed jobs
         try:
-            # existing webdavConn is closed by webdavCleanup
-            submitCleanup(args, conf, conn, token, jobs, webdavConn, webdavUrl)
+            submitCleanup(args, conf, actrest, jobs, webdavClient, webdavBase)
         finally:
-            conn.close()
+            actrest.close()
+            if webdavClient:
+                webdavClient.close()
 
 
-def submitCleanup(args, conf, conn, token, jobs, webdavConn, webdavUrl):
+def submitCleanup(args, conf, actrest, jobs, webdavClient, webdavBase):
     # clean jobs that could not be submitted
     tokill = [job['id'] for job in jobs if job['cleanup']]
     if tokill:
         print('Cleaning up failed or cancelled jobs ...')
-        params = {'id': tokill}
-        jobs = killJobs(conn, token, params)
-
-        # TODO: change API to not return underscored prefix
+        try:
+            jobs = actrest.killJobs(jobids=tokill)
+        except Exception as exc:
+            raise ACTClientError(f'Error cleaning up after job submission: {exc}')
         toclean = [job['c_id'] for job in jobs]
-        webdavCleanup(args, conf, toclean, webdavConn, webdavUrl)
+        webdavCleanup(args, conf, toclean, webdavClient, webdavBase)

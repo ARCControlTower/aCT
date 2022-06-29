@@ -4,15 +4,14 @@ from datetime import datetime
 
 import arc
 import jwt
-import yaml
-from act.client.errors import (ConfigError, InvalidJobIDError,
-                               InvalidJobRangeError, RESTError,
-                               UnknownClusterError)
+from act.arc.rest import isLocalInputFile
+from act.arc.x509proxy import checkRFCProxy, createProxyCSR
+from act.client.errors import (ConfigError, InvalidColumnError,
+                               InvalidJobIDError, InvalidJobRangeError,
+                               RESTError, UnknownClusterError)
 from act.client.jobmgr import JobManager, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
-from act.arc.x509proxy import createProxyCSR
-from act.client.errors import InvalidColumnError
-from act.arc.rest import isLocalInputFile
+from act.common.aCTConfig import aCTConfigAPP
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -30,7 +29,7 @@ from werkzeug.exceptions import BadRequest
 
 
 STREAM_CHUNK_SIZE = 4096
-CONFIG_PATH = '/etc/act/config.yaml'
+appconf = aCTConfigAPP()
 
 
 app = Flask(__name__)
@@ -123,21 +122,18 @@ def clean():
 
 
 # expects JSON object with 'state' attribute:
-# { "state": "tofetch|tocancel|toresubmit" }
+# { "state": "fetch|cancel|resubmit" }
 @app.route('/jobs', methods=['PATCH'])
 def patch():
     '''
     Set jobs' state based on request parameters.
 
-    Parameter that defines operation is passed in body of request in
-    JSON format. It is a JSON object with a single property "arcstate",
-    that has to be one of possible settable states
-    (for instance {"arcstate": "tofetch"}).
-
-    Other parameters are passed in URL, they are:
+    Parameters that are passed in URL:
         'id': a list of job IDs
         'name': a substring that has to be present in job names
         'state': state that jobs have to be in
+        'action': what action should be performed on jobs
+            (fetch|cancel|resubmit)
 
     Returns:
         status 200: A string with a number of affected jobs.
@@ -146,7 +142,6 @@ def patch():
     try:
         token = getToken()
         jobids = getIDs()
-        jsonData = request.get_json()
     except BadRequest as e:
         print(f'error: PATCH /jobs: {e}')
         return {'msg': str(e)}, 400
@@ -155,22 +150,20 @@ def patch():
         return {'msg': str(e)}, e.httpCode
     proxyid = token['proxyid']
 
-    if not jsonData:
-        print('error: PATCH /jobs: No JSON data')
-        return {'msg': 'error: PATCH /jobs: No JSON data'}, 400
-    else:
-        arcstate = jsonData.get('arcstate', None)
-        if arcstate is None:
-            return {'msg': 'Request data has no \'arcstate\' attribute'}, 400
-
     name_filter = request.args.get('name', default='')
     state_filter = request.args.get('state', default='')
 
+    action = request.args.get('action', None)
+    if action is None:
+        return {'msg': 'Request has no action parameter'}, 400
+    elif action not in ('fetch', 'cancel', 'resubmit'):
+        return {'msg': f'Invalid action "{action}"'}, 400
+
     try:
         jmgr = JobManager()
-        if arcstate == 'tofetch':
+        if action == 'fetch':
             jobs = jmgr.fetchJobs(proxyid, jobids, name_filter)
-        elif arcstate == 'tocancel':
+        elif action == 'cancel':
             # One state in which a job can be killed is before it is passed
             # to ARC. Such jobs have None as arcid. Data dirs for jobs are
             # otherwise cleaned by cleaning operation but this is one exception
@@ -181,10 +174,8 @@ def patch():
                 if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting'):
                     datadir = jmgr.getJobDataDir(job['c_id'])
                     shutil.rmtree(jmgr.getJobDataDir(datadir), ignore_errors=True)
-        elif arcstate == 'toresubmit':
+        elif action == 'resubmit':
             jobs = jmgr.resubmitJobs(proxyid, jobids, name_filter)
-        else:
-            return {'msg': '"arcstate" should be either "tofetch" or "tocancel" or "toresubmit"'}, 400
     except Exception as e:
         print(f'error: PATCH /jobs: {e}')
         return {'msg': 'Server error'}, 500
@@ -336,7 +327,7 @@ def confirm_jobs():
         # get job's data directory
         try:
             jobDataDir = jmgr.getJobDataDir(job['id'])
-        except ConfigError as e:
+        except ConfigError as exp:
             print(f'{errpref}{e}')
             job['msg'] = 'Server error'
             continue
@@ -413,7 +404,7 @@ def getResults():
             return {'msg': 'Results for job not found'}, 404
         resultDir = results.jobdicts[0]['dir']
         if not resultDir:
-            return {'msg': 'No results to fetch'}, 204
+            return '', 204
 
         # create result archive in data dir
         jobDataDir = jmgr.getJobDataDir(jobids[0])
@@ -492,8 +483,7 @@ def getCSR():
 
         # generate CSR string and auth token
         csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
-        conf = readConfig()
-        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, conf['jwt_secret'], algorithm='HS256')
+        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, appconf.user.jwt_secret, algorithm='HS256')
     except Exception as e:
         print(f'error: POST /proxies: {e}')
         return {'msg': 'Server error'}, 500
@@ -545,8 +535,7 @@ def uploadSignedProxy():
         if not checkRFCProxy(proxy_obj):
             return {'msg': 'cert is not a valid proxy'}, 400
         proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, attr, exptime)
-        conf = readConfig()
-        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, conf['jwt_secret'], algorithm='HS256')
+        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, appconf.user.jwt_secret, algorithm='HS256')
     except Exception as e:
         print(f'error: PUT /proxies: {e}')
         return {'msg': 'Server error'}, 500
@@ -619,17 +608,16 @@ def uploadFile():
         print(f'error: PUT /data: {e}')
         return {'msg': 'Server error'}, 500
 
-    return {'msg': 'OK'}, 200
+    return '', 204
 
 
 @app.route('/info', methods=['GET'])
 def info():
     try:
         getToken()
-        conf = readConfig()
         jmgr = JobManager()
 
-        json = {'clusters': conf['clusters']}
+        json = {'clusters': appconf.user.clusters}
 
         c = jmgr.arcdb.db.getCursor()
         c.execute('SHOW COLUMNS FROM arcjobs')
@@ -674,12 +662,12 @@ def getToken():
         RESTError: Token is not present or is expired
     '''
     tokstr = request.headers.get('Authorization', None)
-    if tokstr is None: raise RESTError('Auth token is missing', 401)
+    if tokstr is None:
+        raise RESTError('Auth token is missing', 401)
     try:
         # potential errors with tokstr, token decode, proxy manager ...
         tokstr = tokstr.split()[1]
-        conf = readConfig()
-        token = jwt.decode(tokstr, conf['jwt_secret'], algorithms=['HS256'])
+        token = jwt.decode(tokstr, appconf.user.jwt_secret, algorithms=['HS256'])
         pmgr = ProxyManager()
         result = pmgr.checkProxyExists(token['proxyid'])
         if result is None:
@@ -692,25 +680,7 @@ def getToken():
         return token
 
 
-def checkRFCProxy(proxy):
-    for ext in proxy.extensions:
-        if ext.oid.dotted_string == "1.3.6.1.5.5.7.1.14":
-            return True
-    return False
-
-
-def readConfig():
-    with open(CONFIG_PATH, 'r') as f:
-        yamlstr = f.read()
-    return yaml.safe_load(yamlstr)
-
-
-# TODO: hardcoded
-# TODO: for now this is called in try except block so we don't handle exceptions
 def checkClusters(clusterlist):
-    conf = readConfig()
-    if 'clusters' not in conf:
-        raise ConfigError(f'{CONFIG_PATH}: clusters')
     for cluster in clusterlist:
-        if cluster not in conf['clusters']:
+        if cluster not in appconf.user.clusters:
             raise UnknownClusterError(cluster)
