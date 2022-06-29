@@ -498,7 +498,7 @@ class aCTSubmitter(aCTProcess):
                         try:
                             arcrest.renewDelegation(job.arcjob.delegid)
                         except Exception as exc:
-                            job.arcjobs.errors.append(exc)
+                            job.arcjob.errors.append(exc)
                         else:
                             torestart.append(job.arcjob)
 
