@@ -144,6 +144,7 @@ class Client2Arc(object):
                     'arcjobid': row['LAST_INSERT_ID()'],
                     'modified': self.clidb.getTimeStamp()
                 })
+                self.log.info(f'Successfully inserted job {job["id"]} {row["LAST_INSERT_ID()"]} to ARC engine')
 
     def finish(self):
         """Log stop message."""
