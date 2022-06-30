@@ -382,7 +382,7 @@ class ARCRest:
             transferQueue.put({
                 "jobid": job.id,
                 "url": f"{self.baseURL}/jobs/{job.id}/session",
-                "filename": "",
+                "path": "",
                 "type": "listing"
             })
 
@@ -448,7 +448,7 @@ class ARCRest:
             transferQueue.put({
                 "jobid": job.id,
                 "url": f"{self.baseURL}/jobs/{job.id}/diagnose/{diagName}",
-                "filename": diagFile,
+                "path": diagFile,
                 "type": "diagnose"
             })
 
@@ -817,26 +817,12 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
         try:
             if transfer["type"] in ("file", "diagnose"):
                 # filter out download files that are not specified
-                if job.downloadFiles and not transfer["type"] == "diagnose":
-                    toDownload = False
-                    for pattern in job.downloadFiles:
-                        # direct match
-                        if pattern == transfer["filename"]:
-                            toDownload = True
-                            break
-                        # recursive folder match
-                        elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
-                            toDownload = True
-                            break
-                        # entire session directory, not matched by above if
-                        elif pattern == "/":
-                            toDownload = True
-                            break
-                    if not toDownload:
+                if not transfer["type"] == "diagnose":
+                    if filterOutFile(job.downloadFiles, transfer["path"]):
                         continue
 
                 # download file
-                path = f"{downloadDir}/{transfer['jobid']}/{transfer['filename']}"
+                path = f"{downloadDir}/{transfer['jobid']}/{transfer['path']}"
                 try:
                     downloadFile(httpClient, transfer["url"], path)
                 except ARCHTTPError as exc:
@@ -869,17 +855,8 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
             elif transfer["type"] == "listing":
 
                 # filter out listings that do not match download patterns
-                if job.downloadFiles:
-                    toDownload = False
-                    for pattern in job.downloadFiles:
-                        # part of pattern
-                        if pattern.startswith(transfer["filename"]):
-                            toDownload = True
-                        # recursive folder match
-                        elif pattern.endswith("/") and transfer["filename"].startswith(pattern):
-                            toDownload = True
-                    if not toDownload:
-                        continue
+                if filterOutListing(job.downloadFiles, transfer["path"]):
+                    continue
 
                 # download listing
                 try:
@@ -902,35 +879,13 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
 
                 logger.info(f"Successfully downloaded listing {transfer['url']}")
 
-                # create new transfer jobs; duplication except for "type" key
-                if "file" in listing:
-                    if not isinstance(listing["file"], list):
-                        listing["file"] = [listing["file"]]
-                    for f in listing["file"]:
-                        if transfer["filename"]:
-                            filename = f"{transfer['filename']}/{f}"
-                        else:  # if session root, slash needs to be skipped
-                            filename = f
-                        transferQueue.put({
-                            "jobid": transfer["jobid"],
-                            "type": "file",
-                            "filename": filename,
-                            "url": f"{endpoint}/jobs/{transfer['jobid']}/session/{filename}"
-                        })
-                elif "dir" in listing:
-                    if not isinstance(listing["dir"], list):
-                        listing["dir"] = [listing["dir"]]
-                    for d in listing["dir"]:
-                        if transfer["filename"]:
-                            filename = f"{transfer['filename']}/{d}"
-                        else:  # if session root, slash needs to be skipped
-                            filename = d
-                        transferQueue.put({
-                            "jobid": transfer["jobid"],
-                            "type": "listing",
-                            "filename": filename,
-                            "url": f"{endpoint}/jobs/{transfer['jobid']}/session/{filename}"
-                        })
+                # create new transfer jobs
+                transfers = createTransfersFromListing(
+                    endpoint, listing, transfer["path"], transfer["jobid"]
+                )
+                for transfer in transfers:
+                    transferQueue.put(transfer)
+
         except:
             import traceback
             excstr = traceback.format_exc()
@@ -1070,3 +1025,66 @@ class InputFileError(ARCError):
 
 class NoValueInARCResult(ARCError):
     pass
+
+
+def filterOutFile(downloadFiles, filePath):
+    if not downloadFiles:
+        return False
+    for pattern in downloadFiles:
+        # direct match
+        if pattern == filePath:
+            return False
+        # recursive folder match
+        elif pattern.endswith("/") and filePath.startswith(pattern):
+            return False
+        # entire session directory, not matched by above if
+        elif pattern == "/":
+            return False
+    return True
+
+
+def filterOutListing(downloadFiles, listingPath):
+    if not downloadFiles:
+        return False
+    for pattern in downloadFiles:
+        # part of pattern
+        if pattern.startswith(listingPath):
+            return False
+        # recursive folder match
+        elif pattern.endswith("/") and listingPath.startswith(pattern):
+            return False
+    return True
+
+
+def createTransfersFromListing(endpoint, listing, path, jobid):
+    transfers = []
+    # create new transfer jobs; duplication except for "type" key
+    if "file" in listing:
+        if not isinstance(listing["file"], list):
+            listing["file"] = [listing["file"]]
+        for f in listing["file"]:
+            if path:
+                newpath = f"{path}/{f}"
+            else:  # if session root, slash needs to be skipped
+                newpath = f
+            transfers.append({
+                "jobid": jobid,
+                "type": "file",
+                "path": newpath,
+                "url": f"{endpoint}/jobs/{jobid}/session/{newpath}"
+            })
+    if "dir" in listing:
+        if not isinstance(listing["dir"], list):
+            listing["dir"] = [listing["dir"]]
+        for d in listing["dir"]:
+            if path:
+                newpath = f"{path}/{d}"
+            else:  # if session root, slash needs to be skipped
+                newpath = d
+            transfers.append({
+                "jobid": jobid,
+                "type": "listing",
+                "path": newpath,
+                "url": f"{endpoint}/jobs/{jobid}/session/{newpath}"
+            })
+    return transfers
