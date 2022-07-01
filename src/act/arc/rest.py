@@ -827,21 +827,18 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                 try:
                     downloadFile(httpClient, transfer["url"], path)
                 except ARCHTTPError as exc:
-                    # don't stop downloading files when files are missing (404)
+                    logger.error(f"Error downloading file {transfer['url']}: {exc}")
+                    error = exc
                     if exc.status == 404:
-                        # don't signal missing diagnose file as error
                         if transfer["type"] == "diagnose":
-                            logger.info(f"Missing diagnose file {transfer['url']}")
-                            continue
-                    else:
-                        job.cancelEvent.set()
-
-                    logger.error(str(exc))
+                            error = MissingDiagnoseFile(transfer["url"])
+                        else:
+                            error = MissingOutputFile(transfer["url"])
                     resultQueue.put({
                         "jobid": transfer["jobid"],
-                        "error": exc
+                        "error": error
                     })
-
+                    continue
                 except Exception as exc:
                     job.cancelEvent.set()
                     logger.error(str(exc))
@@ -886,7 +883,6 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                 )
                 for transfer in transfers:
                     transferQueue.put(transfer)
-
         except:
             import traceback
             excstr = traceback.format_exc()
@@ -1026,6 +1022,34 @@ class InputFileError(ARCError):
 
 class NoValueInARCResult(ARCError):
     pass
+
+
+class MissingResultFile(ARCError):
+
+    def __init__(self, filename):
+        self.filename = filename
+        super().__init__(str(self))
+
+    def __str__(self):
+        return f"Missing result file {self.filename}"
+
+
+class MissingOutputFile(MissingResultFile):
+
+    def __init__(self, filename):
+        super().__init__(filename)
+
+    def __str__(self):
+        return f"Missing output file {self.filename}"
+
+
+class MissingDiagnoseFile(MissingResultFile):
+
+    def __init__(self, filename):
+        super().__init__(filename)
+
+    def __str__(self):
+        return f"Missing diagnose file {self.filename}"
 
 
 def filterOutFile(downloadFiles, filePath):

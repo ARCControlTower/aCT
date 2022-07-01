@@ -365,8 +365,6 @@ class aCTSubmitter(aCTProcess):
 
             self.db.Commit()
 
-    # This does not handle jobs with empty clusterlist. What about that?
-    #
     # This does not kill jobs (before cleaning them)!!!
     def processToResubmit(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]

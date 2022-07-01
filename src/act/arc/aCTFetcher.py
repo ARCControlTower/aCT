@@ -11,7 +11,7 @@ from json import JSONDecodeError
 from ssl import SSLError
 from urllib.parse import urlparse
 
-from act.arc.rest import ARCError, ARCHTTPError, ARCRest
+from act.arc.rest import ARCError, ARCHTTPError, ARCRest, MissingDiagnoseFile
 from act.common.aCTProcess import aCTProcess
 from act.common.aCTJob import ACTJob
 
@@ -77,11 +77,18 @@ class aCTFetcher(aCTProcess):
                 arcrest.close()
 
             for job in jobs:
-                # TODO: retry based on error condition
-                if job.arcjob.errors:
-                    for error in job.arcjob.errors:
+                isError = False
+                for error in job.arcjob.errors:
+                    # don't treat missing diagnose file as fail
+                    if isinstance(error, MissingDiagnoseFile):
+                        self.log.info(str(error))
+                    else:
+                        isError = True
                         self.log.error(f"Error fetching  job {job.appid} {job.arcid}: {error}")
+                if isError:
+                    # TODO: HARDCODED
                     if job.tstate + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
+                        self.log.info(f"Fetch timeout for job {job.appid} {job.arcid}, marking job \"donefailed\"")
                         jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
                         self.db.updateArcJobLazy(job.arcid, jobdict)
                     else:
