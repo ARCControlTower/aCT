@@ -20,6 +20,7 @@ import arc
 HTTP_BUFFER_SIZE = 2**23
 
 
+# TODO: hardcoded timeout for http.client connection
 class HTTPClient:
 
     def __init__(self, hostname, proxypath=None, isHTTPS=False, port=None):
@@ -54,11 +55,11 @@ class HTTPClient:
                 context = None
             if not self.port:
                 self.port = 443
-            self.conn = HTTPSConnection(self.host, port=self.port, context=context)
+            self.conn = HTTPSConnection(self.host, port=self.port, context=context, timeout=60)
         else:
             if not self.port:
                 self.port = 80
-            self.conn = HTTPConnection(self.host, port=self.port)
+            self.conn = HTTPConnection(self.host, port=self.port, timeout=60)
 
     def request(self, method, endpoint, headers={}, token=None, jsonData=None, data=None, params={}):
         """
