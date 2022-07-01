@@ -354,6 +354,7 @@ class aCTSubmitter(aCTProcess):
                             if error.status == 404:
                                 state = "cancelled"
                                 self.log.error(f"Job {job.appid} {job.arcid} not found, setting to cancelled")
+                                continue
                         self.log.error(f"Error killing job {job.appid} {job.arcid}: {error}")
 
                 if state:
