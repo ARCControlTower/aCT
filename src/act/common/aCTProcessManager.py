@@ -6,6 +6,7 @@ import os
 from . import aCTUtils
 from act.arc import aCTDBArc
 from act.condor import aCTDBCondor
+from act.common.aCTConfig import aCTConfigARC
 
 class aCTProcessManager:
     '''
@@ -17,8 +18,8 @@ class aCTProcessManager:
         self.conf = conf
         # logger
         self.log = log
-        self.actlocation = self.conf.get(["actlocation","dir"])
-        self.logdir = self.conf.get(["logger", "logdir"])
+        self.actlocation = self.conf.actlocation.dir
+        self.logdir = self.conf.logger.logdir
         # DB connection
         self.dbarc = aCTDBArc.aCTDBArc(self.log)
         self.dbcondor = aCTDBCondor.aCTDBCondor(self.log)
@@ -31,7 +32,7 @@ class aCTProcessManager:
         # dictionary of processes:aCTProcessHandler of which to run a single instance
         self.processes_single = {'act/common/aCTProxyHandler': None,
                                  'act/common/aCTMonitor': None}
-        apps = appconf.getList(["modules", "app"])
+        apps = appconf.modules.app
         for app in apps:
             try:
                 ap = importlib.import_module(app).app_processes
@@ -93,7 +94,7 @@ class aCTProcessManager:
         Get the list of current clusters and (re)start necessary processes
         '''
 
-        self.conf.parse()
+        self.conf = aCTConfigARC()
 
         clusters = self.dbarc.getActiveClusters()
         activeclusters = dict((k, v) for (k, v) in zip([c['cluster'] for c in clusters],
@@ -149,7 +150,11 @@ class aCTProcessManager:
         for cluster in clusterlist:
             if cluster not in self.submitters:
                 procs = []
-                for nprocs in range(int(self.conf.getCond(["sites", "site"], f"endpoint={cluster}", ["submitters"]) or 1)):
+                submitters = 0
+                for _, site in self.conf.sites:
+                    if site.endpoint == cluster:
+                        submitters = site.submitters
+                for nprocs in range(submitters or 1):
                     self.log.info("Starting process aCTSubmitter for %s", cluster)
                     ph = self.aCTProcessHandler(self.arcsubmitter, self.logdir, cluster, actlocation=self.actlocation)
                     ph.start()
@@ -226,7 +231,11 @@ class aCTProcessManager:
         for cluster in clusterlist:
             if cluster not in self.submitters:
                 procs = []
-                for nprocs in range(int(self.conf.getCond(["sites", "site"], f"endpoint={cluster}", ["submitters"]) or 1)):
+                submitters = 0
+                for _, site in self.conf.sites:
+                    if site.endpoint == cluster:
+                        submitters = site.submitters
+                for nprocs in range(submitters or 1):
                     self.log.info("Starting process aCTSubmitter for %s", cluster)
                     ph = self.aCTProcessHandler(self.condorsubmitter, self.logdir, cluster, actlocation=self.actlocation)
                     ph.start()

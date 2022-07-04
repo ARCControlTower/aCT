@@ -17,10 +17,9 @@ import sys
 import logging
 import os
 
-import act.client.jobmgr as jobmgr
-import act.client.clicommon as clicommon
-from act.client.errors import InvalidJobRangeError
-from act.client.errors import InvalidJobIDError
+from act.client.jobmgr import getIDsFromList, JobManager
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
+from act.client.errors import InvalidJobRangeError, InvalidJobIDError
 
 
 def main():
@@ -45,7 +44,7 @@ def main():
     parser.add_argument('--get-cols', action='store_true',
             help='print all available column names')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -57,7 +56,7 @@ def main():
         logging.basicConfig(format=logFormat, level=logging.DEBUG, filename=os.devnull)
 
     # get column names from database
-    manager = jobmgr.JobManager()
+    manager = JobManager()
     if args.get_cols:
         clientCols = manager.getClientColumns()
         arcCols = manager.getArcColumns()
@@ -76,7 +75,7 @@ def main():
         jobs = [] # empty means all jobs
     elif args.jobs:
         try:
-            jobs = jobmgr.getIDsFromList(args.jobs)
+            jobs = getIDsFromList(args.jobs)
         except InvalidJobRangeError as e:
             print("error: range '{}' is not a valid range".format(e.jobRange))
             sys.exit(2)
@@ -98,7 +97,7 @@ def main():
         arccols = args.arc_cols.split(',')
 
     # get proxy ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # get information
     try:

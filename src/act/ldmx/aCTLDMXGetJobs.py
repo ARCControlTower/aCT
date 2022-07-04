@@ -161,7 +161,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
         Read new job files in buffer dir and create necessary job descriptions
         '''
 
-        bufferdir = self.conf.get(['jobs', 'bufferdir'])
+        bufferdir = self.conf.jobs.bufferdir
         configsdir = os.path.join(bufferdir, 'configs')
         os.makedirs(configsdir, 0o755, exist_ok=True)
         jobs = [os.path.join(configsdir, j) for j in os.listdir(configsdir) if os.path.isfile(os.path.join(configsdir, j))]
@@ -214,7 +214,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                         if output_base:
                             njf.write(f'FinalOutputBasePath={output_base}\n')
  
-                        nouploadsites = self.arcconf.getListCond(["sites", "site"], "noupload=1", ["endpoint"])
+                        nouploadsites = [site.endpoint for _, site in self.arcconf.sites if site.noupload == 1]
                         if nouploadsites:
                             self.log.debug(nouploadsites)
                             njf.write(f'NoUploadSites={",".join(nouploadsites)}\n')

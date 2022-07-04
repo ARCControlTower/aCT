@@ -2,7 +2,7 @@ import logging
 import time
 import os, re, sys
 import json
-from act.common import aCTConfig
+from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 
 class aCTCRICParser:
     '''
@@ -12,59 +12,38 @@ class aCTCRICParser:
 
     def __init__(self, logger):
         self.log = logger
-        self.conf = aCTConfig.aCTConfigAPP()
-        self.arcconf = aCTConfig.aCTConfigARC()
+        self.conf = aCTConfigAPP()
+        self.arcconf = aCTConfigARC()
         self.tparse = 0
         self.getSites()
 
     def _parseConfigSites(self):
         sites = {}
-        for sitename in self.conf.getList(["sites","site","name"]):
+
+        for sitename, site in self.conf.panda.sites:
             siteinfo = {}
-            configendpoints = self.conf.getListCond(["sites","site"],"name=" + sitename, ["endpoints","item"])
-            if configendpoints:
-                siteinfo['endpoints'] = configendpoints
-            try:
-                siteinfo['flavour'] = self.conf.getListCond(["sites","site"],"name=" + sitename, ["flavour"])[0]
-            except:
-                pass
-            try:
-                siteinfo['schedconfig'] = self.conf.getListCond(["sites","site"],"name=" + sitename, ["schedconfig"])[0]
-            except:
-                pass
-            try:
-                siteinfo['type'] = self.conf.getListCond(["sites","site"],"name=" + sitename, ["type"])[0]
-            except:
-                # ignore missing type and hope cric has the info
-                pass
-            try:
-                siteinfo['corecount'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["corecount"])[0])
-            except:
-                pass
-            try:
-                siteinfo['maxjobs'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["maxjobs"])[0])
-            except:
-                pass
-            try:
-                siteinfo['truepilot'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["truepilot"])[0])
-            except:
-                pass
-            try:
-                siteinfo['push'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["push"])[0])
-            except:
-                pass
-            try:
-                siteinfo['cricjsons'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["cricjsons"])[0])
-            except:
-                siteinfo['cricjsons'] = 0
-            # If status is already defined in CRIC then only override if explicity specified here
-            try:
-                siteinfo['status'] = self.conf.getListCond(["sites","site"],"name=" + sitename, ["status"])[0]
-            except:
-                if not self.sites.get(sitename, {}).get('status'):
-                    siteinfo['status'] = 'online'
+            if site.endpoints:
+                siteinfo['endpoints'] = site.endpoints
+            if site.flavour:
+                siteinfo['flavour'] = site.flavour
+            if site.schedconfig:
+                siteinfo['schedconfig'] = site.schedconfig
+            if site.type:
+                siteinfo['type'] = site.type
+            if site.corecount:
+                siteinfo['corecount'] = site.corecount
+            if site.maxjobs:
+                siteinfo['maxjobs'] = site.maxjobs
+            if site.truepilot:
+                siteinfo['truepilot'] = site.truepilot
+            if site.push:
+                siteinfo['push'] = site.push
+
+            siteinfo['cricjsons'] = site.cricjsons or 0
+            siteinfo['status'] = site.status or 'online'
             siteinfo['enabled'] = True
             sites[sitename] = siteinfo
+
         self.log.info("Parsed sites from config: %s" % str(list(sites.keys())))
         return sites
 
@@ -78,7 +57,7 @@ class aCTCRICParser:
                (pilotver is None or siteinfo['pilot_version'] == str(pilotver)) and \
                siteinfo['state'] == 'ACTIVE' and not siteinfo['is_virtual']:
                 siteinfo['enabled'] = True
-                siteinfo['maxjobs'] = int(self.conf.get(["cric", "maxjobs"]))
+                siteinfo['maxjobs'] = self.conf.cric.maxjobs
             else:
                 siteinfo['enabled'] = False
                 siteinfo['maxjobs'] = 0
@@ -179,8 +158,8 @@ class aCTCRICParser:
     def getSites(self, flavour=None):
         '''Get site info, filtered by CE flavour(s) if given'''
 
-        self.conf.parse()
-        cricfile = self.conf.get(['cric','jsonfilename'])
+        self.conf = aCTConfigAPP()
+        cricfile = self.conf.cric.jsonfilename
         if not cricfile:
             # No CRIC, only manually configured sites
             return self._parseConfigSites()
@@ -199,12 +178,12 @@ class aCTCRICParser:
                 time.sleep(10)
 
         # check if json file or config file changed before parsing
-        if (self.tparse < cricmtime) or (self.tparse < os.stat(self.conf.configfile).st_mtime):
+        if (self.tparse < cricmtime) or (self.tparse < os.stat(self.conf.path).st_mtime):
             self.log.info("CRIC file and/or config modified, reparsing site info")
-            pilotmgr = self.conf.get(['cric','pilotmanager'])
-            pilotver = self.conf.get(['cric','pilotversion'])
+            pilotmgr = self.conf.cric.pilotmanager
+            pilotver = self.conf.cric.pilotversion
             start_parsing = time.time()
-            self._parseDDMEndpoints(self.conf.get(['cric', 'osfilename']))
+            self._parseDDMEndpoints(self.conf.cric.osfilename)
             self.sites = self._parseCRICJson(cricfile, pilotmgr, pilotver)
             self._mergeSiteDicts(self.sites, self._parseConfigSites())
             self.tparse = time.time()

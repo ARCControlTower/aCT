@@ -11,14 +11,14 @@ class aCTPanda:
 
     def __init__(self,logger, proxyfile):
         self.conf = aCTConfig.aCTConfigAPP()
-        server = self.conf.get(['panda','server'])
+        server = self.conf.panda.server
         u = urllib.parse.urlparse(server)
         self.hostport = u.netloc
         self.topdir = u.path
         proxypath = proxyfile
         self.log = logger
         # timeout in seconds
-        self.timeout = int(self.conf.get(['panda','timeout']))
+        self.timeout = self.conf.panda.timeout
         socket.setdefaulttimeout(self.timeout)
 
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
@@ -167,7 +167,7 @@ class aCTPanda:
         node={}
         node['jobId']=pandaId
         node['state']=state
-        node['schedulerID']=self.conf.get(['panda','schedulerid'])
+        node['schedulerID']=self.conf.panda.schedulerid
         if desc:
             for key in desc.keys():
                 node[key]=desc[key]
@@ -191,7 +191,7 @@ class aCTPanda:
         jobdata = []
         for job in jobs:
             node = job
-            node['schedulerID'] = self.conf.get(['panda','schedulerid'])
+            node['schedulerID'] = self.conf.panda.schedulerid
             jobdata.append(node)
         urldata=self.__HTTPConnect__('updateJobsInBulk', {'jobList': json.dumps(jobdata)})
         try:
@@ -205,7 +205,7 @@ class aCTPanda:
     def queryJobInfo(self, cloud='ND'):
         node={}
         node['cloud']=cloud
-        node['schedulerID']=self.conf.get(['panda','schedulerid'])
+        node['schedulerID']=self.conf.panda.schedulerid
         try:
             urldata=self.__HTTPConnect__('queryJobInfoPerCloud',node)
         except:

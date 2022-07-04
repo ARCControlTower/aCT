@@ -1,0 +1,93 @@
+db:
+  type: mysql
+  socket: /data/user/atlact1/act-mysql/act.mysql.socket
+  name: act
+  user: user
+  password: password
+  host: host.name
+  port: 42
+
+sites:
+  sitename:
+    endpoint: https://my.arc.ce/arex
+    maxjobs: 50
+    submitters: 5
+
+periodicrestart:
+  actsubmitter: 120
+  actstatus: 600
+  actfetcher: 600
+  actcleaner: 600
+
+tmp:
+  dir: /data/user/atlact1/act-test1/tmp
+
+actlocation:
+  dir: /data/user/atlact1/src/aCT/act
+  pidfile: /data/user/atlact1/act-test1/act.pid
+
+logger:
+  level: debug
+  arclevel: info
+  logdir: /data/user/atlact1/act-test1/log
+  rotate: 25
+
+jobs:
+  queuefraction: 0.15
+  queueoffset: 200
+  checkinterval: 60
+  checkmintime: 120
+  maxtimerunning: 777600
+  maxtimeundefined: 86400
+  maxtimeidle: 86400
+  maxtimeheld: 3600
+  maxtimehold: 172800
+  maxtimepreparing: 86400
+  maxtimefinishing: 86400
+  maxtimefinished: 86400
+
+downtime:
+  stopsubmission: False
+  srmdown: False
+  clusters:
+    - nosuchcluster
+    - Xjeannedarc.hpc2n.umu.se
+
+voms:
+  vo: atlas
+  roles:
+    - production
+    - pilot
+
+  bindir: /usr/bin
+  proxylifetime: 345600
+  minlifetime: 302400
+  proxypath: /data/user/atlact1/.globus/latest
+  proxystoredir: /cephfs/user/atlact1/act-prod/act403/proxies
+  cacertdir: /etc/grid-security/certificates
+
+errors:
+  toresubmit:
+    arcerrors:
+      - "Job was lost"
+      - "Job submission to LRMS failed"
+      - "Failed extracting LRMS ID"
+      - "Job disappeared from SGE"
+      - "Failed extracting LRMS ID"
+      - "Job was cancelled"
+      - "Internal error in uploader"
+      - "Job finished with non-zero exit code"
+      - "LRMS error: (127) Job failed"
+      - "Job missing from SLURM"
+      - "Submission: runtime script"
+      - "LRMS error: (-4)"
+      - "Job failed with exit code 1"
+      - "Job was killed by PBS"
+      - "Local submission client failed"
+      - "LRMS error: (255)"
+      - "xxx LRMS error: (257)"
+      - "LRMS error: (1)"
+      - "LRMS error: (-1)"
+      - "LRMS error: (91)"
+      - "LRMS error: (257) Node fail"
+      - "Failed initiating job submission to LRMS"

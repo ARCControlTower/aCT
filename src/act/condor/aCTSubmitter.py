@@ -70,7 +70,7 @@ class aCTSubmitter(aCTProcess):
                 jd = {}
                 jd['condorstate'] = 'submitted'
                 # initial offset to 1 minute to force first status check
-                jd['tcondorstate'] = self.dbcondor.getTimeStamp(time.time() - int(self.conf.get(['jobs', 'checkinterval'])) + 120)
+                jd['tcondorstate'] = self.dbcondor.getTimeStamp(time.time() - self.conf.jobs.checkinterval + 120)
                 jd['cluster'] = self.cluster
                 jd['ClusterId'] = t.jobid
                 self.log.info("%s: Job submitted with ClusterId %d" % (t.appjobid, t.jobid))
@@ -91,7 +91,7 @@ class aCTSubmitter(aCTProcess):
         global queuelist
 
         # check for stopsubmission flag
-        if self.conf.get(['downtime','stopsubmission']) == "true":
+        if self.conf.downtime.stopsubmission:
             self.log.info('Submission suspended due to downtime')
             return 0
 
@@ -158,8 +158,8 @@ class aCTSubmitter(aCTProcess):
 
             # Set number of submitted jobs to (running * qfraction + qoffset/num of shares)/num CEs
             # Note: assumes only a few shares are used and all jobs in the fairshare have the same clusterlist
-            qfraction = float(self.conf.get(['jobs', 'queuefraction'])) if self.conf.get(['jobs', 'queuefraction']) else 0.15
-            qoffset = int(self.conf.get(['jobs', 'queueoffset'])) if self.conf.get(['jobs', 'queueoffset']) else 100
+            qfraction = self.conf.jobs.queuefraction if self.conf.jobs.queuefraction else 0.15
+            qoffset = self.conf.jobs.queueoffset if self.conf.jobs.queueoffset else 100
             jlimit = (len(rjobs)*qfraction + qoffset/len(fairshares)) / len(jobs[0]['clusterlist'].split(','))
             self.log.debug("running %d, queued %d, queue limit %d" % (len(rjobs), len(qjobs), jlimit))
 

@@ -3,7 +3,7 @@
 # Handles proxy updates in proxies table
 #
 
-from act.common import aCTConfig
+from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
 from act.common.aCTProxy import aCTProxy
 
@@ -13,7 +13,7 @@ class aCTProxyHandler(aCTProcess):
 
     def __init__(self):
         aCTProcess.__init__(self)
-        self.conf=aCTConfig.aCTConfigARC()
+        self.conf = aCTConfigARC()
         self.pm = aCTProxy(self.log)
         self.tstamp = datetime.datetime.utcnow()-datetime.timedelta(0,self.pm.interval)
         if self._updateLocalProxies() == 0:
@@ -30,11 +30,11 @@ class aCTProxyHandler(aCTProcess):
             return proxylifetime
 
     def _updateRolesFromConfig(self):
-        vo = self.conf.get(["voms", "vo"])
-        validTime = self._checkProxyLifetime(int(self.conf.get(["voms", "proxylifetime"])))
-        proxypath = self.conf.get(["voms", "proxypath"])
+        vo = self.conf.voms.vo
+        validTime = self._checkProxyLifetime(self.conf.voms.proxylifetime)
+        proxypath = self.conf.voms.proxypath
         # TODO: roles should be taken from AGIIS
-        roles = self.conf.getList(["voms", "roles", "item"])
+        roles = self.conf.voms.roles
         if not roles:
             self.pm.createVOMSAttribute(vo, '', proxypath, validTime)
         else:
@@ -49,12 +49,12 @@ class aCTProxyHandler(aCTProcess):
         select = "proxytype='local'"
         columns = ["dn","attribute","proxypath","id"]
         ret_columns = self.pm.db.getProxiesInfo(select, columns)
-        vo = self.conf.get(["voms", "vo"])
-        validTime = self._checkProxyLifetime(int(self.conf.get(["voms", "proxylifetime"])))
+        vo = self.conf.voms.vo
+        validTime = self._checkProxyLifetime(self.conf.voms.proxylifetime)
         for row in ret_columns:
             dn = row["dn"]
             attribute = row["attribute"]
-            proxypath = self.conf.get(["voms", "proxypath"])
+            proxypath = self.conf.voms.proxypath
             proxyid = row["id"]
             self.pm.voms_proxies[(dn, attribute)] = (vo, attribute, proxypath, validTime, proxyid)
         return len(ret_columns)

@@ -6,10 +6,12 @@ import logging
 import os
 import arc
 import datetime
+import re
 
-import act.common.aCTProxy as aCTProxy
-import act.arc.aCTDBArc as aCTDBArc
-import act.client.errors as errors
+from act.common.aCTProxy import aCTProxy
+from act.arc.aCTDBArc import aCTDBArc
+from act.client.errors import NoSuchProxyError, NoProxyFileError
+from act.client.errors import ProxyFileExpiredError, ProxyDBExpiredError
 
 DEFAULT_PROXY_PATH = '/tmp/x509up_u'
 
@@ -35,8 +37,8 @@ class ProxyManager(object):
     def __init__(self):
         """Initialize object."""
         self.logger = logging.getLogger(__name__)
-        self.actproxy = aCTProxy.aCTProxy(self.logger)
-        self.arcdb = aCTDBArc.aCTDBArc(self.logger)
+        self.actproxy = aCTProxy(self.logger)
+        self.arcdb = aCTDBArc(self.logger)
 
     def getProxyInfo(self, dn, attribute='', columns=[]):
         """
@@ -56,12 +58,12 @@ class ProxyManager(object):
         try:
             proxyInfo =  self.actproxy.getProxyInfo(dn, attribute, columns)
         except: # probably some sort of mysql error; log and raise
-            self.logger.exception('Error getting info for proxy dn={} attribute={}'.format(dn, attribute))
+            self.logger.exception(f'Error getting info for proxy dn={dn} attribute={attribute}')
             raise
         else:
             if not proxyInfo:
-                self.logger.error('No proxy with dn={} and attribute={}'.format(dn, attribute))
-                raise errors.NoSuchProxyError(dn, attribute)
+                self.logger.error(f'No proxy with dn={dn} and attribute={attribute}')
+                raise NoSuchProxyError(dn, attribute)
             else:
                 return proxyInfo
 
@@ -80,14 +82,14 @@ class ProxyManager(object):
             ProxyFileExpiredError: Proxy has expired.
         """
         if not os.path.isfile(proxyPath):
-            raise errors.NoProxyFileError(proxyPath)
+            raise NoProxyFileError(proxyPath)
         try:
             proxystr, dn, expirytime = self.actproxy._readProxyFromFile(proxyPath)
-        except: # probably some file reading error
-            self.logger.exception('Error reading proxy file {}'.format(proxyPath))
+        except:  # probably some file reading error
+            self.logger.exception(f'Error reading proxy file {proxyPath}')
             raise
         if expirytime < datetime.datetime.now():
-            raise errors.ProxyFileExpiredError()
+            raise ProxyFileExpiredError()
         return proxystr, dn, expirytime
 
     def readProxyString(self, proxyStr):
@@ -148,7 +150,7 @@ class ProxyManager(object):
         _, dn, expirytime = self.readProxyFile(path)
         proxyinfo = self.getProxyInfo(dn, '', ['id', 'expirytime'])
         if expirytime != proxyinfo["expirytime"]:
-            raise errors.ProxyDBExpiredError()
+            raise ProxyDBExpiredError()
         return proxyinfo["id"]
 
     def getProxiesWithDN(self, dn, columns=[]):
@@ -162,6 +164,71 @@ class ProxyManager(object):
         Returns:
             A list of dictionaries with column name:value entries for proxies.
         """
-        return self.arcdb.getProxiesInfo(" dn = '{}' ".format(dn), columns)
+        return self.arcdb.getProxiesInfo(f" dn = '{dn}' ", columns)
+
+    def getProxyKeyPEM(self, proxyid):
+        c = self.arcdb.db.getCursor()
+        try:
+            c.execute('SELECT proxy FROM proxies WHERE id = %s', (proxyid,))
+        except:
+            self.logger.exception('Error retrieving private key PEM from database')
+            return None
+        else:
+            row = c.fetchone()
+            return row['proxy']
+        finally:
+            c.close()
+
+    def checkProxyExists(self, proxyid):
+        try:
+            c = self.arcdb.db.getCursor()
+            c.execute('SELECT id,expirytime FROM proxies WHERE id = %s LIMIT 1', (proxyid,))
+        except Exception as e:
+            self.logger.exception('Error checking existence of proxy')
+            return None
+        else:
+            proxy = c.fetchone()
+            if proxy is not None:
+                if proxy['expirytime'] > datetime.datetime.now():
+                    return True
+            return False
+        finally:
+            c.close()
 
 
+# We basically want to get the value of the first 'attribute:' line from
+# 'arcproxy -I' output.
+#
+# We achieve this by replicating what arcproxy does. The relevant part is:
+# https://source.coderefinery.org/nordugrid/arc/-/blob/master/src/clients/credentials/arcproxy.cpp#L606-744
+def getVOMSProxyAttributes(certPEM, chainPEM):
+    certList = [certPEM]
+    certList.extend(splitChainPEMs(chainPEM))
+
+    for cert in certList:
+        uc = arc.UserConfig()
+        uc.CredentialString(cert)
+        cr = arc.Credential(uc)
+        if not cr.GetCert():
+            continue
+        trustList = arc.VOMSTrustList()
+        trustList.AddRegex(".*")
+        acList = arc.VOMSACInfoVector()
+        if not arc.parseVOMSAC(cr, uc.CACertificatesDirectory(), "", "/etc/grid-security/vomsdir", trustList, acList):
+            continue
+        # These loops go over values of interest. They mimic this code snippet:
+        # https://source.coderefinery.org/nordugrid/arc/-/blob/master/src/clients/credentials/arcproxy.cpp#L684-724
+        for ac in acList:
+            for attr in ac.attributes:
+                if 'hostname=' not in attr:
+                    return attr
+    return None
+
+
+def splitChainPEMs(pem):
+    """Return a list of cert PEMs from combined string of chain PEMs."""
+    return re.findall(
+        "-----BEGIN.*?-----.*?-----END.*?-----",
+        pem,
+        flags=re.DOTALL
+    )

@@ -1,5 +1,4 @@
 import mysql.connector as mysql
-from _mysql_connector import MySQLInterfaceError # pylint: disable-msg=E0401
 from act.common import aCTUtils
 from act.db.aCTDBMS import aCTDBMS
 
@@ -32,11 +31,11 @@ class aCTDBMySQL(aCTDBMS):
             self.log.warning("Database session closed")
 
     def _connect(self, dbname=None):
-        if self.socket != 'None':
+        if self.socket:
             self.conn = mysql.connect(unix_socket=self.socket, database=dbname)
         elif self.user and self.passwd:
-            if self.host != 'None' and self.port != 'None':
-                self.conn = mysql.connect(user=self.user, password=self.passwd, host=self.host, port=self.port, database=dbname)
+            if self.host and self.port:
+                self.conn = mysql.connect(user=self.user, password=self.passwd, host=self.host, port=self.port, database=dbname, ssl_disabled=True)
             else:
                 self.conn = mysql.connect(user=self.user, password=self.passwd, db=dbname)
 
@@ -44,7 +43,7 @@ class aCTDBMySQL(aCTDBMS):
         # make sure cursor reads newest db state
         try:
             self.conn.commit()
-        except (mysql.errors.InternalError, MySQLInterfaceError) as e:
+        except mysql.errors.InternalError as e:
             # Unread result, force reconnection
             self.log.warning(str(e))
             self.conn.close()

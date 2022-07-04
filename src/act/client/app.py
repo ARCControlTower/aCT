@@ -1,44 +1,43 @@
-"""
-Flask application module for aCT's RESTful interface.
-
-Functions anotated with @app.route are ones that respond to requests.
-All of them require client certificate to authenticate user and allow
-operations. The client certificate has to be a proxy certificate that is
-created by user. The only exception is request that submits a new proxy
-certificate: this one requires user to use personal certificate.
-
-There are also some utility functions which are common to all response
-functions.
-"""
-
-import act.client.jobmgr as jobmgr
-import act.client.proxymgr as proxymgr
-import act.client.clientdb as clientdb
-import act.client.errors as errors
-
-import json
 import os
 import shutil
-import io
+from datetime import datetime
 
-# TODO: switch to cryptography library
-from OpenSSL.crypto import load_certificate
-from OpenSSL.crypto import X509Store, X509StoreContext
-from OpenSSL.crypto import FILETYPE_PEM
+import arc
+import jwt
+from act.arc.rest import isLocalInputFile
+from act.arc.x509proxy import checkRFCProxy, createProxyCSR
+from act.client.errors import (ConfigError, InvalidColumnError,
+                               InvalidJobIDError, InvalidJobRangeError,
+                               RESTError, UnknownClusterError)
+from act.client.jobmgr import JobManager, getIDsFromList
+from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
+from act.common.aCTConfig import aCTConfigAPP
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from flask import Flask, jsonify, request, send_file
+from werkzeug.exceptions import BadRequest
+
+# TODO: see if checkJobExists should be used anywhere else
+# TODO: implement proper logging
+# TODO: HTTP return codes
+# TODO: consistently change relevant jobmgr API to return jobs as dicts
+#       rather than list of IDs
+# TODO: API should not return underscored column names for as many endpoints
+#       possible
 
 
-from flask import Flask, request, send_file
+STREAM_CHUNK_SIZE = 4096
+appconf = aCTConfigAPP()
+
+
 app = Flask(__name__)
-
-
-@app.route('/test', methods=['GET'])
-def test():
-    return "Hello World!\n", 200
 
 
 @app.route('/jobs', methods=['GET'])
 def stat():
-    """
+    '''
     Return status info for jobs in JSON format.
 
     There are several parameters that can be given in URL. Possible
@@ -55,41 +54,38 @@ def stat():
     Returns:
         status 200: A JSON list of JSON objects with jobs' status info.
         status 4**: A string with error message.
-    """
-    try:
-        proxyid = getProxyId()
-    except errors.NoSuchProxyError:
-        return 'Wrong or no client certificate', 401
-
-    try:
-        jobids = getIDs()
-    except Exception:
-        return 'Invalid id parameter', 400
-
+    '''
     name_filter = request.args.get('name', default='')
     state_filter = request.args.get('state', default='')
-
     clicols = request.args.get('client', default=[])
     if clicols:
         clicols = clicols.split(',')
-
     arccols = request.args.get('arc', default=[])
     if arccols:
         arccols = arccols.split(',')
 
-    jmgr = jobmgr.JobManager()
     try:
+        token = getToken()
+        jmgr = JobManager()
+        proxyid = token['proxyid']
+        jobids = getIDs()
         jobdicts = jmgr.getJobStats(proxyid, jobids, state_filter, name_filter, clicols, arccols)
+    except InvalidColumnError as e:
+        print(f'error: GET /jobs: {e}')
+        return {'msg': str(e)}, 400
+    except RESTError as e:
+        print(f'error: GET /jobs: {e}')
+        return {'msg': str(e)}, e.httpCode
     except Exception as e:
-        # TODO: could also be server error
-        return str(e), 400
+        print(f'error: GET /jobs: {e}')
+        return {'msg': 'Server error'}, 500
     else:
-        return json.dumps(jobdicts)
+        return jsonify(jobdicts)
 
 
 @app.route('/jobs', methods=['DELETE'])
 def clean():
-    """
+    '''
     Clean jobs that satisfy parameters in current request context.
 
     Parameters are given in request URL, they are:
@@ -100,352 +96,591 @@ def clean():
     Returns:
         status 200: A string with number of cleaned jobs.
         status 401: A string with error message.
-    """
+    '''
     try:
-        proxyid = getProxyId()
-    except errors.NoSuchProxyError:
-        return 'Wrong or no client certificate', 401
-
-    try:
+        token = getToken()
         jobids = getIDs()
-    except Exception:
-        return 'Invalid id parameter', 400
+    except RESTError as e:
+        print(f'error: DELETE /jobs: {e}')
+        return {'msg': str(e)}, e.httpCode
+    proxyid = token['proxyid']
 
     name_filter = request.args.get('name', default='')
     state_filter = request.args.get('state', default='')
 
-    jmgr = jobmgr.JobManager()
-    numDeleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
-    return json.dumps(numDeleted)
+    try:
+        jmgr = JobManager()
+        deleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
+        for jobid in deleted:
+            datadir = jmgr.getJobDataDir(jobid)
+            shutil.rmtree(jmgr.getJobDataDir(datadir), ignore_errors=True)
+    except Exception as e:
+        print(f'error: DELETE /jobs: {e}')
+        return {'msg': 'Server error'}, 500
+
+    return jsonify(deleted)
 
 
+# expects JSON object with 'state' attribute:
+# { "state": "fetch|cancel|resubmit" }
 @app.route('/jobs', methods=['PATCH'])
 def patch():
-    """
+    '''
     Set jobs' state based on request parameters.
 
-    Parameter that defines operation is passed in body of request in
-    JSON format. It is a JSON object with a single property "arcstate",
-    that has to be one of possible settable states
-    (for instance {"arcstate": "tofetch"}).
-
-    Other parameters are passed in URL, they are:
+    Parameters that are passed in URL:
         'id': a list of job IDs
         'name': a substring that has to be present in job names
         'state': state that jobs have to be in
+        'action': what action should be performed on jobs
+            (fetch|cancel|resubmit)
 
     Returns:
         status 200: A string with a number of affected jobs.
         status 4**: A string with error message.
-    """
+    '''
     try:
-        proxyid = getProxyId()
-    except errors.NoSuchProxyError:
-        return 'Wrong or no client certificate', 401
-
-    try:
+        token = getToken()
         jobids = getIDs()
-    except Exception:
-        return 'Invalid id parameter', 400
+    except BadRequest as e:
+        print(f'error: PATCH /jobs: {e}')
+        return {'msg': str(e)}, 400
+    except RESTError as e:
+        print(f'error: PATCH /jobs: {e}')
+        return {'msg': str(e)}, e.httpCode
+    proxyid = token['proxyid']
 
     name_filter = request.args.get('name', default='')
     state_filter = request.args.get('state', default='')
 
-    jmgr = jobmgr.JobManager()
-
-    # force ignores incomptable mimetype, silent returns None instead of
-    # calling on_json_loading_failed() of request object
-    patch = request.get_json(force=True, silent=True)
-    if not patch:
-        return 'Request data is not valid JSON', 400
+    action = request.args.get('action', None)
+    if action is None:
+        return {'msg': 'Request has no action parameter'}, 400
+    elif action not in ('fetch', 'cancel', 'resubmit'):
+        return {'msg': f'Invalid action "{action}"'}, 400
 
     try:
-        arcstate = patch['arcstate']
-    except KeyError:
-        return "Request data has no 'arcstate' property", 400
+        jmgr = JobManager()
+        if action == 'fetch':
+            jobs = jmgr.fetchJobs(proxyid, jobids, name_filter)
+        elif action == 'cancel':
+            # One state in which a job can be killed is before it is passed
+            # to ARC. Such jobs have None as arcid. Data dirs for jobs are
+            # otherwise cleaned by cleaning operation but this is one exception
+            # where killing destroys the job immediately and has to remove the
+            # data dir as well.
+            jobs = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
+            for job in jobs:
+                if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting'):
+                    datadir = jmgr.getJobDataDir(job['c_id'])
+                    shutil.rmtree(jmgr.getJobDataDir(datadir), ignore_errors=True)
+        elif action == 'resubmit':
+            jobs = jmgr.resubmitJobs(proxyid, jobids, name_filter)
+    except Exception as e:
+        print(f'error: PATCH /jobs: {e}')
+        return {'msg': 'Server error'}, 500
+    return jsonify(jobs)
 
-    if arcstate == 'tofetch':
-        num = jmgr.fetchJobs(proxyid, jobids, name_filter)
-    elif arcstate == 'tocancel':
-        num = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
-    elif arcstate == 'toresubmit':
-        num = jmgr.resubmitJobs(proxyid, jobids, name_filter)
-    else:
-        return "'arcstate' should be either 'tofetch' or 'tocancel' or 'toresubmit'", 400
-    return json.dumps(num)
 
-
-# TODO: is it secure to return exception messages?
+# expects a JSON list of job objects in the following form:
+# [
+#   {
+#     "clusterlist": "<list of clusters>"
+#   },
+#   {
+#     "clusterlist": "<list of clusters>"
+#   },
+#   ...
+# ]
 @app.route('/jobs', methods=['POST'])
-def submit():
-    """
-    Submit job from current request context.
-
-    Submission of jobs is done with multipart/form-data POST request.
-    Job is submitted as a form containing xRSL file (name="xrsl")
-    and site name (name="site").
-
-    Returns:
-        status 200: A string with id of submitted job.
-        status 4** or 500: A string with error message.
-    """
+def create_jobs():
+    errpref = 'error: POST /jobs: '
     try:
-        proxyid = getProxyId()
-    except errors.NoSuchProxyError:
-        return 'Wrong or no client certificate', 401
+        token = getToken()
+        jobs = request.get_json()
+        jmgr = JobManager()
+    except RESTError as e:
+        print(f'{errpref}{e}')
+        return {'msg': str(e)}, e.httpCode
+    except BadRequest as e:  # raised for invalid JSON
+        print(f'{errpref}{e}')
+        return {'msg': str(e)}, 400
+    except Exception as e:
+        print(f'{errpref}{e}')
+        return {'msg': 'Server error'}, 500
 
-    jmgr = jobmgr.JobManager()
+    if not jobs:
+        return jsonify([])
 
-    site = request.form.get('site', None)
-    if not site:
-        return 'No site given', 400
-    xrsl_file = request.files.get('xrsl', None)
-    if not xrsl_file:
-        return 'No job description file given', 400
-    jobdesc = xrsl_file.read()
-    try:
-        jobmgr.checkJobDesc(jobdesc)
-        jobmgr.checkSite(site)
-    except errors.InvalidJobDescriptionError as e:
-        return 'Invalid job description', 400
-    except errors.NoSuchSiteError as e:
-        return 'Invalid site', 400
-    else:
+    results = []
+    for job in jobs:
+        result = {}
+        results.append(result)
+
         try:
-            jobid = jmgr.clidb.insertJobAndDescription(jobdesc, proxyid, site)
+            # check clusters
+            if 'clusterlist' not in job or not job['clusterlist']:
+                print(f'{errpref}No clusters given')
+                result['msg'] = 'No clusters given'
+                continue
+            checkClusters(job['clusterlist'])
+
+            # insert job
+            jobid = jmgr.clidb.insertJob(token['proxyid'], ','.join(job['clusterlist']))
+        except UnknownClusterError as e:
+            print(f'{errpref}Unknown cluster {e.name}')
+            result['msg'] = f'Unknown cluster {e.name}'
+            continue
         except Exception as e:
-            return 'Server error: {}'.format(str(e)), 500
+            print(f'{errpref}{e}')
+            result['msg'] = 'Server error'
+            continue
+
+        result['id'] = jobid
+
+    return jsonify(results)
+
+
+# expects a JSON list of job objects in the following form:
+# [
+#   {
+#     "desc": "<xRSL or ADL>",
+#     "id": "<job ID>"
+#   },
+#   {
+#     "desc": "<xRSL or ADL>",
+#     "id": "<job ID>"
+#   },
+#   ...
+# ]
+@app.route('/jobs', methods=['PUT'])
+def confirm_jobs():
+    errpref = 'error: PUT /jobs: '
+    try:
+        token = getToken()
+        proxyid = token['proxyid']
+        submissions = request.get_json()
+        jmgr = JobManager()
+    except BadRequest as e:
+        print(f'{errpref}{e}')
+        return {'msg': str(e)}, 400
+    except RESTError as e:
+        print(f'{errpref}{e}')
+        return {'msg': str(e)}, e.httpCode
+    except Exception as e:
+        print(f'{errpref}{e}')
+        return {'msg': 'Server error'}, 500
+
+    if not submissions:
+        return jsonify([])
+    elif not isinstance(submissions, list):
+        print(f'{errpref}Input JSON is not a list: {submissions}')
+        return {'msg': 'Input JSON is not a list: {submissions}'}, 400
+
+    jobs = []
+    jobids = []
+    tocheck = []
+    for submission in submissions:
+        job = {}
+        jobs.append(job)
+        if not isinstance(submission, dict):
+            print(f'{errpref}Job element is not an object: {submission}')
+            job['msg'] = f'Job element is not an object: {submission}'
+        elif 'id' not in submission:
+            print(f'{errpref}No job ID given')
+            job['msg'] = 'No job ID given'
         else:
-            return str(jobid)
+            job.update(submission)
+            jobids.append(job['id'])
+            tocheck.append(job)
+
+    # get info for all jobs and check which ones don't exist
+    tosubmit = []
+    stats = jmgr.getJobStats(proxyid, jobids, '', '', ['id',], [], '')
+    for job in tocheck:
+        inStats = False
+        for stat in stats:
+            if stat['c_id'] == job['id']:
+                inStats = True
+        if not inStats:
+            print(f'{errpref}Job ID {job["id"]} does not exist')
+            job['msg'] = f'Job ID {job["id"]} does not exist'
+        else:
+            tosubmit.append(job)
+
+    jobdescs = arc.JobDescriptionList()
+
+    for job in tosubmit:
+
+        # parse job description
+        if 'desc' not in job:
+            print(f'{errpref}No job description given')
+            job['msg'] = 'No job description given'
+            continue
+        if not arc.JobDescription_Parse(job['desc'], jobdescs):
+            print(f'{errpref}Invalid job description')
+            job['msg'] = 'Invalid job description'
+            continue
+
+        job['name'] = jobdescs[-1].Identification.JobName
+
+        # get job's data directory
+        try:
+            jobDataDir = jmgr.getJobDataDir(job['id'])
+        except ConfigError as exp:
+            print(f'{errpref}{e}')
+            job['msg'] = 'Server error'
+            continue
+
+        # modify job description for local input files
+        #
+        # InputFiles need to be accessed through index otherwise
+        # the changes do not survive outside of for loop.
+        for i in range(len(jobdescs[-1].DataStaging.InputFiles)):
+            filename = jobdescs[-1].DataStaging.InputFiles[i].Name
+            filepath = isLocalInputFile(
+                jobdescs[-1].DataStaging.InputFiles[i].Name,
+                jobdescs[-1].DataStaging.InputFiles[i].Sources[0].fullstr()
+            )
+            if not filepath:  # remote file
+                continue
+
+            path = os.path.abspath(os.path.join(jobDataDir, filename))
+            if not os.path.isfile(path):
+                job['msg'] = f'Input file {filepath} missing'
+                break
+
+            jobdescs[-1].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(path)
+
+        # errors on missing input files
+        if 'msg' in job:
+            print(f'{errpref}{job["msg"]}')
+            continue
+
+        # TODO: ADL unparsing works but it doesn't unparse modified
+        # input files
+        desc = jobdescs[-1].UnParse('nordugrid:xrsl')[1]
+        #desc = jobdescs[0].UnParse('emies:adl')[1]
+        if not arc.JobDescription_Parse(desc, jobdescs):
+            print(f'{errpref}Invalid modified job description')
+            job['msg'] = 'Server error'
+            continue
+
+        # update job entry and confirm job for submission
+        try:
+            jmgr.clidb.updateJob(job['id'], {
+                'jobdesc': desc,
+                'jobname': job['name'],
+                'modified': jmgr.clidb.getTimeStamp()
+            })
+        except Exception as e:
+            print(f'{errpref}{e}')
+            job['msg'] = 'Server error'
+            continue
+
+    return jsonify(jobs)
 
 
 @app.route('/results', methods=['GET'])
 def getResults():
-    """
-    Return a .zip archive of job results folder.
-
-    Request potentionaly accepts a list of IDs but only the first one is
-    processed because it's easier to respond for one job.
-
-    Function creates a .zip archive of job results.
-    .zip archive could just be sent in response but since response is the last
-    thing that function does, there is no simple way of deleting archive
-    afterwards and cleaning the job. The solution is therefore to create an
-    archive, read it's binary presentation (read it as a binary file) to
-    memory, remove the archive and send byte stream as a file to the client.
-
-    Returns:
-        status 200: A .zip archive of job results.
-        status 4** or 500: A string with error message.
-    """
     try:
-        proxyid = getProxyId()
-    except errors.NoSuchProxyError:
-        return 'Wrong or no client certificate', 401
-
-    try:
+        token = getToken()
         jobids = getIDs()
-    except Exception:
-        return 'Invalid id parameter', 400
+    except RESTError as e:
+        return {'msg': str(e)}, e.httpCode
+    proxyid = token['proxyid']
+
     if not jobids:
-        return 'No job ID given', 400
-    jobid = [jobids[0]] # only take first job
+        return {'msg': 'No job ID given'}, 400
+    elif len(jobids) > 1:
+        return {'msg': 'Cannot fetch results of more than one job'}, 400
+    jobids = jobids[:1] # only take first job
 
-    # get job results
-    jmgr = jobmgr.JobManager()
-    results = jmgr.getJobs(proxyid, jobid)
-    if not results.jobdicts:
-        return 'Results for job not found', 404
-    resultDir = results.jobdicts[0]['dir']
-
-    # create archive and read bytes
-    # TODO: exception handling is not optimal, there should be finally
-    # part that closes file but that would require more understanding of
-    # the exceptions raised for different functions which is impossible
-    # to find in python documentation.
-    # TODO: should probably split this for more systematic error handling
     try:
-        archivePath = shutil.make_archive(resultDir, 'zip', resultDir)
-        archive = open(archivePath, 'rb')
-        byteStream = io.BytesIO(archive.read())
-        archive.close()
-        os.remove(archivePath)
-    except Exception as e:
-        return 'Server error: {}'.format(str(e)), 500
+        # get job results
+        jmgr = JobManager()
+        results = jmgr.getJobs(proxyid, jobids)
+        if not results.jobdicts:
+            return {'msg': 'Results for job not found'}, 404
+        resultDir = results.jobdicts[0]['dir']
+        if not resultDir:
+            return '', 204
 
-    return send_file(byteStream,
-            mimetype='application/zip',
-            as_attachment=True,
-            attachment_filename=archivePath.split('/')[-1])
+        # create result archive in data dir
+        jobDataDir = jmgr.getJobDataDir(jobids[0])
+        path = os.path.join(jobDataDir, os.path.basename(resultDir))
+        archivePath = shutil.make_archive(path, 'zip', resultDir)
+    except Exception as e:
+        print(f'error: GET /results: {e}')
+        return {'msg': 'Server error'}, 500
+
+    return send_file(archivePath)
+
+
+@app.route('/proxies', methods=['POST'])
+def getCSR():
+    # get issuer cert string from request
+    try:
+        jsonData = request.get_json()
+        pmgr = ProxyManager()
+    except BadRequest as e:
+        print(f'error: POST /proxies: {e}')
+        return {'msg': str(e)}, 400
+    except Exception as e:
+        print(f'error: POST /proxies: creating proxy manager: {e}')
+        return {'msg': 'Server error'}, 500
+
+    if not jsonData:
+        print('error: POST /proxies: No JSON data')
+        return {'msg', 'No JSON data'}, 400
+    else:
+        issuer_pem = jsonData.get('cert', None)
+        if not issuer_pem:
+            print('error: POST /proxies: missing issuer certificate')
+            return {'msg': 'Missing issuer certificate'}, 400
+        chain_pem = jsonData.get('chain', None)
+        if not chain_pem:
+            print('error: POST /proxies: missing certificate chain')
+            return {'msg': 'Missing certificate chain'}, 400
+
+    dn, exptime = pmgr.readProxyString(issuer_pem)
+    if datetime.now() >= exptime:
+        print('error: POST /proxies: expired certificate')
+        return {'msg': 'Given certificate is expired'}, 400
+    attr = getVOMSProxyAttributes(issuer_pem, chain_pem)
+    if not attr or not dn:
+        print('error: POST /proxies: DN or VOMS attribute extraction failure')
+        return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
+
+    try:
+        # load certificate string and check proxy
+        issuer = x509.load_pem_x509_certificate(issuer_pem.encode("utf-8"), default_backend())
+        if not checkRFCProxy(issuer):
+            print('error: POST /proxies: issuer cert is not a valid proxy')
+            return {'msg': 'Issuer cert is not a valid proxy'}, 400
+
+        # generate private key for delegated proxy
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+
+        # generate CSR
+        csr = createProxyCSR(issuer, private_key)
+        print(f'CSR generated: DN: {dn}, attr: {attr}, expiration: {exptime}')
+
+        # put private key into string and store in db
+        pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption()
+        ).decode('utf-8')
+        proxyid = pmgr.actproxy.updateProxy(pem, dn, attr, exptime)
+        if proxyid is None:
+            print('error: POST /proxies: proxy insertion failure')
+            return {'msg': 'Server error'}, 500
+
+        # generate CSR string and auth token
+        csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
+        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, appconf.user.jwt_secret, algorithm='HS256')
+    except Exception as e:
+        print(f'error: POST /proxies: {e}')
+        return {'msg': 'Server error'}, 500
+
+    return {'token': token, 'csr': csr_pem}, 200
 
 
 @app.route('/proxies', methods=['PUT'])
-def submitProxy():
-    """
-    Submit a proxy certificate of a user.
-
-    This operation requires user to provide personal certificate as
-    client certificate in request. Proxy certificate that is to be submitted
-    should be provided as raw data in request body.
-
-    Function first verifies user's personal certificate against a
-    CA certificate. If verification is successful, it procedes to read proxy
-    certificate in body and insert it to database.
-
-    Returns:
-        status 200: A string with ID of a proxy certificate.
-        status 401 or 500: A string with error message.
-    """
-    # The following validation procedure is done as per:
-    # https://stackoverflow.com/questions/30700348/how-to-validate-verify-an-x509-certificate-chain-of-trust-in-python
-
-    # user pem is client certificate in header
-    user_pem = getCertString()
-    if not user_pem:
-        return 'Wrong or no client certificate', 401
-
-    # get pem for CA
-    caPath = os.path.join(os.environ['PATH'].split(':')[-1], 'ca.pem')
+def uploadSignedProxy():
     try:
-        caFile = open(caPath, 'r') # TODO: ca.pem in bin directory
+        token = getToken()
+        jsonData = request.get_json()
+        pmgr = ProxyManager()
+    except RESTError as e:
+        print(f'error: PUT /proxies: {e}')
+        return {'msg': str(e)}, e.httpCode
+    except BadRequest as e:
+        print(f'error: PUT /proxies: {e}')
+        return {'msg': str(e)}, 400
     except Exception as e:
-        return 'Server error: {}'.format(str(e)), 500
-    else:
-        root_pem = caFile.read()
-        caFile.close()
+        print(f'error: PUT /proxies: {e}')
+        return {'msg': 'Server error'}, 500
 
-    # verify
-    root_cert = load_certificate(FILETYPE_PEM, root_pem)
-    user_cert = load_certificate(FILETYPE_PEM, user_pem)
-    store = X509Store()
-    store.add_cert(root_cert)
-    store_ctx = X509StoreContext(store, user_cert)
-    try:
-        store_ctx.verify_certificate()
-    except Exception as e:
-        return 'Client certificate verification failed', 401
+    if not jsonData:
+        print('error: PUT /proxies: No JSON data')
+        return {'msg': 'No JSON data'}, 400
 
-    pmgr = proxymgr.ProxyManager() # TODO: handle error with pmgr and jmgr
+    proxyid = token['proxyid']
+    cert_pem = jsonData.get('cert', None)
+    chain_pem = jsonData.get('chain', None)
+    if cert_pem is None:
+        print('error: PUT /proxies: No signed certificate')
+        return {'msg': 'No signed certificate'}, 400
+    if chain_pem is None:
+        print('error: PUT /proxies: No cert chain')
+        return {'msg': 'No cert chain'}, 400
+
+    key_pem = pmgr.getProxyKeyPEM(proxyid)
+    dn, exptime = pmgr.readProxyString(cert_pem)
+    if datetime.now() >= exptime:
+        return {'msg': 'Given certificate is expired'}, 400
+    attr = getVOMSProxyAttributes(cert_pem, chain_pem)
+    if not attr or not dn:
+        return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
+    proxy_pem = cert_pem + key_pem.decode('utf-8') + chain_pem
 
     try:
-        # TODO: ARC API does not fail when given genproxy script as proxy!!!!
-        proxyStr = request.get_data()
-        dn, exp_time = pmgr.readProxyString(proxyStr)
-        proxyid = pmgr.actproxy.updateProxy(proxyStr, dn, '', exp_time)
+        proxy_obj = x509.load_pem_x509_certificate(proxy_pem.encode('utf-8'), backend=default_backend())
+        if not checkRFCProxy(proxy_obj):
+            return {'msg': 'cert is not a valid proxy'}, 400
+        proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, attr, exptime)
+        token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, appconf.user.jwt_secret, algorithm='HS256')
     except Exception as e:
-        return 'Server error: {}'.format(str(e)), 500
-    else:
-        return json.dumps(proxyid)
+        print(f'error: PUT /proxies: {e}')
+        return {'msg': 'Server error'}, 500
+
+    print(f'Proxy submitted: DN: {dn}, attr: {attr}, expiration: {exptime}')
+    return {'token': token}, 200
 
 
-@app.route('/proxies', methods=['GET'])
-def getProxies():
-    """
-    Return information on proxies.
-
-    Currently there are no parameters that would allow users to select which
-    columns should be fetched from table.
-
-    Returns:
-        JSON list of JSON objects with proxy information (status 200).
-    """
-    dn = getCertDN()
-    pmgr = proxymgr.ProxyManager()
-    proxies = pmgr.getProxiesWithDN(dn, columns=['id', 'attribute'])
-    return json.dumps(proxies)
-
-
-# TODO: not most efficiently done if user has a lot of proxies: could
-# turn around the loops
 @app.route('/proxies', methods=['DELETE'])
-def deleteProxies():
-    """
-    Delete proxies from database.
+def deleteProxy():
+    try:
+        token = getToken()
+        pmgr = ProxyManager()
+        pmgr.arcdb.deleteProxy(token['proxyid'])
+    except RESTError as e:
+        print(f'error: DELETE /proxies: {e}')
+        return {'msg': str(e)}, e.httpCode
+    except Exception as e:
+        print(f'error: DELETE /proxies: {e}')
+        return {'msg': 'Server error'}, 500
+    return '', 204
 
-    Parameter has to be given in url: 'id' which is a list of proxy IDs that
-    should be deleted.
 
-    Function first fetches all proxies that match the DN of a certificate
-    from request. Then it deletes those whose IDs are in 'id' parameter.
-    This is done so that user cannot delete any proxies but his own.
+@app.route('/data', methods=['PUT'])
+def uploadFile():
+    try:
+        token = getToken()
+        jobids = getIDs()
+    except RESTError as e:
+        print(f'error: PUT /data: {e}')
+        return {'msg': str(e)}, e.httpCode
+    except Exception as e:
+        print(f'error: PUT /data: {e}')
+        return {'msg': 'Server error'}, 500
+    proxyid = token['proxyid']
 
-    Returns:
-        status 200: A string with a number of deleted proxies.
-        status 401: A string with error message.
-    """
-    dn = getCertDN()
-    pmgr = proxymgr.ProxyManager()
-    jmgr = jobmgr.JobManager()
-    proxies = pmgr.getProxiesWithDN(dn, columns=['id'])
+    if not jobids:
+        print('error: PUT /data: no job ID given')
+        return {'msg': 'No job ID given'}, 400
+    elif len(jobids) > 1:
+        print('error: PUT /data: more than one job ID given')
+        return {'msg': 'More than one job ID given'}, 400
 
     try:
-        proxyids = getIDs()
-    except Exception:
-        return 'Invalid id parameter', 400
-    if not proxyids:
-        return 'Wrong or no client certificate', 401
+        jmgr = JobManager()
+        jobid = jmgr.checkJobExists(proxyid, jobids[0])
+        if not jobid:
+            print('error: PUT /data: job ID does not exist')
+            return {'msg': f'Client Job ID {jobids[0]} does not exist'}, 400
+    except Exception as e:
+        print(f'error: PUT /data: {e}')
+        return {'msg': 'Server error'}, 500
 
-    numDeleted = 0
-    for proxy in proxies:
-        if proxy['id'] in proxyids:
-            # do not remove a proxy on which jobs depend
-            if not jmgr.getJobStats(proxy['id'], [], '', '', clicols=['id']):
-                pmgr.arcdb.deleteProxy(proxy['id'])
-                proxyids.remove(proxy['id']) # optimize a little bit
-                numDeleted += 1
-    return json.dumps(numDeleted)
+    try:
+        filename = request.args.get('filename', None)
+        if filename is None:
+            print('error: PUT /data: file name not given')
+            return {'msg': 'File name not given'}, 400
 
+        jobDataDir = jmgr.getJobDataDir(jobid)
+        os.makedirs(jobDataDir, exist_ok=True)
+        filepath = os.path.join(jobDataDir, filename)
+        with open(filepath, 'wb') as f:
+            while True:
+                chunk = request.stream.read(STREAM_CHUNK_SIZE)
+                if len(chunk) == 0:
+                    break
+                f.write(chunk)
+    except Exception as e:
+        print(f'error: PUT /data: {e}')
+        return {'msg': 'Server error'}, 500
 
-def getProxyId():
-    """Get proxy id from proxy info in current request context."""
-    pmgr = proxymgr.ProxyManager()
-    dn = getCertDN()
-    proxyid = pmgr.getProxyInfo(dn, '', ['id'])['id']
-    return proxyid
-
-
-def getCertDN():
-    """Get cert DN from cert in current request context."""
-    pmgr = proxymgr.ProxyManager()
-    cert = getCertString()
-    dn, _ = pmgr.readProxyString(cert)
-    return dn
+    return '', 204
 
 
-def getCertString():
-    """
-    Get cert string from current request context.
+@app.route('/info', methods=['GET'])
+def info():
+    try:
+        getToken()
+        jmgr = JobManager()
 
-    Function expects certificate to be in header as X-Ssl-Client-Cert.
-    """
-    cert = request.headers.get('X-Ssl-Client-Cert', default='')
-    fixedCert = fixCertStr(cert)
-    return fixedCert
+        json = {'clusters': appconf.user.clusters}
+
+        c = jmgr.arcdb.db.getCursor()
+        c.execute('SHOW COLUMNS FROM arcjobs')
+        rows = c.fetchall()
+        json['arc'] = [row['Field'] for row in rows]
+        c.execute('SHOW COLUMNS FROM clientjobs')
+        rows = c.fetchall()
+        json['client'] = [row['Field'] for row in rows]
+        c.close()
+
+    except RESTError as e:
+        print(f'error: GET /info: {e}')
+        return {'msg': str(e)}, e.httpCode
+    except Exception as e:
+        print(f'error: GET /info: {e}')
+        return {'msg': 'Server error'}, 500
+    return jsonify(json)
 
 
 def getIDs():
-    """
+    '''
     Get IDs from current request context.
 
     IDs are taken from 'id' url parameter. Exceptions for getJobsFromList
     are handled by callers so they can generate appropriate responses.
-    """
+    '''
     ids = request.args.get('id', default=[])
     if ids:
-        return jobmgr.getIDsFromList(ids)
+        try:
+            return getIDsFromList(ids)
+        except InvalidJobIDError as e:
+            raise RESTError(f'Invalid job ID: {e.jobid}', 400)
+        except InvalidJobRangeError as e:
+            raise RESTError(f'Invalid job range: {e.jobRange}', 400)
     else:
         return []
 
 
-def fixCertStr(certStr):
-    """
-    Remove spaces after newlines.
+def getToken():
+    '''
+    Raises:
+        RESTError: Token is not present or is expired
+    '''
+    tokstr = request.headers.get('Authorization', None)
+    if tokstr is None:
+        raise RESTError('Auth token is missing', 401)
+    try:
+        # potential errors with tokstr, token decode, proxy manager ...
+        tokstr = tokstr.split()[1]
+        token = jwt.decode(tokstr, appconf.user.jwt_secret, algorithms=['HS256'])
+        pmgr = ProxyManager()
+        result = pmgr.checkProxyExists(token['proxyid'])
+        if result is None:
+            raise RESTError('Server error', 500)
+        if result is False:
+            raise RESTError('Proxy from token does not exist in database or is expired', 401)
+    except jwt.ExpiredSignatureError:
+        raise RESTError('Auth token is expired', 401)
+    else:
+        return token
 
-    When certificate is put in header by NGINX, one space is put after each
-    newline character, which breaks certificate. This function fixes
-    certificate string by removing those spaces.
-    """
-    newCertStr = certStr.replace('\n ', '\n')
-    return newCertStr
 
-
+def checkClusters(clusterlist):
+    for cluster in clusterlist:
+        if cluster not in appconf.user.clusters:
+            raise UnknownClusterError(cluster)

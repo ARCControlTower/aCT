@@ -39,7 +39,7 @@ class aCTReport:
     def AppReport(self):
 
         appconf = aCTConfigAPP()
-        apps = appconf.getList(["modules", "app"])
+        apps = appconf.modules.app
         for app in apps:
             try:
                 ap = importlib.import_module(f'{app}.aCTReport').report
@@ -104,7 +104,7 @@ class aCTReport:
     def ArcJobReport(self):
         rep={}
         rtot={}
-        states = ["Undefined", "Accepted", "Preparing", "Submitting",
+        states = ["Undefined", "Accepting", "Accepted", "Preparing", "Submitting",
                  "Queuing", "Running", "Finishing", "Finished", "Hold", "Killed",
                  "Failed", "Deleted", "Other"]
 

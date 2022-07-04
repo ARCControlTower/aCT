@@ -7,9 +7,9 @@ import subprocess
 import sys
 import tempfile
 import traceback
-from act.common import aCTConfig
+from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from act.common import aCTLogger
-from act.common import aCTSignal
+from act.common.aCTSignal import aCTSignal
 from act.common import aCTUtils
 from act.common import aCTProcessManager
 
@@ -19,29 +19,31 @@ class aCTMain:
     """
 
     def __init__(self, args):
-
         # Check we have the right ARC version
         self.checkARC()
 
         # xml config file
-        self.conf = aCTConfig.aCTConfigARC()
-        self.appconf = aCTConfig.aCTConfigAPP()
+        self.conf = aCTConfigARC()
+        self.appconf = aCTConfigAPP()
 
         # Create required directories
-        tmpdir = self.conf.get(["tmp", "dir"])
+        tmpdir = self.conf.tmp.dir
         self.makeDirs(tmpdir)
         self.makeDirs(os.path.join(tmpdir, 'inputfiles'))
         self.makeDirs(os.path.join(tmpdir, 'eventranges'))
         self.makeDirs(os.path.join(tmpdir, 'failedlogs'))
-        self.makeDirs(self.conf.get(["voms","proxystoredir"]), 0o700)
-        self.makeDirs(self.conf.get(["logger", "logdir"]))
+        self.makeDirs(self.conf.voms.proxystoredir, 0o700)
+        self.makeDirs(self.conf.logger.logdir)
 
         # logger
         self.logger = aCTLogger.aCTLogger("aCTMain")
         self.log = self.logger()
 
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
+
         # Check if we should run
-        self.shouldrun = not os.path.exists(os.path.join(self.conf.get(["actlocation","dir"]), "act.stop"))
+        self.shouldrun = not os.path.exists(os.path.join(self.conf.actlocation.dir, "act.stop"))
         if not self.shouldrun:
             self.log.warning("Detected act.stop file, won't start child processes")
 
@@ -88,7 +90,7 @@ class aCTMain:
         """
         Start daemon
         """
-        pidfile = self.conf.get(['actlocation', 'pidfile'])
+        pidfile = self.conf.actlocation.pidfile
         try:
             with open(pidfile) as f:
                 pid = f.read()
@@ -135,7 +137,7 @@ class aCTMain:
         os.dup2(se.fileno(), sys.stderr.fileno())
 
         # change to aCT working dir
-        os.chdir(self.conf.get(['actlocation', 'dir']))
+        os.chdir(self.conf.actlocation.dir)
 
         # write pidfile
         with open(pidfile,'w+') as f:
@@ -146,7 +148,7 @@ class aCTMain:
         """
         Stop daemon
         """
-        pidfile = self.conf.get(['actlocation', 'pidfile'])
+        pidfile = self.conf.actlocation.pidfile
         pid = None
         try:
             with open(pidfile) as f:
@@ -208,9 +210,9 @@ class aCTMain:
                 maxsize 100M
                 nocreate
                 nocompress
-            }''' % (self.conf.get(["logger", "logdir"]),
-                    self.conf.get(["logger", "rotate"]))
-        logrotatestatus = os.path.join(self.conf.get(["tmp", "dir"]), "logrotate.status")
+            }''' % (self.conf.logger.logdir,
+                    self.conf.logger.rotate)
+        logrotatestatus = os.path.join(self.conf.tmp.dir, "logrotate.status")
 
         # Make a temp file with conf and call logrotate
         with tempfile.NamedTemporaryFile() as temp:
@@ -239,8 +241,10 @@ class aCTMain:
                 # sleep
                 aCTUtils.sleep(10)
 
-            except aCTSignal.ExceptInterrupt:
-                break
+                if self.signal.isInterrupted():
+                    self.log.info("*** Exiting on exit interrupt ***")
+                    break
+
             except:
                 self.log.critical("*** Unexpected exception! ***")
                 self.log.critical(traceback.format_exc())
@@ -250,7 +254,6 @@ class aCTMain:
                 except:
                     self.log.critical(traceback.format_exc())
                 aCTUtils.sleep(10)
-
 
     def finish(self):
         """

@@ -1,6 +1,6 @@
 import os
 import logging.handlers
-from . import aCTConfig
+from .aCTConfig import aCTConfigARC
 
 import arc
 
@@ -14,11 +14,11 @@ LEVELS = {'debug': logging.DEBUG,
 class aCTLogger:
 
     def __init__(self,name,cluster='',arclog=True):
-        self.conf=aCTConfig.aCTConfigARC()
+        self.conf = aCTConfigARC()
         self.logger=logging.LoggerAdapter(logging.getLogger(name), {'cluster': cluster})
         self.logger.logger.setLevel(logging.DEBUG)
-        level = LEVELS.get(self.conf.get(["logger","level"]), logging.NOTSET)
-        logfile = os.path.join(self.conf.get(["logger","logdir"]), name + '.log')
+        level = LEVELS.get(self.conf.logger.level, logging.NOTSET)
+        logfile = os.path.join(self.conf.logger.logdir, name + '.log')
         self.logger.logger.setLevel(level)
         # aCTMain calls logrotate to rotate logs
         self.handler = logging.handlers.WatchedFileHandler(logfile)
@@ -35,8 +35,8 @@ class aCTLogger:
             self.arclogfile = arc.LogFile(str(logfile))
             self.arclogfile.setFormat(arc.LongFormat)
             arc.Logger_getRootLogger().addDestination(self.arclogfile)
-            if self.conf.get(["logger", "arclevel"]):
-                arc.Logger_getRootLogger().setThreshold(arc.string_to_level(str(self.conf.get(["logger", "arclevel"])).upper()))
+            if self.conf.logger.arclevel:
+                arc.Logger_getRootLogger().setThreshold(arc.string_to_level(self.conf.logger.arclevel.upper()))
             else:
                 arc.Logger_getRootLogger().setThreshold(arc.ERROR)
 

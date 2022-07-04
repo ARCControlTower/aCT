@@ -8,11 +8,14 @@ import shutil
 import os
 
 import arc
-import act.arc.aCTDBArc as aCTDBArc
-import act.common.aCTConfig as aCTConfig
-import act.client.clientdb as clientdb
-import act.client.config as config
-import act.client.errors as errors
+from act.arc.aCTDBArc import aCTDBArc
+from act.common.aCTConfig import aCTConfigARC
+from act.client.clientdb import ClientDB, createMysqlEscapeList
+from act.client.errors import NoSuchProxyError, NoJobDirectoryError
+from act.client.errors import ConfigError, InvalidJobDescriptionError
+from act.client.errors import NoSuchSiteError, InvalidJobRangeError
+from act.client.errors import InvalidJobIDError
+from act.client.common import readSites
 
 
 logger = logging.getLogger(__name__)
@@ -51,19 +54,17 @@ class JobManager(object):
         logger: An object for logging.
         arcdb: An object that is interface to ARC engine's table.
         clidb: An object that is interface to client engine's table.
-        tmpdir: A string with path to tmp directory.
     """
 
     def __init__(self):
         """Initialize object's attributes."""
         self.logger = logging.getLogger(__name__)
-        self.arcdb = aCTDBArc.aCTDBArc(self.logger)
-        self.clidb = clientdb.ClientDB(self.logger)
+        self.arcdb = aCTDBArc(self.logger)
+        self.clidb = ClientDB(self.logger)
 
         # TODO: if and when sites from arc config are used, move everything
         # that uses arc config to this class
-        arcconf = aCTConfig.aCTConfigARC()
-        self.tmpdir = arcconf.get(['tmp', 'dir'])
+        self.arcconf = aCTConfigARC()
 
     def checkProxy(self, proxyid):
         """
@@ -80,7 +81,7 @@ class JobManager(object):
             NoSuchProxyError: Proxy does not exist in database.
         """
         if not self.arcdb.getProxy(proxyid):
-            raise errors.NoSuchProxyError(proxyid, None)
+            raise NoSuchProxyError(proxyid, None)
 
     def getClientColumns(self):
         """Return a list of column names from client engine's table."""
@@ -92,6 +93,7 @@ class JobManager(object):
         # TODO: hardcoded
         return self.clidb.getColumns('arcjobs')
 
+    # TODO: return a list of IDs rather than number
     def cleanJobs(self, proxyid, jobids=[], state_filter='', name_filter=''):
         """
         Clean given jobs that match optional filters.
@@ -113,11 +115,11 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of cleaned jobs.
+            A list of IDs of deleted jobs.
         """
         # wrong state filter, return immediately
         if state_filter not in ('', 'done', 'donefailed', 'cancelled', 'failed'):
-            return 0 # zero jobs cleaned
+            return []
 
         # create filters in query
         where = ' c.proxyid = %s AND '
@@ -139,12 +141,12 @@ class JobManager(object):
                 where_params=where_params)
 
         if not jobs:
-            return 0 # zero jobs cleaned
+            return []
 
         # create where clauses for removal and remove tmp dirs
         arc_where = ''
         client_params = []
-        numDeleted = 0
+        deletedIDs = []
         for job in jobs:
             # remove results folder; if none, just log and don't notify user
             if job['a_arcstate'] in ('done', 'donefailed'):
@@ -153,30 +155,27 @@ class JobManager(object):
                     shutil.rmtree(jobdir)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception('Could not clean job results in {}'.format(
-                        jobdir))
-                except errors.NoJobDirectoryError as e:
+                    self.logger.error(f'Could not clean job results in {jobdir}')
+                except NoJobDirectoryError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception('Could not clean job results in {}'.format(
-                        e.jobdir))
+                    self.logger.info(f'Job {job["c_id"]} has no job results to clean')
 
             # add job to removal query
-            arc_where += '{}, '.format(job['a_id'])
+            arc_where += f'{job["a_id"]}, '
             client_params.append(int(job['c_id']))
 
-            numDeleted += 1
+            deletedIDs.append(job['c_id'])
 
         # delete jobs from tables
-        if numDeleted:
+        if deletedIDs:
             arc_where = arc_where.rstrip(', ')
-            arc_where = ' id IN ({})'.format(arc_where)
-            client_where = ' id IN ({})'.format(
-                    clientdb.createMysqlEscapeList(len(client_params)))
+            arc_where = f' id IN ({arc_where})'
+            client_where = f' id IN ({createMysqlEscapeList(len(client_params))})'
             patch = {'arcstate': 'toclean', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
             self.clidb.deleteJobs(client_where, client_params)
 
-        return numDeleted
+        return deletedIDs
 
     def forceCleanJobs(self, results):
         """
@@ -196,12 +195,11 @@ class JobManager(object):
             results: A :class:`JobGetResults` object with results.
         """
         if results.arcIDs: # jobs are cleaned from ARC by setting their state
-            arc_where = ' id in ({})'.format(self._createMysqlIntList(results.arcIDs))
+            arc_where = f' id in ({self._createMysqlIntList(results.arcIDs)})'
             patch = {'arcstate': 'toclean', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
         if results.clientIDs:
-            client_where = ' id in ({})'.format(
-                    clientdb.createMysqlEscapeList(len(results.clientIDs)))
+            client_where = f' id in ({createMysqlEscapeList(len(results.clientIDs))})'
             self.clidb.deleteJobs(client_where, results.clientIDs)
 
         for result in results.jobdicts:
@@ -221,7 +219,7 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of jobs assigned for fetching.
+            A list of IDs of fetched jobs.
         """
         # create query with filtering
         where = " a.arcstate = 'failed' AND c.proxyid = %s AND "
@@ -231,21 +229,20 @@ class JobManager(object):
         where = where.rstrip('AND ')
 
         jobs = self.clidb.getJoinJobsInfo(
-                clicols=[],
+                clicols=['id'],
                 arccols=['id'],
                 where=where,
                 where_params=where_params)
 
         if not jobs:
-            return 0 # 0 jobs to fetch
+            return []
 
         # update jobs' state for fetching
-        where = ' id IN ({})'.format(
-                self._createMysqlIntList([job['a_id'] for job in jobs]))
+        where = f' id IN ({self._createMysqlIntList([job["a_id"] for job in jobs])})'
         patch = {'arcstate': 'tofetch', 'tarcstate': self.arcdb.getTimeStamp()}
         self.arcdb.updateArcJobs(patch, where)
 
-        return len(jobs)
+        return [job['c_id'] for job in jobs]
 
     def refetchJobs(self, proxyid, jobids=[], name_filter=''):
         """
@@ -264,7 +261,7 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of jobs that will be refetched.
+            A list of IDs of jobs that will be refetched.
         """
         # create filters in query
         where = ' c.proxyid = %s AND '
@@ -275,13 +272,13 @@ class JobManager(object):
         where = where.rstrip('AND ')
 
         jobs = self.clidb.getJoinJobsInfo(
-                clicols=[],
+                clicols=['id'],
                 arccols=['arcstate', 'JobID', 'id'],
                 where=where,
                 where_params=where_params)
 
         if not jobs:
-            return 0
+            return []
 
         for job in jobs:
             if job['a_arcstate'] == 'failed':
@@ -292,12 +289,10 @@ class JobManager(object):
                     shutil.rmtree(jobdir)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception('Could not clean job results in {}'.format(
-                        jobdir))
-                except errors.NoJobDirectoryError as e:
+                    self.logger.exception(f'Could not clean job results in {jobdir}')
+                except NoJobDirectoryError as e:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception('Could not clean job results in {}'.format(
-                        e.jobdir))
+                    self.logger.exception(f'Could not clean job results in {e.jobdir}')
 
                 # finished jobs become done, tofetch jobs become donefailed;
                 # the job status should be preserved
@@ -306,11 +301,11 @@ class JobManager(object):
                 else:
                     patch = {'arcstate': 'tofetch'}
 
-            where = ' id = {}'.format(job['a_id'])
+            where = f' id = {job["a_id"]}'
             patch['tarcstate'] = self.arcdb.getTimeStamp()
             self.arcdb.updateArcJobs(patch, where)
 
-        return len(jobs)
+        return [job['c_id'] for job in jobs]
 
     def getJobs(self, proxyid, jobids=[], state_filter='', name_filter=''):
         """
@@ -362,7 +357,7 @@ class JobManager(object):
         for job in jobs:
             try:
                 srcdir = self.getACTJobDir(job['a_JobID'])
-            except errors.NoJobDirectoryError:
+            except NoJobDirectoryError:
                 srcdir = None
             results.arcIDs.append(job['a_id'])
             results.clientIDs.append(int(job['c_id']))
@@ -392,11 +387,11 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of jobs assigned to be killed.
+            A list of job dictionaries.
         """
         # wrong state filter, return immediately
         if state_filter not in ('', 'submitted', 'running', 'tosubmit', 'submitting'):
-            return 0 # zero killed jobs
+            return []
         where = ' c.proxyid = %s AND '
         where_params = [proxyid]
         if state_filter:
@@ -409,7 +404,7 @@ class JobManager(object):
         where, where_params = self._addIDFilter(jobids, where, where_params)
         where = where.rstrip('AND ')
 
-        res = self.arcdb.db.getMutexLock('arcjobs', timeout=2)
+        res = self.arcdb.db.getMutexLock('arcjobs')
         if not res:
             raise Exception("Could not lock table for killing jobs")
 
@@ -420,7 +415,7 @@ class JobManager(object):
                 where_params=where_params)
 
         if not jobs:
-            return 0 # 0 jobs killed
+            return []
 
         arc_ids = []
         client_ids = []
@@ -440,20 +435,19 @@ class JobManager(object):
                 arc_ids.append(int(job['a_id']))
 
         if arc_ids:
-            arc_where = ' id IN ({})'.format(
-                    self._createMysqlIntList(arc_ids))
+            arc_where = f' id IN ({self._createMysqlIntList(arc_ids)})'
+
             patch = {'arcstate': 'tocancel', 'tarcstate': self.arcdb.getTimeStamp()}
             self.arcdb.updateArcJobs(patch, arc_where)
         if client_ids:
-            client_where = ' id IN ({})'.format(
-                    clientdb.createMysqlEscapeList(len(client_ids)))
+            client_where = f' id IN ({createMysqlEscapeList(len(client_ids))})'
             self.clidb.deleteJobs(client_where, client_ids)
 
         res = self.arcdb.db.releaseMutexLock('arcjobs')
         if not res:
             raise Exception("Could not release lock after killing jobs")
 
-        return len(jobs)
+        return jobs
 
     def resubmitJobs(self, proxyid, jobids=[], name_filter=''):
         """
@@ -468,7 +462,7 @@ class JobManager(object):
             name_filter: A string that job names should match.
 
         Returns:
-            Number of jobs assigned for resubmittion.
+            A list of IDs of jobs that will be resubmitted.
         """
         # create query with filters
         where = " a.arcstate = 'failed' AND c.proxyid = %s AND "
@@ -479,21 +473,22 @@ class JobManager(object):
 
         if where:
             jobs = self.clidb.getJoinJobsInfo(
-                    clicols=[],
+                    clicols=['id'],
                     arccols=['id'],
                     where=where,
                     where_params=where_params)
 
         if not jobs:
-            return 0 # 0 jobs to resubmit
+            return []
 
         # set job state for resubmittion
-        where = ' id IN ({})'.format(
-                self._createMysqlIntList([job['a_id'] for job in jobs]))
+        where = f' id IN ({self._createMysqlIntList([job["a_id"] for job in jobs])})'
+
+
         patch = {'arcstate': 'toresubmit', 'tarcstate': self.arcdb.getTimeStamp()}
         self.arcdb.updateArcJobs(patch, where)
 
-        return len(jobs)
+        return [job['c_id'] for job in jobs] # TODO: performance issue?
 
     # TODO: refactor to **kwargs
     # TODO: should filters be used together or separately?
@@ -563,20 +558,25 @@ class JobManager(object):
             arcid: A string with job's ARC ID.
 
         Raises:
-            TmpConfigurationError: tmp directory is not configured in aCT.
+            ConfigError: tmp directory is not configured in aCT.
             NoJobDirectoryError: Job directory does not exist in aCT.
         """
-        if self.tmpdir:
-            jobdir = arcid.rsplit('/', 1)[-1]
-            actJobDir = os.path.join(self.tmpdir, jobdir)
-            if os.path.isdir(actJobDir):
-                return actJobDir
-            else:
-                self.logger.error('Could not find job directory: {}'.format(actJobDir))
-                raise errors.NoJobDirectoryError(actJobDir)
-        else:
+        tmpdir = self.arcconf.tmp.dir
+        if not tmpdir:
             self.logger.error('tmp directory is not in config')
-            raise errors.TmpConfigurationError()
+            raise ConfigError("config/tmp/dir")
+        jobdir = arcid.rsplit('/', 1)[-1]
+        actJobDir = os.path.join(tmpdir, jobdir)
+        if os.path.isdir(actJobDir):
+            return actJobDir
+        else:
+            raise NoJobDirectoryError(actJobDir)
+
+    def getJobDataDir(self, jobid):
+        datapath = self.arcconf.actlocation.datman
+        if not datapath:
+            raise ConfigError("config/actlocation/datman")
+        return os.path.join(datapath, str(jobid))
 
     def _createMysqlIntList(self, integers):
         """
@@ -593,7 +593,7 @@ class JobManager(object):
         where = ''
         if integers:
             for integer in integers:
-                where += '{}, '.format(integer)
+                where += f'{integer}, '
             where = where.rstrip(', ')
         return where
 
@@ -606,10 +606,23 @@ class JobManager(object):
 
     def _addIDFilter(self, ids=[], where='', where_params=[]):
         if ids:
-            where += ' c.id IN ({}) AND '.format(
-                    clientdb.createMysqlEscapeList(len(ids)))
+            #if len(ids) == 1:
+            #    where += ' c.id = %s '
+            #    where_params.append(ids[0])
+            #else:
+            #    where += ' c.id IN ({}) AND '.format(createMysqlEscapeList(len(ids)))
+            #    where_params.extend(ids)
+            where += f' c.id IN ({createMysqlEscapeList(len(ids))}) AND '
             where_params.extend(ids)
         return where, where_params
+
+    def checkJobExists(self, proxyid, jobid):
+        """Returns given jobid if job exists or None if not."""
+        jobdicts = self.getJobStats(proxyid, [jobid], "", "", ["id"], [], "")
+        if not jobdicts:
+            return None
+        else:
+            return jobdicts[0]["c_id"]
 
 
 class JobGetResults(object):
@@ -652,7 +665,7 @@ def checkJobDesc(jobdesc):
     jobdescs = arc.JobDescriptionList()
     if not arc.JobDescription_Parse(str(jobdesc), jobdescs):
         logger.error('Job description is not valid')
-        raise errors.InvalidJobDescriptionError()
+        raise InvalidJobDescriptionError()
 
 
 def checkSite(siteName, confpath='/etc/act/sites.json'):
@@ -669,7 +682,7 @@ def checkSite(siteName, confpath='/etc/act/sites.json'):
         NoSuchSiteError: Site is not in configuration.
     """
     try:
-        sites = config.readSites()
+        sites = readSites()
         for site in sites:
             if site == siteName:
                 return
@@ -677,7 +690,7 @@ def checkSite(siteName, confpath='/etc/act/sites.json'):
         logger.exception('Problem reading configuration')
         raise
 
-    raise errors.NoSuchSiteError(siteName)
+    raise NoSuchSiteError(siteName)
 
 
 def getIDsFromList(listStr):
@@ -712,21 +725,21 @@ def getIDsFromList(listStr):
             try:
                 firstIx, lastIx = group.split('-')
             except ValueError: # if there is more than one dash
-                raise errors.InvalidJobRangeError(group)
+                raise InvalidJobRangeError(group)
             try:
                 firstIx = int(firstIx)
             except ValueError:
-                raise errors.InvalidJobIDError(firstIx)
+                raise InvalidJobIDError(firstIx)
             try:
                 lastIx = int(lastIx)
             except ValueError:
-                raise errors.InvalidJobIDError(lastIx)
+                raise InvalidJobIDError(lastIx)
             ids.extend(range(int(firstIx), int(lastIx) + 1))
         else:
             try:
                 ids.append(int(group))
             except ValueError:
-                raise errors.InvalidJobIDError(group)
+                raise InvalidJobIDError(group)
     return ids
 
 

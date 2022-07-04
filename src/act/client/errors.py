@@ -21,6 +21,19 @@ class NoSuchSiteError(Exception):
         self.siteName = siteName
 
 
+class UnknownClusterError(Exception):
+    """Error when cluster is not in configuration."""
+
+    def __init__(self, name):
+        """
+        Initialize cluster name variable.
+
+        Args:
+            name: A string with name of cluster.
+        """
+        self.name = name
+
+
 class InvalidJobRangeError(Exception):
     """Error when job range is invalid."""
 
@@ -47,9 +60,14 @@ class InvalidJobIDError(Exception):
         self.jobid = jobid
 
 
-class TmpConfigurationError(Exception):
-    """Error when tmp is not configured in aCT configuration."""
-    pass
+class ConfigError(Exception):
+    """Error when configuration parameter does not exist."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __str__(self):
+        return f"Configuration parameter {self.name} is not configured"
 
 
 class NoJobDirectoryError(Exception):
@@ -106,6 +124,16 @@ class NoProxyFileError(Exception):
         self.path = path
 
 
+class InvalidColumnError(Exception):
+    """Error when given column does not exist in database."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def __str__(self):
+        return f'Invalid column "{self.name}"'
+
+
 class ProxyFileExpiredError(Exception):
     """Error when expired proxy file is used."""
     pass
@@ -116,3 +144,18 @@ class ProxyDBExpiredError(Exception):
     pass
 
 
+class RESTError(Exception):
+    """
+    Base class for exceptions that have to be handled in endpoint routes.
+
+    We want them to have error msg (already from base Exception), HTTP
+    response code and potentially internal aCT error codes (which are not
+    universally defined).
+    """
+
+    def __init__(self, msg, httpCode):
+        self.msg = msg
+        self.httpCode = httpCode
+
+    def __str__(self):
+        return self.msg

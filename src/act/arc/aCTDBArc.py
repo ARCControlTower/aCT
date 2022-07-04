@@ -8,7 +8,7 @@ class aCTDBArc(aCTDB):
     def __init__(self, log):
         aCTDB.__init__(self, log, 'arcjobs')
 
-        self.proxydir = self.conf.get(["voms","proxystoredir"])
+        self.proxydir = self.conf.voms.proxystoredir
 
         # mapping from Job class attribute types to column types
         self.jobattrmap = {int: 'integer',
@@ -232,11 +232,11 @@ class aCTDBArc(aCTDB):
         Delete job from ARC table.
         '''
         c=self.db.getCursor()
-        c.execute("select jobdesc from arcjobs where id="+str(id))
+        c.execute("select jobdesc from arcjobs where id = %s", (id,))
         row = c.fetchone()
         if row:
-            c.execute("delete from jobdescriptions where id="+str(row['jobdesc']))
-        c.execute("delete from arcjobs where id="+str(id))
+            c.execute("delete from jobdescriptions where id = %s", (row['jobdesc'],))
+        c.execute("delete from arcjobs where id = %s", (id,))
         self.Commit()
 
     def updateArcJob(self, id, desc, job=None):

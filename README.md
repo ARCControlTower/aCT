@@ -55,25 +55,21 @@ aCT requires a database. MySQL/MariaDB is the only officially supported database
 
 # Configuring
 
-aCT is configured with 2 configuration files, `aCTConfigARC.xml` and optional `aCTConfigAPP.xml`. The former configures the ARC side of aCT and the latter configures the app-specific side. These files are searched for in the following places in order until found:
+aCT is configured with 2 configuration files, `aCTConfigARC.yaml` and optional `aCTConfigAPP.yaml`. The former configures the ARC side of aCT and the latter configures the app-specific side. These files are searched for in the following places in order until found:
 ```
 $ACTCONFIGARC
-$VIRTUAL_ENV/etc/act/aCTConfigARC.xml
-/etc/act/aCTConfigARC.xml
-./aCTConfigARC.xml
+$VIRTUAL_ENV/etc/act/aCTConfigARC.yaml
+/etc/act/aCTConfigARC.yaml
+./aCTConfigARC.yaml
 ```
-and the same for aCTConfigAPP.xml. Configuration templates can be found in etc/act in the virtualenv.
+and the same for aCTConfigAPP.yaml. Configuration templates can be found in etc/act in the virtualenv.
 
 The app config must contain at least
 
-```
-<config>
-
-<modules>
-  <app>act.app</app>
-</modules>
-
-</config>
+```yaml
+modules:
+  app:
+    - act.app
 ```
 
 where `app` is the app-specific python module. The app config can also contain any app-specific configuration.
@@ -101,19 +97,18 @@ Several tools exist to help administer aCT
 
 # Monitoring
 
-[Prometheus](https://prometheus.io/) monitoring can be enabled by setting the port number on which to expose metrics in `aCTConfigARC.xml`, eg
+[Prometheus](https://prometheus.io/) monitoring can be enabled by setting the port number on which to expose metrics in `aCTConfigARC.yaml`, eg
 
-```
-<monitor>
-  <prometheusport>8001</prometheusport>
-</monitor>
+```yaml
+monitor:
+  prometheusport: 8001
 ```
 
 By default only ARC metrics are reported, but app-specific metrics can also be added - see the developers section below.
 
 # Client tools
 
-__Experimental__ client tools exist which allow job management through simple command line tools (`actsub`, `actstat`, etc). These tools allow aCT to be used as a generic job submission engine, independent from the ATLAS part.
+__Experimental__ client tools exist which allow job management through simple command line tools (`act sub`, `act stat`, etc). These tools allow aCT to be used as a generic job submission engine, independent from the ATLAS part.
 
 # For developers
 

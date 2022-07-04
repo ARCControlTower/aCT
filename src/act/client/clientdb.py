@@ -8,6 +8,7 @@ import arc
 import logging
 
 from act.db.aCTDB import aCTDB
+from act.client.errors import InvalidColumnError
 
 
 class ClientDB(aCTDB):
@@ -55,8 +56,8 @@ class ClientDB(aCTDB):
             modified TIMESTAMP,
             created TIMESTAMP,
             jobname VARCHAR(255),
-            jobdesc integer,
-            siteName VARCHAR(255),
+            jobdesc mediumtext,
+            clusterlist VARCHAR(1024),
             arcjobid integer,
             proxyid integer
         )"""
@@ -81,42 +82,30 @@ class ClientDB(aCTDB):
         else:
             self.Commit()
 
-    def insertJob(self, jobdesc, proxyid, siteName, lazy=False):
+    def insertJob(self, proxyid, clusterlist, lazy=False):
         """
         Insert job into clientjobs table.
 
-        This function does not insert job decription in to the database. It
-        has to be inserted separately. However, job description is still needed
-        to determine the name of the job. This function is meant for clients
-        that need to perform additional work on job descriptions.
-
         Args:
             jobdesc: A string with xRSL job description.
+            jobname: Job name string.
             proxyid: ID from proxies table of a proxy that job will
                 be submitted with.
-            siteName: A string with name of a site in configuration
-                that job will be submitted to.
+            clusterlist: A string of comma separated URLs of clusters that job
+                will be submitted to.
             lazy: A boolean that determines whether transaction should be
                 commited after operation.
 
         Returns:
             ID of inserted job.
         """
-        # get job name from xRSL
-        jobdescs = arc.JobDescriptionList()
-        # Error is not checked because caller (actsub.py) already checked
-        # validity of xrsl.
-        arc.JobDescription_Parse(str(jobdesc), jobdescs)
-        jobname = jobdescs[0].Identification.JobName
-
-        # insert job
         query = """
-            INSERT INTO clientjobs (created, jobname, jobdesc, siteName, proxyid)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO clientjobs (created, clusterlist, proxyid)
+            VALUES (%s, %s, %s)
         """
         c = self.db.getCursor()
         try:
-            c.execute(query, [self.getTimeStamp(), jobname, None, siteName, proxyid])
+            c.execute(query, [self.getTimeStamp(), clusterlist, proxyid])
             c.execute('SELECT LAST_INSERT_ID()')
             jobid = c.fetchone()['LAST_INSERT_ID()']
         except:
@@ -127,7 +116,7 @@ class ClientDB(aCTDB):
                 self.Commit()
             return jobid
 
-    def insertJobAndDescription(self, jobdesc, proxyid, siteName, lazy=False):
+    def insertJobAndDescription(self, jobdesc, proxyid, clusterlist, lazy=False):
         """
         Insert job into clientjobs and job description into jobdescriptions.
 
@@ -138,8 +127,8 @@ class ClientDB(aCTDB):
             jobdesc: A string with xRSL job description.
             proxyid: ID from proxies table of a proxy that job will
                 be submitted with.
-            siteName: A string with name of a site in configuration
-                that job will be submitted to.
+            clusterlist: A string of comma separated URLs of clusters that job
+                will be submitted to.
             lazy: A boolean that determines whether transaction should be
                 commited after operation.
 
@@ -165,12 +154,12 @@ class ClientDB(aCTDB):
 
         # insert job
         query = """
-            INSERT INTO clientjobs (created, jobname, jobdesc, siteName, proxyid)
+            INSERT INTO clientjobs (created, jobname, jobdesc, clusterlist, proxyid)
             VALUES (%s, %s, %s, %s, %s)
         """
         c = self.db.getCursor()
         try:
-            c.execute(query, [self.getTimeStamp(), jobname, jobdescid, siteName, proxyid])
+            c.execute(query, [self.getTimeStamp(), jobname, jobdescid, clusterlist, proxyid])
             c.execute('SELECT LAST_INSERT_ID()')
             jobid = c.fetchone()['LAST_INSERT_ID()']
         except:
@@ -209,7 +198,7 @@ class ClientDB(aCTDB):
         desc['arcstate'] = "tosubmit"
         desc['tarcstate']  = desc['created']
         desc['tstate'] = desc['created']
-        desc['cluster']  = ''
+        desc['cluster'] = ''
         desc['clusterlist'] = clusterlist
         desc['jobdesc'] = jobdescid
         desc['attemptsleft'] = maxattempts
@@ -241,13 +230,13 @@ class ClientDB(aCTDB):
         """
         query = 'DELETE FROM clientjobs'
         if where:
-            query += ' WHERE {}'.format(where)
+            query += f' WHERE {where}'
 
         c = self.db.getCursor()
         try:
             c.execute(query, params)
         except:
-            self.log.exception('Error deleting jobs with query: "{}"'.format(where))
+            self.log.exception(f'Error deleting jobs with query: "{where}"')
             raise
         else:
             self.Commit()
@@ -271,19 +260,17 @@ class ClientDB(aCTDB):
         Returns:
             A list of dictionaries of column_name:value.
         """
-        if not self._checkColumns('clientjobs', columns):
-            return None
+        self._checkColumns('clientjobs', columns)
 
         # query params
         params = []
         # create query
-        query = 'SELECT {} FROM clientjobs '.format(
-            self._column_list2str(columns))
+        query = f'SELECT {self._column_list2str(columns)} FROM clientjobs '
         if 'where' in kwargs:
-            query += ' WHERE {} '.format(kwargs['where'])
+            query += f' WHERE {kwargs["where"]} '
             params.extend(kwargs['where_params'])
         if 'order_by' in kwargs:
-            query += ' ORDER BY {} '.format(kwargs['order_by'])
+            query += f' ORDER BY {kwargs["order_by"]} '
             params.extend(kwargs['order_by_params'])
         if 'limit' in kwargs:
             query += ' LIMIT %s'
@@ -325,13 +312,12 @@ class ClientDB(aCTDB):
             lazy: A boolean that determines whether transaction should be
                 commited after operation.
         """
-        if not self._checkColumns('clientjobs', patch.keys()):
-            raise Exception("Invalid job attribute")
+        self._checkColumns('clientjobs', patch.keys())
 
         query = 'UPDATE clientjobs SET '
         params = []
         for key in patch.keys():
-            query += '{} = %s, '.format(key)
+            query += f'{key} = %s, '
             params.append(patch[key])
         query = query.rstrip(', ')
         query += ' WHERE id = %s'
@@ -341,7 +327,7 @@ class ClientDB(aCTDB):
         try:
             c.execute(query, params)
         except:
-            self.log.exception('Error updating job {}'.format(jobid))
+            self.log.exception(f'Error updating job {jobid}')
             raise
         else:
             if not lazy:
@@ -372,18 +358,17 @@ class ClientDB(aCTDB):
         if not clicols and not arccols:
             return []
 
-        if not self._checkColumns('clientjobs', clicols) or \
-                not self._checkColumns('arcjobs', arccols):
-            raise Exception("Invalid columns")
+        self._checkColumns('clientjobs', clicols)
+        self._checkColumns('arcjobs', arccols)
 
         c = self.db.getCursor()
         query = "SELECT "
         # prepend table name for all columns and add them to query
         for col in clicols:
-            query += 'c.{} AS c_{}, '.format(col, col)
+            query += f'c.{col} AS c_{col}, '
         for col in arccols:
-            query += 'a.{} AS a_{}, '.format(col, col)
-        query = query.rstrip(', ') # strip last comma and space
+            query += f'a.{col} AS a_{col}, '
+        query = query.rstrip(', ')  # strip last comma and space
 
         # inner join
         query += " FROM clientjobs c "
@@ -392,10 +377,10 @@ class ClientDB(aCTDB):
         params = []
         # select job
         if 'where' in kwargs:
-            query += ' WHERE {}'.format(kwargs['where'])
+            query += f' WHERE {kwargs["where"]}'
             params.extend(kwargs['where_params'])
         if 'order_by' in kwargs:
-            query += ' ORDER BY {}'.format(kwargs['order_by'])
+            query += f' ORDER BY {kwargs["order_by"]}'
             params.extend(kwargs['order_by_params'])
         if 'limit' in kwargs:
             query += ' LIMIT %s'
@@ -405,7 +390,7 @@ class ClientDB(aCTDB):
         try:
             c.execute(query, params)
         except:
-            self.log.exception('Error getting inner join for query {}'.format(query))
+            self.log.exception(f'Error getting inner join for query {query}')
             raise
         else:
             return c.fetchall()
@@ -440,18 +425,17 @@ class ClientDB(aCTDB):
         if not clicols and not arccols:
             return []
 
-        if not self._checkColumns('clientjobs', clicols) or \
-                not self._checkColumns('arcjobs', arccols):
-            raise Exception("Invalid columns")
+        self._checkColumns('clientjobs', clicols)
+        self._checkColumns('arcjobs', arccols)
 
         c = self.db.getCursor()
         query = "SELECT "
         # prepend table name for all columns and add them to query
         for col in clicols:
-            query += 'c.{} AS c_{}, '.format(col, col)
+            query += f'c.{col} AS c_{col}, '
         for col in arccols:
-            query += 'a.{} AS a_{}, '.format(col, col)
-        query = query.rstrip(', ') # strip last comma and space
+            query += f'a.{col} AS a_{col}, '
+        query = query.rstrip(', ')  # strip last comma and space
 
         # left join
         query += " FROM clientjobs c "
@@ -460,10 +444,10 @@ class ClientDB(aCTDB):
         params = []
         # select job
         if 'where' in kwargs:
-            query += ' WHERE {}'.format(kwargs['where'])
+            query += f' WHERE {kwargs["where"]}'
             params.extend(kwargs['where_params'])
         if 'order_by' in kwargs:
-            query += ' ORDER BY {}'.format(kwargs['order_by'])
+            query += f' ORDER BY {kwargs["order_by"]}'
             params.extend(kwargs['order_by_params'])
         if 'limit' in kwargs:
             query += ' LIMIT %s'
@@ -473,7 +457,7 @@ class ClientDB(aCTDB):
         try:
             c.execute(query, params)
         except:
-            self.log.exception('Error getting left join for query {}'.format(query))
+            self.log.exception(f'Error getting left join for query {query}')
             raise
         else:
             return c.fetchall()
@@ -494,11 +478,11 @@ class ClientDB(aCTDB):
         the same interface.
         """
         c = self.db.getCursor()
-        query = 'SHOW columns FROM {}'.format(tableName)
+        query = f'SHOW columns FROM {tableName}'
         try:
             c.execute(query)
         except:
-            self.log.exception('Error getting columns for table {}'.format(tableName))
+            self.log.exception(f'Error getting columns for table {tableName}')
             raise
         else:
             rows = c.fetchall()
@@ -509,8 +493,7 @@ class ClientDB(aCTDB):
         tableColumns = self.getColumns(tableName)
         for col in columns:
             if col not in tableColumns:
-                return False
-        return True
+                raise InvalidColumnError(col)
 
 
 def createMysqlEscapeList(num):

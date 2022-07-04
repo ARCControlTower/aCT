@@ -33,26 +33,31 @@ class aCTPanda2Xrsl:
         if self.maxwalltime == 0:
             self.maxwalltime = 7*24*60
 
-        self.created = pandadbjob['created']
-        self.wrapper = atlasconf.get(["executable", "wrapperurl"])
-        if self.prodSourceLabel.startswith('rc_'):
-            self.wrapper = atlasconf.get(["executable", "wrapperurlrc"])
+        self.pilotargs = None
+        params = siteinfo.get("params", None)
+        if params is not None:
+            self.pilotargs = params.get("pilot_args", None)
 
-        self.pilotversion = siteinfo.get('pilot_version', '2')
+        self.created = pandadbjob['created']
+        self.wrapper = atlasconf.executable.wrapperurl
+        if self.prodSourceLabel.startswith('rc_'):
+            self.wrapper = atlasconf.executable.wrapperurlrc
+
+        self.pilotversion = siteinfo.get('pilot_version', '3')
         self.piloturl = siteinfo.get('params', {}).get('pilot_url')
         if self.prodSourceLabel.startswith('rc_test'):
-            self.piloturl = atlasconf.get(["executable", "ptarurlrc"])
+            self.piloturl = atlasconf.executable.ptarurlrc
             if self.pilotversion == '3':
-                self.piloturl = atlasconf.get(["executable", "p3tarurlrc"])
+                self.piloturl = atlasconf.executable.p3tarurlrc
         if self.prodSourceLabel.startswith('ptest'):
-            self.piloturl = atlasconf.get(["executable", "ptarurldev"])
+            self.piloturl = atlasconf.executable.ptarurldev
             if self.pilotversion == '3':
-                self.piloturl = atlasconf.get(["executable", "p3tarurldev"])
+                self.piloturl = atlasconf.executable.p3tarurldev
 
         if not self.truepilot and not self.piloturl:
-            self.piloturl = atlasconf.get(["executable", "ptarurl"])
+            self.piloturl = atlasconf.executable.ptarurl
             if self.pilotversion == '3':
-                self.piloturl = atlasconf.get(["executable", "p3tarurl"])
+                self.piloturl = atlasconf.executable.p3tarurl
 
         self.tmpdir = tmpdir
         self.inputfiledir = os.path.join(self.tmpdir, 'inputfiles')
@@ -64,11 +69,11 @@ class aCTPanda2Xrsl:
         try:
             self.schedulerid = json.loads(pandadbjob['metadata'].decode())['schedulerid']
         except:
-            self.schedulerid = atlasconf.get(["panda", "schedulerid"])
+            self.schedulerid = atlasconf.panda.schedulerid
 
         self.rtesites = ["BEIJING-CS-TH-1A_MCORE","BEIJING-ERAII_MCORE","BEIJING-TIANJIN-TH-1A_MCORE","LRZ-LMU_MUC1_MCORE"]#,"LRZ-LMU_MUC_MCORE1"]#"MPPMU-DRACO_MCORE","MPPMU-HYDRA_MCORE"]
         self.atlasrelease = None
-        self.monitorurl = atlasconf.get(["monitor", "apfmon"])
+        self.monitorurl = atlasconf.monitor.apfmon
         # ES merge jobs need unique guids because pilot uses them as dict keys
         if not self.truepilot and 'eventServiceMerge' in self.jobdesc and self.jobdesc['eventServiceMerge'][0] == 'True':
             if self.pandajob.startswith('GUID'):
@@ -306,7 +311,7 @@ class aCTPanda2Xrsl:
     def setArguments(self):
 
         #pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-d" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s"' \
-        pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-j" "%s" "--pilot-user" "ATLAS" "-w" "generic" "--job-type" "%s" "--resource-type" "%s" "--pilotversion" "%s"' \
+        pargs = '"-q" "%s" "-r" "%s" "-s" "%s" "-j" "%s" "--pilot-user" "ATLAS" "--harvester-submit-mode" "PUSH" "-w" "generic" "--job-type" "%s" "--resource-type" "%s" "--pilotversion" "%s"' \
                 % (self.schedconfig, self.sitename, self.sitename, self.prodSourceLabel, self.getJobType(), self.getResourceType(), self.pilotversion)
         if self.prodSourceLabel == 'rc_alrb':
             pargs += ' "-i" "ALRB"'
@@ -320,6 +325,9 @@ class aCTPanda2Xrsl:
                 pargs += ' "--piloturl" "%s"' % (self.piloturl)
         else:
             pargs += ' "-z" "-t" "--piloturl" "local" "--mute"'
+
+        if self.pilotargs is not None:
+            pargs += ' "%s"' % self.pilotargs
 
         self.xrsl['arguments'] = '(arguments = %s)' % pargs
 
@@ -372,7 +380,7 @@ class aCTPanda2Xrsl:
             x += '(runpilot2-wrapper.sh "%s")' % self.wrapper
 
         # Pilot tarball
-        x += '(pilot2.tar.gz "%s" "cache=check")' % self.piloturl
+        x += '(pilot3.tar.gz "%s" "cache=check")' % self.piloturl
 
         # Special HPCs which cannot get cric files from cvmfs or over network
         if self.cricjsons:
@@ -506,7 +514,7 @@ class aCTPanda2Xrsl:
         # Set schedulerID and job log URL
         environment = {}
         environment['PANDA_JSID'] = self.schedulerid
-        schedurl = self.atlasconf.get(["joblog", "urlprefix"])
+        schedurl = self.atlasconf.joblog.urlprefix
         environment['GTAG'] = '%s/%s/%s/%s.out' % (schedurl, self.created.strftime('%Y-%m-%d'), self.sitename, self.pandaid)
 
         # ATLAS_RELEASE for RTE sites

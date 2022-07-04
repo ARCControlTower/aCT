@@ -23,8 +23,8 @@ def bootstrap_conf():
 def bootstrap_dirs():
     '''Make necessary directories'''
     arcconf = aCTConfigARC()
-    os.makedirs(arcconf.get(['tmp', 'dir']), mode=0o755, exist_ok=True)
-    os.makedirs(arcconf.get(['logger', 'logdir']), mode=0o755, exist_ok=True)
+    os.makedirs(arcconf.tmp.dir, mode=0o755, exist_ok=True)
+    os.makedirs(arcconf.logger.logdir, mode=0o755, exist_ok=True)
 
 def bootstrap_db():
     '''Set up the ARC and Condor DB tables'''
@@ -42,7 +42,7 @@ def bootstrap_db():
 def bootstrap_app():
     '''Set up app-specific things'''
     appconf = aCTConfigAPP()
-    apps = appconf.getList(["modules", "app"])
+    apps = appconf.modules.app
     for app in apps:
         print(f'Setting up app from {app}...')
         try:
