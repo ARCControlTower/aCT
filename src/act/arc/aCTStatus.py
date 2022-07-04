@@ -372,55 +372,83 @@ class aCTStatus(aCTProcess):
 
         return patchDict
 
+    def checkLostJobs(self):
+        """
+        Move jobs with a long time since status update to lost
+        """
 
-    def checkACTStateTimeouts(self):
-        COLUMNS = ["id", "appjobid"]
+        # TODO: HARDCODED
+        jobs = self.db.getArcJobsInfo(
+            "(arcstate='submitted' or arcstate='running' or "
+            "arcstate='cancelling' or arcstate='finished') and "
+            f"cluster='{self.cluster}' and "
+            f"{self.db.timeStampLessThan('tarcstate', 172800)}",
+            ['id', 'appjobid', 'JobID', 'arcstate']
+        )
 
-        for state, timeout in self.conf.timeouts.aCT_state:
-            tstampCond = self.db.timeStampLessThan("tarcstate", timeout)
-            jobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and arcstate='{state}' and {tstampCond}", COLUMNS)
-            for job in jobs:
-                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in \"{state}\"")
-                tstamp = self.db.getTimeStamp()
-
-                if state == "cancelling":
-                    self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-
-                if state == "finished":
-                    self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
-
+        tstamp = self.db.getTimeStamp()
+        for job in jobs:
+            if job['arcstate'] == 'cancelling':
+                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in cancelling, marking as cancelled")
+                self.db.updateArcJob(job['id'], {'arcstate': 'cancelled', 'tarcstate': tstamp})
+            else:
+                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in {job['arcstate']}, marking as lost")
+                self.db.updateArcJob(job['id'], {'arcstate': 'lost', 'tarcstate': tstamp})
         self.db.Commit()
 
-    def checkARCStateTimeouts(self):
-        COLUMNS = ["id", "appjobid", "arcstate", "State", "IDFromEndpoint"]
+    def checkStuckJobs(self):
+        """
+        Check jobs with tstate too long ago and set them tocancel
+        maxtimestate can be set in arc config file for any state in arc.JobState,
+        e.g. maxtimerunning, maxtimequeuing
+        Also mark as cancelled jobs stuck in cancelling for more than one hour
+        """
+        tstamp = self.db.getTimeStamp()
 
-        for state, timeout in self.conf.timeouts.ARC_state:
-            tstampCond = self.db.timeStampLessThan("tstate", timeout)
-            jobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and State='{state}' and {tstampCond}", COLUMNS)
+        # Loop over possible states
+        # Note: MySQL is case-insensitive. Need to watch out with other DBs
+
+        # Some states are repeated in mapping so set is used.
+        for jobstate in set(ARC_STATE_MAPPING.values()):
+            maxtime = self.conf.jobs.get(f"maxtime{jobstate.lower()}", None)
+            if not maxtime:
+                continue
+
+            # be careful not to cancel jobs that are stuck in cleaning
+            select = f"state='{jobstate}' and {self.db.timeStampLessThan('tstate', maxtime)}"
+            jobs = self.db.getArcJobsInfo(select, columns=['id', 'JobID', 'appjobid', 'arcstate'])
 
             for job in jobs:
-                # do not cancel already cancelled jobs
-                if job["arcstate"] in ("cancelled", "cancelling"):
+                if job["arcstate"] == "toclean":
+                    # delete jobs stuck in toclean
+                    self.log.info(f"Job {job['appjobid']} {job['id']} stuck in toclean for too long, deleting")
+                    self.db.deleteArcJob(job["id"])
                     continue
 
-                # do not cancel jobs in states that don't make sense
-                if job["State"] in ("FINISHED", "FAILED", "KILLING", "KILLED", "WIPED"):
-                    continue
-
-                # cancel jobs
-                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in state {state}")
-                tstamp = self.db.getTimeStamp()
-                if job["IDFromEndpoint"]:
-                    self.db.updateArcJobLazy(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in state {jobstate}, cancelling")
+                if job["JobID"]:
+                    # If jobid is defined, cancel
+                    self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp, "tstate": tstamp})
                 else:
-                    self.db.updateArcJobLazy(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
+                    # Otherwise mark cancelled
+                    self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "tstate": tstamp})
+
+        # TODO: HARDCODED
+        jobs = self.db.getArcJobsInfo(
+            f"arcstate='cancelling' and cluster='{self.cluster}' and "
+            f"{self.db.timeStampLessThan('tstate', 3600)}",
+            ["id", "appjobid"]
+        )
+        for job in jobs:
+            self.log.info(f"Job {job['appjobid']} {job['id']} stuck in cancelling, marking cancelled")
+            self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "tstate": tstamp})
 
         self.db.Commit()
 
     def process(self):
         self.checkJobs()
-        self.checkARCStateTimeouts()
-        self.checkACTStateTimeouts()
+        self.checkLostJobs()
+        self.checkStuckJobs()
 
 
 if __name__ == '__main__':
