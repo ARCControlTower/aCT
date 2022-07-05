@@ -33,12 +33,6 @@ class aCTCleaner(aCTProcess):
             f"arcstate='toclean' and cluster='{self.cluster}' limit 100",
             COLUMNS
         )
-        dbtoclean = self.db.getArcJobsInfo(
-            "arcstate='toclean' and cluster='' limit 100",
-            COLUMNS
-        )
-        if dbtoclean:
-            jobstoclean.extend(dbtoclean)
         if not jobstoclean:
             return
 

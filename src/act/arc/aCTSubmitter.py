@@ -289,15 +289,9 @@ class aCTSubmitter(aCTProcess):
         # fetch jobs from DB for this cluster and also jobs that
         # don't have cluster assigned
         jobstocancel = self.db.getArcJobsInfo(
-            "arcstate='tocancel' and (cluster='{0}' or clusterlist like '%{0}' or clusterlist like '%{0},%')".format(self.cluster),
+            f"arcstate='tocancel' and cluster='{self.cluster}'",
             COLUMNS
         )
-        dbtocancel = self.db.getArcJobsInfo(
-            "arcstate='tocancel' and cluster=''",
-            COLUMNS
-        )
-        if dbtocancel:
-            jobstocancel.extend(dbtocancel)
         if not jobstocancel:
             return
 
