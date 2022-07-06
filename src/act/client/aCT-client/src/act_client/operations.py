@@ -21,10 +21,9 @@ HTTP_BUFFER_SIZE = 2**23
 
 class ACTRest:
 
-    def __init__(self, host, token=None, port=443, baseURL=''):
-        self.baseURL = baseURL
+    def __init__(self, url, token=None):
         self.token = token
-        self.httpClient = HTTPClient(host, port=port)
+        self.httpClient = HTTPClient(url)
 
     def request(self, *args, **kwargs):
         resp = self.httpClient.request(*args, **kwargs)
@@ -379,8 +378,8 @@ class ACTRest:
 
 class WebDAVClient:
 
-    def __init__(self, host, port=443, proxypath=None):
-        self.httpClient = HTTPClient(host, port=port, proxypath=proxypath)
+    def __init__(self, url, proxypath=None):
+        self.httpClient = HTTPClient(url, proxypath=proxypath)
 
     def rmdir(self, url):
         headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
@@ -414,7 +413,7 @@ class WebDAVClient:
                 dstUrl = resp.getheader('Location')
                 parts = urlparse(dstUrl)
                 urlPath = f'{parts.path}?{parts.query}'
-                nodeClient = getHTTPClient(dstUrl)
+                nodeClient = HTTPClient(dstUrl)
                 try:
                     # if headers are not explicitly set to empty they will
                     # somehow be taken from previous separate connection
@@ -459,32 +458,13 @@ def _storeResultChunks(resp, filename, chunksize=HTTP_BUFFER_SIZE):
         raise ACTClientError(f'Error storing job results to the file {filename}: {e}')
 
 
-def getHTTPClient(url, proxypath=None):
+def getACTRestClient(conf, useToken=True):
     try:
-        parts = urlparse(url)
-        hostname = parts.hostname
-        port = parts.port
-        if proxypath or parts.scheme == 'https':
-            isHTTPS = True
-        else:
-            isHTTPS = False
-        httpClient = HTTPClient(hostname, proxypath, isHTTPS, port)
-    except Exception as e:
-        raise ACTClientError(f'Error connecting to {parts.hostname}:{parts.port}: {e}')
-    else:
-        return httpClient
-
-
-def getACTRestClient(args, conf, useToken=True):
-    try:
-        parts = urlparse(conf['server'])
-        hostname = parts.hostname
-        port = parts.port
         if useToken:
             token = readFile(conf['token'])
         else:
             token = None
-        actrest = ACTRest(hostname, port=port, token=token)
+        actrest = ACTRest(conf['server'], token=token)
     except Exception as exc:
         raise ACTClientError(f'Error creating aCT REST client: {exc}')
     return actrest
@@ -492,14 +472,11 @@ def getACTRestClient(args, conf, useToken=True):
 
 def getWebDAVClient(conf, webdavBase, useProxy=True):
     try:
-        parts = urlparse(webdavBase)
-        hostname = parts.hostname
-        port = parts.port
         if useProxy:
             proxypath = conf['proxy']
         else:
             proxypath = None
-        webdavClient = WebDAVClient(hostname, port=port, proxypath=proxypath)
+        webdavClient = WebDAVClient(webdavBase, proxypath=proxypath)
     except Exception as exc:
         raise ACTClientError(f'Error creating WebDAV client: {exc}')
     return webdavClient

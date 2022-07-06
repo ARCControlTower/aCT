@@ -18,17 +18,8 @@ class aCTCleaner(aCTProcess):
     def processToClean(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
-        # parse cluster URL
-        url = None
-        try:
-            url = urlparse(self.cluster)
-        except ValueError as exc:
-            self.log.error(f"Error parsing cluster URL {url}: {exc}")
-            return
-
-        # TODO: hardcoded limits
-        #
         # Fetch all jobs that can be cleaned from database.
+        # TODO: HARDCODED
         jobstoclean = self.db.getArcJobsInfo(
             f"arcstate='toclean' and cluster='{self.cluster}' limit 100",
             COLUMNS
@@ -60,9 +51,9 @@ class aCTCleaner(aCTProcess):
 
             arcrest = None
             try:
-                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                arcrest = ARCRest(self.cluster, proxypath=proxypath)
                 arcrest.cleanJobs(toARCClean)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")

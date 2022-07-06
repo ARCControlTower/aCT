@@ -158,6 +158,7 @@ class aCTSubmitter(aCTProcess):
             self.log.info(f"Submitting {len(jobs)} jobs")
 
             # parse cluster URL and queue
+            # TODO: make queue object attribute
             url = None
             try:
                 url = urlparse(self.cluster)
@@ -188,9 +189,9 @@ class aCTSubmitter(aCTProcess):
             # submit jobs to ARC
             arcrest = None
             try:
-                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                arcrest = ARCRest(self.cluster, proxypath=proxypath)
                 arcrest.submitJobs(queue, arcjobs, self.log)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error submitting jobs to ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
                 continue
@@ -278,14 +279,6 @@ class aCTSubmitter(aCTProcess):
     def processToCancel(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
-        # parse cluster URL
-        url = None
-        try:
-            url = urlparse(self.cluster)
-        except ValueError as exc:
-            self.log.error(f"Error parsing cluster URL {url}: {exc}")
-            return
-
         # fetch jobs from DB for this cluster and also jobs that
         # don't have cluster assigned
         jobstocancel = self.db.getArcJobsInfo(
@@ -320,9 +313,9 @@ class aCTSubmitter(aCTProcess):
 
             arcrest = None
             try:
-                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                arcrest = ARCRest(self.cluster, proxypath=proxypath)
                 arcrest.killJobs(toARCKill)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -363,14 +356,6 @@ class aCTSubmitter(aCTProcess):
     def processToResubmit(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
-        # parse cluster URL
-        url = None
-        try:
-            url = urlparse(self.cluster)
-        except ValueError as exc:
-            self.log.error(f"Error parsing cluster URL {url}: {exc}")
-            return
-
         # fetch jobs from DB
         jobstoresubmit = self.db.getArcJobsInfo(
             f"arcstate='toresubmit' and cluster='{self.cluster}'",
@@ -404,9 +389,9 @@ class aCTSubmitter(aCTProcess):
 
             arcrest = None
             try:
-                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                arcrest = ARCRest(self.cluster, proxypath=proxypath)
                 arcrest.cleanJobs(toARCClean)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -434,14 +419,6 @@ class aCTSubmitter(aCTProcess):
 
     def processToRerun(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
-
-        # parse cluster URL
-        url = None
-        try:
-            url = urlparse(self.cluster)
-        except ValueError as exc:
-            self.log.error(f"Error parsing cluster URL {url}: {exc}")
-            return
 
         # fetch jobs from DB
         jobstorerun = self.db.getArcJobsInfo(
@@ -473,7 +450,7 @@ class aCTSubmitter(aCTProcess):
 
             arcrest = None
             try:
-                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                arcrest = ARCRest(self.cluster, proxypath=proxypath)
 
                 # get delegations for jobs
                 # AF BUG
@@ -498,7 +475,7 @@ class aCTSubmitter(aCTProcess):
                 # restart jobs
                 arcrest.restartJobs(torestart)
 
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error rerunning jobs in ARC: {exc}")
                 continue
             except JSONDecodeError as exc:

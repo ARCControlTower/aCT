@@ -9,7 +9,6 @@ import shutil
 from http.client import HTTPException
 from json import JSONDecodeError
 from ssl import SSLError
-from urllib.parse import urlparse
 
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest, MissingDiagnoseFile
 from act.common.aCTProcess import aCTProcess
@@ -23,14 +22,6 @@ class aCTFetcher(aCTProcess):
 
     def fetchJobs(self, arcstate, nextarcstate):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "tarcstate"]
-
-        # parse cluster URL
-        url = None
-        try:
-            url = urlparse(self.cluster)
-        except ValueError as exc:
-            self.log.error(f"Error parsing cluster URL {url}: {exc}")
-            return
 
         # TODO: HARDCODED
         jobstofetch = self.db.getArcJobsInfo(f"arcstate='{arcstate}' and cluster='{self.cluster}' limit 100", COLUMNS)
@@ -63,13 +54,13 @@ class aCTFetcher(aCTProcess):
 
             arcrest = None
             try:
-                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                arcrest = ARCRest(self.cluster, proxypath=proxypath)
 
                 # fetch jobs
                 # TODO: HARDCODED
                 arcrest.fetchJobs(self.tmpdir, tofetch, workers=10, logger=self.log)
 
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as exc:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")

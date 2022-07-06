@@ -210,7 +210,7 @@ def main():
 def subcommandInfo(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(args, conf)
+    actrest = getACTRestClient(conf)
     try:
         jsonData, status = actrest.getInfo()
         if status != 200:
@@ -229,7 +229,7 @@ def subcommandInfo(args, conf):
 def subcommandClean(args, conf):
     checkConf(conf, ['server', 'token', 'proxy'])
 
-    actrest = getACTRestClient(args, conf)
+    actrest = getACTRestClient(conf)
     ids = getIDParam(args)
     try:
         disableSIGINT()
@@ -272,7 +272,7 @@ def webdavCleanup(args, conf, jobids, webdavClient=None, webdavBase=None):
 def subcommandFetch(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(args, conf)
+    actrest = getACTRestClient(conf)
     ids = getIDParam(args)
     try:
         jsonData = actrest.fetchJobs(jobids=ids, name=args.name)
@@ -287,7 +287,7 @@ def subcommandFetch(args, conf):
 def subcommandGet(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(args, conf)
+    actrest = getACTRestClient(conf)
     ids = getIDParam(args)
     toclean = []
     try:
@@ -328,7 +328,7 @@ def subcommandGet(args, conf):
 def subcommandKill(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(args, conf)
+    actrest = getACTRestClient(conf)
     ids = getIDParam(args)
     try:
         disableSIGINT()
@@ -347,7 +347,7 @@ def subcommandKill(args, conf):
 def subcommandProxy(args, conf):
     checkConf(conf, ['server', 'token', 'proxy'])
 
-    actrest = getACTRestClient(args, conf, useToken=False)
+    actrest = getACTRestClient(conf, useToken=False)
     proxyStr = readFile(conf['proxy'])
     try:
         disableSIGINT()
@@ -363,7 +363,7 @@ def subcommandProxy(args, conf):
 def subcommandResub(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(args, conf)
+    actrest = getACTRestClient(conf)
     ids = getIDParam(args)
     try:
         jsonData = actrest.resubmitJobs(jobids=ids, name=args.name)
@@ -378,7 +378,7 @@ def subcommandResub(args, conf):
 def subcommandStat(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(args, conf)
+    actrest = getACTRestClient(conf)
     try:
         if args.get_cols:
             getCols(actrest)
@@ -480,7 +480,7 @@ def subcommandSub(args, conf):
     else:
         clusterlist = args.clusterlist.split(',')
 
-    actrest = getACTRestClient(args, conf)
+    actrest = getACTRestClient(conf)
     webdavClient = None
     webdavBase = None
     jobs = []

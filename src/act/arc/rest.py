@@ -23,36 +23,45 @@ HTTP_BUFFER_SIZE = 2**23
 # TODO: hardcoded timeout for http.client connection
 class HTTPClient:
 
-    def __init__(self, hostname, proxypath=None, isHTTPS=False, port=None):
-        """
-        Store connection parameters and connect.
+    def __init__(self, url=None, host=None, port=None, proxypath=None, isHTTPS=False):
+        """Process parameters and create HTTP connection."""
+        if url:
+            parts = urlparse(url)
 
-        Raises:
-            - exceptions that are thrown by self._connect
-        """
-        self.host = hostname
-        self.port = port
-        self.proxypath = proxypath
-        self.isHTTPS = isHTTPS
-
-        self._connect()
-
-    def _connect(self):
-        """
-        Connect to given host and port with optional HTTPS.
-
-        Raises:
-            - ssl.SSLError
-            - http.client.HTTPException
-            - ConnectionError
-            - OSError, socket.gaierror (when DNS fails)
-        """
-        if self.proxypath or self.isHTTPS:
-            if self.proxypath:
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
-                context.load_cert_chain(self.proxypath, keyfile=self.proxypath)
+            if parts.scheme == "https":
+                useHTTPS = True
+            elif parts.scheme == "http":
+                useHTTPS = False
             else:
-                context = None
+                raise ARCError("URL scheme not HTTP(S)")
+
+            self.host = parts.hostname
+            if self.host is None:
+                raise ARCError("No hostname in URL")
+
+            self.port = parts.port
+
+        else:
+            self.host = host
+            if self.host is None:
+                raise ARCError("No hostname parameter")
+
+            useHTTPS = isHTTPS
+            self.port = port
+
+        if self.host is None:
+            raise ARCError("No hostname given")
+
+        if proxypath is not None:
+            if not useHTTPS:
+                raise ARCError("Cannot use proxy without HTTPS")
+            else:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS)
+                context.load_cert_chain(proxypath, keyfile=proxypath)
+        else:
+            context = None
+
+        if useHTTPS:
             if not self.port:
                 self.port = 443
             self.conn = HTTPSConnection(self.host, port=self.port, context=context, timeout=60)
@@ -60,6 +69,9 @@ class HTTPClient:
             if not self.port:
                 self.port = 80
             self.conn = HTTPConnection(self.host, port=self.port, timeout=60)
+
+        self.isHTTPS = useHTTPS
+        self.proxypath = proxypath
 
     def request(self, method, endpoint, headers={}, token=None, jsonData=None, data=None, params={}):
         """
@@ -111,9 +123,9 @@ class HTTPClient:
 
 class ARCRest:
 
-    def __init__(self, host, port=443, baseURL='/arex/rest/1.0', proxypath=None):
-        self.baseURL = baseURL
-        self.httpClient = HTTPClient(host, port=port, proxypath=proxypath)
+    def __init__(self, url, basePath='/arex/rest/1.0', proxypath=None):
+        self.basePath = basePath
+        self.httpClient = HTTPClient(url=url, proxypath=proxypath)
 
     def close(self):
         self.httpClient.close()
@@ -121,7 +133,7 @@ class ARCRest:
     def POSTNewDelegation(self):
         resp = self.httpClient.request(
             "POST",
-            f"{self.baseURL}/delegations?action=new",
+            f"{self.basePath}/delegations?action=new",
             headers={"Accept": "application/json"}
         )
         respstr = resp.read().decode()
@@ -134,7 +146,7 @@ class ARCRest:
     def POSTRenewDelegation(self, delegationID):
         resp = self.httpClient.request(
             "POST",
-            f"{self.baseURL}/delegations/{delegationID}?action=renew"
+            f"{self.basePath}/delegations/{delegationID}?action=renew"
         )
         respstr = resp.read().decode()
 
@@ -156,7 +168,7 @@ class ARCRest:
 
             resp = self.httpClient.request(
                 'PUT',
-                f'{self.baseURL}/delegations/{delegationID}',
+                f'{self.basePath}/delegations/{delegationID}',
                 data=pem,
                 headers={'Content-type': 'application/x-pem-file'}
             )
@@ -191,7 +203,7 @@ class ARCRest:
     def deleteDelegation(self, delegationID):
         resp = self.httpClient.request(
             'POST',
-            f'{self.baseURL}/delegations/{delegationID}?action=delete'
+            f'{self.basePath}/delegations/{delegationID}?action=delete'
         )
         respstr = resp.read().decode()
         if resp.status != 202:
@@ -247,7 +259,7 @@ class ARCRest:
         # submit jobs to ARC
         resp = self.httpClient.request(
             "POST",
-            f"{self.baseURL}/jobs?action=new",
+            f"{self.basePath}/jobs?action=new",
             data=bulkdesc,
             headers={"Accept": "application/json", "Content-type": "application/xml"}
         )
@@ -297,7 +309,7 @@ class ARCRest:
 
             uploads.append({
                 "jobid": job.id,
-                "url": f"{self.baseURL}/jobs/{job.id}/session/{infile.Name}",
+                "url": f"{self.basePath}/jobs/{job.id}/session/{infile.Name}",
                 "path": path
             })
 
@@ -330,8 +342,9 @@ class ARCRest:
         httpClients = []
         for i in range(numWorkers):
             httpClients.append(HTTPClient(
-                self.httpClient.host,
+                host=self.httpClient.host,
                 port=self.httpClient.port,
+                isHTTPS=True,
                 proxypath=self.httpClient.proxypath
             ))
 
@@ -382,7 +395,7 @@ class ARCRest:
             # add job session directory as a listing transfer
             transferQueue.put({
                 "jobid": job.id,
-                "url": f"{self.baseURL}/jobs/{job.id}/session",
+                "url": f"{self.basePath}/jobs/{job.id}/session",
                 "path": "",
                 "type": "listing"
             })
@@ -391,15 +404,16 @@ class ARCRest:
         httpClients = []
         for i in range(workers):
             httpClients.append(HTTPClient(
-                self.httpClient.host,
+                host=self.httpClient.host,
                 port=self.httpClient.port,
+                isHTTPS=True,
                 proxypath=self.httpClient.proxypath
             ))
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = []
             for httpClient in httpClients:
-                futures.append(pool.submit(downloadTransferWorker, httpClient, transferQueue, resultQueue, downloadDir, jobsdict, self.baseURL, logger))
+                futures.append(pool.submit(downloadTransferWorker, httpClient, transferQueue, resultQueue, downloadDir, jobsdict, self.basePath, logger))
             concurrent.futures.wait(futures)
 
         for httpClient in httpClients:
@@ -448,7 +462,7 @@ class ARCRest:
             diagName = diagFile.split("/")[-1]
             transferQueue.put({
                 "jobid": job.id,
-                "url": f"{self.baseURL}/jobs/{job.id}/diagnose/{diagName}",
+                "url": f"{self.basePath}/jobs/{job.id}/diagnose/{diagName}",
                 "path": diagFile,
                 "type": "diagnose"
             })
@@ -458,7 +472,7 @@ class ARCRest:
     def getJobsList(self):
         resp = self.httpClient.request(
             "GET",
-            f"{self.baseURL}/jobs",
+            f"{self.basePath}/jobs",
             headers={"Accept": "application/json"}
         )
         respstr = resp.read().decode()
@@ -545,7 +559,7 @@ class ARCRest:
         # execute action and get JSON result
         resp = self.httpClient.request(
             "POST",
-            f"{self.baseURL}/jobs?action={action}",
+            f"{self.basePath}/jobs?action={action}",
             jsonData=jsonData,
             headers={"Accept": "application/json", "Content-type": "application/json"}
         )

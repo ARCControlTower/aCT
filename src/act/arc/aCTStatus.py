@@ -117,14 +117,6 @@ class aCTStatus(aCTProcess):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "created",
                    "State", "attemptsleft", "tstate"]
 
-        # parse cluster URL
-        url = None
-        try:
-            url = urlparse(self.cluster)
-        except ValueError as exc:
-            self.log.error(f"Error parsing cluster URL {url}: {exc}")
-            return
-
         # minimum time between checks
         if time.time() < self.checktime + self.conf.jobs.checkmintime:
             self.log.debug("mininterval not reached")
@@ -167,10 +159,10 @@ class aCTStatus(aCTProcess):
 
             arcrest = None
             try:
-                arcrest = ARCRest(url.hostname, port=url.port, proxypath=proxypath)
+                arcrest = ARCRest(self.cluster, proxypath=proxypath)
                 joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(tocheck)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError) as e:
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as e:
                 self.log.error(f"Error fetching job info from ARC: {e}")
                 continue
             except json.JSONDecodeError as exc:
