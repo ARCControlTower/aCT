@@ -145,7 +145,7 @@ class aCTATLASStatus(aCTATLASProcess):
         select += " and pandajobs.sitename in %s limit 100000" % self.sitesselect
 
         columns = ["arcjobs.id", "arcjobs.UsedTotalWalltime", "arcjobs.ExecutionNode",
-                   "arcjobs.cluster", "arcjobs.RequestedSlots", "pandajobs.pandaid", "pandajobs.siteName", "arcjobs.appjobid"]
+                   "arcjobs.cluster", "arcjobs.RequestedSlots", "pandajobs.pandaid", "pandajobs.siteName", "arcjobs.appjobid", "arcjobs.tstate"]
         jobstoupdate=self.dbarc.getArcJobsInfo(select, columns=columns, tables="arcjobs,pandajobs")
 
         if len(jobstoupdate) == 0:
@@ -158,7 +158,7 @@ class aCTATLASStatus(aCTATLASProcess):
             desc = {}
             desc["pandastatus"] = "running"
             desc["actpandastatus"] = "running"
-            if state == "finishing":
+            if state == "finishing" and datetime.datetime.utcnow() - aj["tstate"] > datetime.timedelta(minutes=10):
                 desc["pandastatus"] = "transferring"
                 desc["actpandastatus"] = "transferring"
             if len(aj["ExecutionNode"]) > 255:
