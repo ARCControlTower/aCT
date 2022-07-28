@@ -88,7 +88,7 @@ class ProxyManager(object):
         except:  # probably some file reading error
             self.logger.exception(f'Error reading proxy file {proxyPath}')
             raise
-        if expirytime < datetime.datetime.now():
+        if expirytime < datetime.datetime.utcnow():
             raise ProxyFileExpiredError()
         return proxystr, dn, expirytime
 
@@ -189,7 +189,7 @@ class ProxyManager(object):
         else:
             proxy = c.fetchone()
             if proxy is not None:
-                if proxy['expirytime'] > datetime.datetime.now():
+                if proxy['expirytime'] > datetime.datetime.utcnow():
                     return True
             return False
         finally:

@@ -444,7 +444,7 @@ def getCSR():
             return {'msg': 'Missing certificate chain'}, 400
 
     dn, exptime = pmgr.readProxyString(issuer_pem)
-    if datetime.now() >= exptime:
+    if datetime.utcnow() >= exptime:
         print('error: POST /proxies: expired certificate')
         return {'msg': 'Given certificate is expired'}, 400
     attr = getVOMSProxyAttributes(issuer_pem, chain_pem)
@@ -523,7 +523,7 @@ def uploadSignedProxy():
 
     key_pem = pmgr.getProxyKeyPEM(proxyid)
     dn, exptime = pmgr.readProxyString(cert_pem)
-    if datetime.now() >= exptime:
+    if datetime.utcnow() >= exptime:
         return {'msg': 'Given certificate is expired'}, 400
     attr = getVOMSProxyAttributes(cert_pem, chain_pem)
     if not attr or not dn:
