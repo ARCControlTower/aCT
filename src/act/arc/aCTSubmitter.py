@@ -191,12 +191,12 @@ class aCTSubmitter(aCTProcess):
             try:
                 arcrest = ARCRest(self.cluster, proxypath=proxypath)
                 arcrest.submitJobs(queue, arcjobs, self.log)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error submitting jobs to ARC: {exc}")
-                self.setJobsArcstate(jobs, "tosubmit", commit=True)
-                continue
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
+                self.setJobsArcstate(jobs, "tosubmit", commit=True)
+                continue
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+                self.log.error(f"Error submitting jobs to ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
                 continue
             finally:
@@ -315,10 +315,10 @@ class aCTSubmitter(aCTProcess):
             try:
                 arcrest = ARCRest(self.cluster, proxypath=proxypath)
                 arcrest.killJobs(toARCKill)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+                self.log.error(f"Error killing jobs in ARC: {exc}")
             finally:
                 if arcrest:
                     arcrest.close()
@@ -391,10 +391,10 @@ class aCTSubmitter(aCTProcess):
             try:
                 arcrest = ARCRest(self.cluster, proxypath=proxypath)
                 arcrest.cleanJobs(toARCClean)
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+                self.log.error(f"Error killing jobs in ARC: {exc}")
             finally:
                 if arcrest:
                     arcrest.close()
@@ -475,11 +475,11 @@ class aCTSubmitter(aCTProcess):
                 # restart jobs
                 arcrest.restartJobs(torestart)
 
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error rerunning jobs in ARC: {exc}")
-                continue
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
+                continue
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+                self.log.error(f"Error rerunning jobs in ARC: {exc}")
                 continue
             finally:
                 if arcrest:

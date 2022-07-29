@@ -60,10 +60,10 @@ class aCTFetcher(aCTProcess):
                 # TODO: HARDCODED
                 arcrest.fetchJobs(self.tmpdir, tofetch, workers=10, logger=self.log)
 
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error killing jobs in ARC: {exc}")
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+                self.log.error(f"Error killing jobs in ARC: {exc}")
             finally:
                 arcrest.close()
 
