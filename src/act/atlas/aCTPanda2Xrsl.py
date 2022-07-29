@@ -65,11 +65,7 @@ class aCTPanda2Xrsl:
         self.atlasconf = atlasconf
         self.eventranges = pandadbjob['eventranges']
         self.traces = []
-
-        try:
-            self.schedulerid = json.loads(pandadbjob['metadata'].decode())['schedulerid']
-        except:
-            self.schedulerid = atlasconf.panda.schedulerid
+        self.pandameta = json.loads(pandadbjob.get('metadata', b'{}').decode())
 
         self.rtesites = ["BEIJING-CS-TH-1A_MCORE","BEIJING-ERAII_MCORE","BEIJING-TIANJIN-TH-1A_MCORE","LRZ-LMU_MUC1_MCORE"]#,"LRZ-LMU_MUC_MCORE1"]#"MPPMU-DRACO_MCORE","MPPMU-HYDRA_MCORE"]
         self.atlasrelease = None
@@ -513,7 +509,8 @@ class aCTPanda2Xrsl:
 
         # Set schedulerID and job log URL
         environment = {}
-        environment['PANDA_JSID'] = self.schedulerid
+        schedulerid = self.pandameta.get('schedulerid', self.atlasconf.panda.schedulerid)
+        environment['PANDA_JSID'] = schedulerid
         schedurl = self.atlasconf.joblog.urlprefix
         environment['GTAG'] = '%s/%s/%s/%s.out' % (schedurl, self.created.strftime('%Y-%m-%d'), self.sitename, self.pandaid)
 
@@ -521,13 +518,18 @@ class aCTPanda2Xrsl:
         if self.atlasrelease:
             environment['ATLAS_RELEASE'] = self.atlasrelease
 
-        # Vars for APFMon (truepilot only)
-        if self.truepilot and self.monitorurl:
-            environment['APFCID'] = self.pandajobid
-            # harvester prepends "harvester-" to the schedulerid but APFMon uses the original one
-            environment['APFFID'] = self.schedulerid.replace("harvester-","")
-            environment['APFMON'] = self.monitorurl
-            environment['FACTORYQUEUE'] = self.sitename
+        # Vars for APFMon and heartbeats (truepilot only)
+        if self.truepilot:
+            if self.monitorurl:
+                environment['APFCID'] = self.pandajobid
+                # harvester prepends "harvester-" to the schedulerid but APFMon uses the original one
+                environment['APFFID'] = schedulerid.replace("harvester-","")
+                environment['APFMON'] = self.monitorurl
+                environment['FACTORYQUEUE'] = self.sitename
+            if 'harvesterid' in self.pandameta:
+                environment['HARVESTER_ID'] = self.pandameta['harvesterid']
+            if 'harvesterworkerid' in self.pandameta:
+                environment['HARVESTER_WORKER_ID'] = self.pandameta['harvesterworkerid']
 
         environment['PILOT_NOKILL'] = 'YES'
         self.xrsl['environment'] = '(environment = %s)' % ''.join(['("%s" "%s")' % (k,v) for (k,v) in environment.items()])
