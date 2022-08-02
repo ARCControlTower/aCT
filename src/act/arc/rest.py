@@ -295,8 +295,11 @@ class ARCRest:
         """
         uploads = []
         for infile in job.desc.DataStaging.InputFiles:
+            source = None
+            if len(infile.Sources) > 0:
+                source = infile.Sources[0].fullstr()
             try:
-                path = isLocalInputFile(infile.Name, infile.Sources[0].fullstr())
+                path = isLocalInputFile(infile.Name, source)
             except InputFileError as exc:
                 job.errors.append(exc)
                 continue
