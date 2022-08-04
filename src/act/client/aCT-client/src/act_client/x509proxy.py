@@ -63,7 +63,7 @@ def checkRFCProxy(proxy):
     return False
 
 
-def signRequest(csr, proxypath=PROXYPATH, lifetime=24):
+def signRequest(csr, proxypath=PROXYPATH, lifetime=None):
     """Sign proxy CSR."""
     now = datetime.utcnow()
     if not csr.is_signature_valid:
@@ -82,38 +82,44 @@ def signRequest(csr, proxypath=PROXYPATH, lifetime=24):
     subject = list(proxy.subject)
     subject.append(x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, str(int(time.time()))))
 
-    new_cert = x509.CertificateBuilder() \
-                   .issuer_name(proxy.subject) \
-                   .not_valid_before(now) \
-                   .not_valid_after(now + timedelta(hours=lifetime)) \
-                   .serial_number(proxy.serial_number) \
-                   .public_key(csr.public_key()) \
-                   .subject_name(x509.Name(subject)) \
-                   .add_extension(x509.BasicConstraints(ca=False, path_length=None),
-                                  critical=True) \
-                   .add_extension(x509.KeyUsage(digital_signature=True,
-                                                content_commitment=False,
-                                                key_encipherment=False,
-                                                data_encipherment=False,
-                                                key_agreement=True,
-                                                key_cert_sign=False,
-                                                crl_sign=False,
-                                                encipher_only=False,
-                                                decipher_only=False),
-                                  critical=True) \
-                   .add_extension(x509.AuthorityKeyIdentifier(
-                       key_identifier=keyID.digest,
-                       authority_cert_issuer=[x509.DirectoryName(proxy.issuer)],
-                       authority_cert_serial_number=proxy.serial_number
-                       ),
-                                  critical=False) \
-                   .add_extension(x509.extensions.UnrecognizedExtension(
-                       x509.ObjectIdentifier("1.3.6.1.5.5.7.1.14"),
-                       b"0\x0c0\n\x06\x08+\x06\x01\x05\x05\x07\x15\x01"),
-                                  critical=True) \
-                   .sign(private_key=key,
-                         algorithm=proxy.signature_hash_algorithm,
-                         backend=default_backend())
+    cert_builder = x509.CertificateBuilder() \
+        .issuer_name(proxy.subject) \
+        .not_valid_before(now) \
+        .serial_number(proxy.serial_number) \
+        .public_key(csr.public_key()) \
+        .subject_name(x509.Name(subject)) \
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None),
+                       critical=True) \
+        .add_extension(x509.KeyUsage(digital_signature=True,
+                                     content_commitment=False,
+                                     key_encipherment=False,
+                                     data_encipherment=False,
+                                     key_agreement=True,
+                                     key_cert_sign=False,
+                                     crl_sign=False,
+                                     encipher_only=False,
+                                     decipher_only=False),
+                       critical=True) \
+        .add_extension(x509.AuthorityKeyIdentifier(
+            key_identifier=keyID.digest,
+            authority_cert_issuer=[x509.DirectoryName(proxy.issuer)],
+            authority_cert_serial_number=proxy.serial_number
+            ),
+                       critical=False) \
+        .add_extension(x509.extensions.UnrecognizedExtension(
+            x509.ObjectIdentifier("1.3.6.1.5.5.7.1.14"),
+            b"0\x0c0\n\x06\x08+\x06\x01\x05\x05\x07\x15\x01"),
+                       critical=True)
+
+    if not lifetime:
+        cert_builder = cert_builder.not_valid_after(proxy.not_valid_after)
+    else:
+        cert_builder = cert_builder.not_valid_after(now + timedelta(hours=lifetime))
+    new_cert = cert_builder.sign(
+        private_key=key,
+        algorithm=proxy.signature_hash_algorithm,
+        backend=default_backend()
+    )
     return new_cert.public_bytes(serialization.Encoding.PEM)
 
 
