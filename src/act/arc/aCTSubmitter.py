@@ -176,7 +176,7 @@ class aCTSubmitter(aCTProcess):
             arcrest = None
             try:
                 arcrest = ARCRest(self.cluster, proxypath=proxypath)
-                arcrest.submitJobs(queue, arcjobs, self.log)
+                arcrest.submitJobs(queue, arcjobs)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)

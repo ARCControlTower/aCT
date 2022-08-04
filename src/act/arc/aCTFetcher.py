@@ -58,7 +58,7 @@ class aCTFetcher(aCTProcess):
 
                 # fetch jobs
                 # TODO: HARDCODED
-                arcrest.fetchJobs(self.tmpdir, tofetch, workers=10, logger=self.log)
+                arcrest.fetchJobs(self.tmpdir, tofetch, workers=10)
 
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")

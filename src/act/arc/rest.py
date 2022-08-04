@@ -1,7 +1,6 @@
 import concurrent.futures
 import datetime
 import json
-import logging
 import os
 import queue
 import ssl
@@ -209,7 +208,7 @@ class ARCRest:
         if resp.status != 202:
             raise ARCHTTPError(resp.status, respstr, f"Error deleting delegation {delegationID}: {resp.status} {respstr}")
 
-    def submitJobs(self, queue, jobs, logger):
+    def submitJobs(self, queue, jobs):
         """
         Submit jobs specified in given list of job objects.
 
@@ -284,7 +283,7 @@ class ARCRest:
                 job.id = result["id"]
                 job.state = result["state"]
                 toupload.append(job)
-        self.uploadJobFiles(toupload, logger)
+        self.uploadJobFiles(toupload)
 
     def getInputUploads(self, job):
         """
@@ -320,7 +319,7 @@ class ARCRest:
 
     # TODO: blocksize is only added in python 3.7!!!!!!!
     # TODO: hardcoded number of upload workers
-    def uploadJobFiles(self, jobs, logger, workers=10, blocksize=HTTP_BUFFER_SIZE):
+    def uploadJobFiles(self, jobs, workers=10, blocksize=HTTP_BUFFER_SIZE):
         # create transfer queues
         uploadQueue = queue.Queue()
         resultQueue = queue.Queue()
@@ -360,8 +359,7 @@ class ARCRest:
                     httpClient,
                     jobsdict,
                     uploadQueue,
-                    resultQueue,
-                    logger
+                    resultQueue
                 ))
             concurrent.futures.wait(futures)
 
@@ -378,10 +376,7 @@ class ARCRest:
 
     # TODO: blocksize is only added in python 3.7!!!!!!!
     # TODO: hardcoded workers
-    def fetchJobs(self, downloadDir, jobs, workers=10, blocksize=HTTP_BUFFER_SIZE, logger=None):
-        if logger is None:
-            logger = logging.getLogger(__name__).addHandler(logging.NullHandler())
-
+    def fetchJobs(self, downloadDir, jobs, workers=10, blocksize=HTTP_BUFFER_SIZE):
         transferQueue = TransferQueue(workers)
         resultQueue = queue.Queue()
 
@@ -416,7 +411,7 @@ class ARCRest:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = []
             for httpClient in httpClients:
-                futures.append(pool.submit(downloadTransferWorker, httpClient, transferQueue, resultQueue, downloadDir, jobsdict, self.basePath, logger))
+                futures.append(pool.submit(downloadTransferWorker, httpClient, transferQueue, resultQueue, downloadDir, jobsdict, self.basePath))
             concurrent.futures.wait(futures)
 
         for httpClient in httpClients:
@@ -776,7 +771,7 @@ def isLocalInputFile(name, path):
     return url.path
 
 
-def uploadTransferWorker(httpClient, jobsdict, uploadQueue, resultQueue, logger):
+def uploadTransferWorker(httpClient, jobsdict, uploadQueue, resultQueue):
     while True:
         try:
             upload = uploadQueue.get(block=False)
@@ -817,10 +812,7 @@ def uploadTransferWorker(httpClient, jobsdict, uploadQueue, resultQueue, logger)
 
 
 # TODO: add more logging context (job ID?)
-def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, jobsdict, endpoint, logger=None):
-    if logger is None:
-        logger = logging.getLogger(__name__).addHandler(logging.NullHandler())
-
+def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, jobsdict, endpoint):
     while True:
         try:
             transfer = transferQueue.get()
@@ -844,7 +836,6 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                 try:
                     downloadFile(httpClient, transfer["url"], path)
                 except ARCHTTPError as exc:
-                    logger.error(f"Error downloading file {transfer['url']}: {exc}")
                     error = exc
                     if exc.status == 404:
                         if transfer["type"] == "diagnose":
@@ -858,14 +849,11 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                     continue
                 except Exception as exc:
                     job.cancelEvent.set()
-                    logger.error(str(exc))
                     resultQueue.put({
                         "jobid": transfer["jobid"],
                         "error": exc
                     })
                     continue
-
-                logger.info(f"Successfully downloaded file {transfer['url']} to {path}")
 
             elif transfer["type"] == "listing":
 
@@ -877,7 +865,6 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                 try:
                     listing = downloadListing(httpClient, transfer["url"])
                 except ARCHTTPError as exc:
-                    logger.error(f"Error downloading listing {transfer['url']}: {exc}")
                     resultQueue.put({
                         "jobid": transfer["jobid"],
                         "error": exc
@@ -885,14 +872,11 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
                     continue
                 except Exception as exc:
                     job.cancelEvent.set()
-                    logger.error(str(exc))
                     resultQueue.put({
                         "jobid": transfer["jobid"],
                         "error": exc
                     })
                     continue
-
-                logger.info(f"Successfully downloaded listing {transfer['url']}")
 
                 # create new transfer jobs
                 transfers = createTransfersFromListing(
@@ -904,7 +888,6 @@ def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, 
             import traceback
             excstr = traceback.format_exc()
             job.cancelEvent.set()
-            logger.error(excstr)
             resultQueue.put({
                 "jobid": transfer["jobid"],
                 "error": excstr
