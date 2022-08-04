@@ -63,7 +63,7 @@ def checkRFCProxy(proxy):
     return False
 
 
-def signRequest(csr, proxypath=PROXYPATH, lifetime=24):
+def signRequest(csr, proxypath=PROXYPATH, lifetime=72):
     """Sign proxy CSR."""
     now = datetime.utcnow()
     if not csr.is_signature_valid:
