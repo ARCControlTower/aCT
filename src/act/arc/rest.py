@@ -155,7 +155,7 @@ class ARCRest:
 
         return respstr
 
-    def PUTDelegation(self, delegationID, csrStr):
+    def PUTDelegation(self, delegationID, csrStr, lifetime=None):
         try:
             with open(self.httpClient.proxypath) as f:
                 proxyStr = f.read()
@@ -163,7 +163,7 @@ class ARCRest:
             proxyCert, _, issuerChains = parsePEM(proxyStr)
             chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode() + issuerChains + '\n'
             csr = x509.load_pem_x509_csr(csrStr.encode(), default_backend())
-            cert = signRequest(csr, self.httpClient.proxypath).decode()
+            cert = signRequest(csr, self.httpClient.proxypath, lifetime=lifetime).decode()
             pem = (cert + chain).encode()
 
             resp = self.httpClient.request(
@@ -191,14 +191,14 @@ class ARCRest:
                 pass
             raise ARCError(f"Error delegating proxy {self.httpClient.proxypath} for delegation {delegationID}: {exc}")
 
-    def createDelegation(self):
+    def createDelegation(self, lifetime=None):
         csr, delegationID = self.POSTNewDelegation()
-        self.PUTDelegation(delegationID, csr)
+        self.PUTDelegation(delegationID, csr, lifetime=lifetime)
         return delegationID
 
-    def renewDelegation(self, delegationID):
+    def renewDelegation(self, delegationID, lifetime=None):
         csr = self.POSTRenewDelegation(delegationID)
-        self.PUTDelegation(delegationID, csr)
+        self.PUTDelegation(delegationID, csr, lifetime=lifetime)
 
     def deleteDelegation(self, delegationID):
         resp = self.httpClient.request(
