@@ -210,25 +210,18 @@ class ACTRest:
     # SIGINT is disabled to ensure uninterrupted execution where necessary.
     # Reverse iterations are done to allow deletion of elements from the list
     # without messing up iteration.
-    def submitJobs(self, descs, clusterlist, webdavClient, webdavBase):
-        sigint = Signal(signal.SIGINT, callback=lambda: print("\nCancelling submission ..."))
-        sigint.defer()
+    def _submitJobBatch(self, descs, clusterlist, webdavClient, webdavBase):
+        sigint = None
 
-        # read job descriptions into a list of job dictionaries and JSON for
-        # aCT REST
-        results = []  # resulting list of job dicts
-        jobs = []  # a list of jobs being worked on (failed jobs get removed)
-        jsonData = []
-        for desc in descs:
-            job = {'clusterlist': clusterlist, 'descpath': desc, 'cleanup': False}
-            try:
-                job['descstr'] = readFile(desc)
-            except ACTClientError as e:
-                job['msg'] = str(e)
-            else:
-                results.append(job)
-                jobs.append(job)
-                jsonData.append({'clusterlist': job['clusterlist']})
+        # Create a list of results, a list of jobs to be worked on and a JSON
+        # structure for POST to REST API.
+        try:
+            sigint = Signal(signal.SIGINT, callback=lambda: print("\nCancelling submission ..."))
+            results, jobs, jsonData = _prepareJobs(descs, clusterlist)
+        except KeyboardInterrupt:
+            raise SubmissionInterrupt()
+        else:
+            sigint.defer()
 
         # submit jobs to aCT
         jsonData, status = self.request('POST', '/jobs', token=self.token, jsonData=jsonData)
@@ -236,8 +229,7 @@ class ACTRest:
             raise ACTClientError(f'Error creating jobs: {jsonData["msg"]}')
 
         # Parse job descriptions of jobs without errors. Jobs with submission
-        # or parsing errors are removed from working set.
-        jobdescs = arc.JobDescriptionList()
+        # errors are removed from the working set.
         for i in range(len(jobs) - 1, -1, -1):
             if 'msg' in jsonData[i]:
                 jobs[i]['msg'] = jsonData[i]['msg']
@@ -250,20 +242,13 @@ class ACTRest:
             # unless the submission succeeds
             jobs[i]['cleanup'] = True
 
-            # parse job description
-            if not arc.JobDescription_Parse(jobs[i]['descstr'], jobdescs):
-                jobs[i]['msg'] = f'Parsing fail for job description {jobs[i]["descpath"]}'
-                jobs.pop(i)
-            else:
-                jobs[i]['desc'] = jobdescs[-1]
-
         # upload input files
         try:
             sigint.restore()
             for job in jobs:
                 self.uploadJobData(job, webdavClient, webdavBase)
         except KeyboardInterrupt:
-            return results
+            raise SubmissionInterrupt(results)
         else:
             sigint.defer()
 
@@ -313,9 +298,22 @@ class ACTRest:
                     job['cleanup'] = False
 
         try:
-            return results
-        finally:
             sigint.restore()
+        except KeyboardInterrupt:
+            raise SubmissionInterrupt(results)
+        else:
+            return results
+
+    def submitJobs(self, descs, clusterlist, webdavClient, webdavBase):
+        results = []
+        for batch in _sublistGenerator(descs, size=100):
+            print("Submitting batch of 100 jobs ...")
+            try:
+                results.extend(self._submitJobBatch(batch, clusterlist, webdavClient, webdavBase))
+            except SubmissionInterrupt as exc:
+                results.extend(exc.results)
+                raise SubmissionInterrupt(results)
+        return results
 
     def uploadJobData(self, job, webdavClient, webdavBase):
         # create a dictionary of files to upload
@@ -459,6 +457,41 @@ def _storeResultChunks(resp, filename, chunksize=HTTP_BUFFER_SIZE):
         raise ACTClientError(f'Error storing job results to the file {filename}: {e}')
 
 
+def _prepareJobs(descs, clusterlist):
+    # read job descriptions into a list of job dictionaries and JSON for
+    # aCT REST
+    results = []  # resulting list of job dicts
+    jobs = []  # a list of jobs being worked on (failed jobs get removed)
+    jsonData = []
+    jobdescs = arc.JobDescriptionList()
+    for desc in descs:
+        job = {'clusterlist': clusterlist, 'descpath': desc, 'cleanup': False}
+        try:
+            job['descstr'] = readFile(desc)
+        except ACTClientError as e:
+            job['msg'] = str(e)
+        else:
+            if not arc.JobDescription_Parse(job['descstr'], jobdescs):
+                job['msg'] = f'Parsing fail for job description {job["descpath"]}'
+            else:
+                job['desc'] = jobdescs[-1]
+        results.append(job)
+        if 'msg' not in job:
+            jobs.append(job)
+            jsonData.append({'clusterlist': clusterlist})
+    return results, jobs, jsonData
+
+
+def _sublistGenerator(lst, size=100):
+    if size < 1:
+        raise ACTClientError("Invalid sublist size")
+    start = 0
+    end = len(lst)
+    while start < end:
+        yield lst[start:start + size]
+        start += size
+
+
 def getACTRestClient(conf, useToken=True):
     try:
         if useToken:
@@ -481,3 +514,9 @@ def getWebDAVClient(conf, webdavBase, useProxy=True):
     except Exception as exc:
         raise ACTClientError(f'Error creating WebDAV client: {exc}')
     return webdavClient
+
+
+class SubmissionInterrupt(Exception):
+
+    def __init__(self, results=[]):
+        self.results = results

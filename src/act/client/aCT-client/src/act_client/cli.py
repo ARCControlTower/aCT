@@ -4,7 +4,7 @@ import sys
 from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
                                getWebDAVBase, readFile)
 from act_client.config import checkConf, expandPaths, loadConf
-from act_client.operations import getACTRestClient, getWebDAVClient
+from act_client.operations import getACTRestClient, getWebDAVClient, SubmissionInterrupt
 
 
 def addCommonArgs(parser):
@@ -488,7 +488,11 @@ def subcommandSub(args, conf):
             webdavBase = getWebDAVBase(args, conf)
             webdavClient = getWebDAVClient(conf, webdavBase)
         jobs = actrest.submitJobs(args.xRSL, clusterlist, webdavClient, webdavBase)
+    except SubmissionInterrupt as exc:
+        jobs = exc.results
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         raise ACTClientError(f'Error submitting jobs: {exc}')
     finally:
         disableSIGINT()
