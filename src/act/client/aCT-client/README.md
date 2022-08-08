@@ -85,7 +85,7 @@ clusters:
 First, obtain proxy certificate with VOMS credentials needed to access the
 clusters:
 ``` sh
-$ arcproxy -S gen.vo.sling.si`
+$ arcproxy -S gen.vo.sling.si
 Enter pass phrase for private key:
 Your identity: /C=SI/O=SiGNET/O=IJS/OU=F9/CN=John Doe
 Contacting VOMS server (named gen.vo.sling.si): voms.sling.si on port: 15001
