@@ -6,17 +6,14 @@ import signal
 import zipfile
 from urllib.parse import urlencode, urlparse
 
-import arc
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
 from act_client.common import ACTClientError, Signal, deleteFile, readFile
-from act_client.rest import HTTPClient
+from act_client.httpclient import HTTP_BUFFER_SIZE, HTTPClient
 from act_client.x509proxy import parsePEM, signRequest
-
-# TODO: hardcoded
-HTTP_BUFFER_SIZE = 2**23
+from act_client.xrsl import XRSLParser
 
 
 class ACTRest:
@@ -209,14 +206,14 @@ class ACTRest:
     # SIGINT is disabled to ensure uninterrupted execution where necessary.
     # Reverse iterations are done to allow deletion of elements from the list
     # without messing up iteration.
-    def _submitJobBatch(self, descs, clusterlist, webdavClient, webdavBase):
-        sigint = None
-
+    def submitJobBatch(self, descs, clusterlist, webdavClient, webdavBase):
         # Create a list of results, a list of jobs to be worked on and a JSON
         # structure for POST to REST API.
+        sigint = parser = None
         try:
             sigint = Signal(signal.SIGINT, callback=lambda: print("\nCancelling submission ..."))
-            results, jobs, jsonData = _prepareJobs(descs, clusterlist)
+            parser = XRSLParser()
+            results, jobs, jsonData = _prepareJobs(descs, clusterlist, parser)
         except KeyboardInterrupt:
             raise SubmissionInterrupt()
         else:
@@ -259,7 +256,7 @@ class ACTRest:
                 jobs.pop(i)
                 continue
 
-            jobs[i]['descstr'] = jobs[i]['desc'].UnParse('emies:adl')[1]
+            jobs[i]['descstr'] = parser.unparse(jobs[i]['desc'])
             if not jobs[i]['descstr']:
                 jobs[i]['msg'] = 'Error generating job description'
                 jobs.pop(i)
@@ -308,7 +305,7 @@ class ACTRest:
         for batch in _sublistGenerator(descs, size=100):
             print("Submitting batch of 100 jobs ...")
             try:
-                results.extend(self._submitJobBatch(batch, clusterlist, webdavClient, webdavBase))
+                results.extend(self.submitJobBatch(batch, clusterlist, webdavClient, webdavBase))
             except SubmissionInterrupt as exc:
                 results.extend(exc.results)
                 raise SubmissionInterrupt(results)
@@ -317,18 +314,16 @@ class ACTRest:
     def uploadJobData(self, job, webdavClient, webdavBase):
         # create a dictionary of files to upload
         files = {}
-        #for infile in job['desc'].DataStaging.InputFiles:
-        for i in range(len(job['desc'].DataStaging.InputFiles)):
-            infile = job['desc'].DataStaging.InputFiles[i]
-            path = infile.Sources[0].fullstr()
+        for infile in job['desc'].get('inputfiles', []):
+            path = infile[1]
             if not path:
-                path = infile.Name
+                path = infile[0]
 
             # parse as URL, remote resource if scheme or hostname
             try:
                 url = urlparse(path)
             except ValueError as e:
-                job['msg'] = f'Error parsing source of file {infile.Name}: {e}'
+                job['msg'] = f'Error parsing source of file {infile[0]}: {e}'
                 return
 
             # skip non local files
@@ -343,10 +338,10 @@ class ACTRest:
 
             # modify job description if using WebDAV
             if webdavBase:
-                url = f'{webdavBase}/{job["id"]}/{infile.Name}'
-                infile.Sources[0] = arc.SourceType(url)
+                url = f'{webdavBase}/{job["id"]}/{infile[0]}'
+                infile[1] = url
 
-            files[infile.Name] = path
+            files[infile[0]] = path
 
         # create job directory in WebDAV storage
         if webdavBase:
@@ -456,28 +451,25 @@ def _storeResultChunks(resp, filename, chunksize=HTTP_BUFFER_SIZE):
         raise ACTClientError(f'Error storing job results to the file {filename}: {e}')
 
 
-def _prepareJobs(descs, clusterlist):
+def _prepareJobs(descs, clusterlist, parser):
     # read job descriptions into a list of job dictionaries and JSON for
     # aCT REST
     results = []  # resulting list of job dicts
     jobs = []  # a list of jobs being worked on (failed jobs get removed)
     jsonData = []
-    jobdescs = arc.JobDescriptionList()
     for desc in descs:
-        job = {'clusterlist': clusterlist, 'descpath': desc, 'cleanup': False}
         try:
-            job['descstr'] = readFile(desc)
-        except ACTClientError as e:
-            job['msg'] = str(e)
+            xrslstr = readFile(desc)
+            descdicts = parser.parse(xrslstr)
+        except Exception as exc:
+            results.append({'msg': str(exc), 'descpath': desc, 'cleanup': False})
         else:
-            if not arc.JobDescription_Parse(job['descstr'], jobdescs):
-                job['msg'] = f'Parsing fail for job description {job["descpath"]}'
-            else:
-                job['desc'] = jobdescs[-1]
-        results.append(job)
-        if 'msg' not in job:
-            jobs.append(job)
-            jsonData.append({'clusterlist': clusterlist})
+            for descdict in descdicts:
+                job = {'clusterlist': clusterlist, 'descpath': desc, 'cleanup': False}
+                job['desc'] = descdict
+                results.append(job)
+                jobs.append(job)
+                jsonData.append({'clusterlist': clusterlist})
     return results, jobs, jsonData
 
 
