@@ -5,7 +5,8 @@ here use that branch.
 # Install
 
 ## System dependencies
-Nordugrid ARC Client has to be installed.
+Nordugrid ARC Client has to be installed to use `arcproxy` for proxy
+certificates.
 See [instructions](http://www.nordugrid.org/arc/arc6/users/client_install.html).
 
 ## Notes on install locations
@@ -21,11 +22,7 @@ of the system or other virtual environments.
 
 To create a virtual environment, the user needs to choose the location of the
 environment and then run:  
-`$ python3 -m venv --system-site-packages /path/to/act-venv`
-
-`--system-site-packages` flag is necessary to copy ARC client's python bindings
-that are not available in PyPI package repository. `act-venv` is the name of this
-virtual environment.
+`$ python3 -m venv /path/to/act-venv`
 
 Once virtual environment is created, it has to be activated to be used.  
 `$ source /path/to/act-venv/bin/activate`  
@@ -38,6 +35,10 @@ a package repository like PyPI. To run aCT client commands the virtual envionmne
 needs to be activated. Your shell might indicate that the environment is active
 by prepending prefix to its prompt:  
 `(act-venv) $ `  
+
+## Upgrading to newest version
+`(act-venv) $ pip uninstall aCT-client`  
+`(act-venv) $ pip install git+https://github.com/ARCControlTower/aCT.git@test#subdirectory=src/act/client/aCT-client`  
 
 # Configuration
 Default location for aCT configuration file is `$HOME/.config/act-client/config.yaml`.
