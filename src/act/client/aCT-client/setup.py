@@ -16,5 +16,6 @@ setup(
     install_requires=[
         'cryptography',
         'pyyaml',
+        'lark',
     ]
 )
