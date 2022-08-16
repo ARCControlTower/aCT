@@ -411,11 +411,7 @@ class aCTPanda2Xrsl:
                 #    continue
                 # Hard-coded pilot rucio account - should change based on proxy
                 # Rucio does not expose mtime, set cache=invariant so not to download too much
-                #if self.sitename in ["SiGNET"]:
-                if self.sitename in ['ANALY_ARNES_DIRECT', 'ANALY_BOINC', 'ANALY_SiGNET_DIRECT', 'ARC-TEST', 'ARNES', 'DCSC', 'HPC2N', 'LUNARC', 'NSC', 'RIVR.UM', 'SiGNET', 'SiGNET-NSC_MCORE', 'UIO', 'UIO_CLOUD', 'UIO_CLOUD_LOPRI', 'UNIBE-LHEP', 'UNIBE-LHEP-UBELIX', 'UNIBE-LHEP-UBELIX_MCORE_LOPRI', 'UNIGE-BAOBAB']:
-                    lfn = '/'.join(["rucio://rucio-lb-prod.cern.ch;rucioaccount=pilot;transferprotocol=https;httpgetpartial=no;cache=invariant/replicas", scope, filename])
-                else:
-                    lfn = '/'.join(["rucio://rucio-lb-prod.cern.ch;rucioaccount=pilot;cache=invariant/replicas", scope, filename])
+                lfn = '/'.join(["rucio://rucio-lb-prod.cern.ch;rucioaccount=pilot;transferprotocol=https;httpgetpartial=no;cache=invariant/replicas", scope, filename])
                 inf[filename] = lfn
                 dn = self.jobdesc.get('prodUserID', [])
                 eventType = 'get_sm'
