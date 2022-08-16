@@ -43,7 +43,7 @@ class aCTDBMySQL(aCTDBMS):
         # make sure cursor reads newest db state
         try:
             self.conn.commit()
-        except mysql.errors.InternalError as e:
+        except (mysql.errors.InternalError, mysql.errors.OperationalError) as e:
             # Unread result, force reconnection
             self.log.warning(str(e))
             self.conn.close()
