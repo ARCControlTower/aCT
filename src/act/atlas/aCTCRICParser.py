@@ -1,6 +1,7 @@
 import logging
 import time
-import os, re, sys
+import os
+import sys
 import json
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 
@@ -110,43 +111,12 @@ class aCTCRICParser:
                 if len(siteinfo['copytools']) == 1 or 'mv' in siteinfo['acopytools'].get('pr', []):
                     truepilot = False
             siteinfo['truepilot'] = truepilot
-            # set OS bucket IDs
-            try:
-                objstore = [self.bucketmap[e]['bucket_id'] for e in siteinfo['astorages']['es_events'] if e in self.bucketmap and self.bucketmap[e]['type'] == 'OS_ES'][0]
-                siteinfo['ddmoses'] = objstore
-            except:
-                if siteinfo['enabled'] and siteinfo['jobseed'] in ('es', 'all'):
-                    self.log.debug('No ES object store for %s but jobseed is %s' % (sitename, siteinfo['jobseed']))
 
         if len(sites) < 100:
             self.log.info("Parsed sites from CRIC: %s" % str(list(sites.keys())))
         else:
             self.log.info("Parsed %d sites from CRIC" % len(sites))
         return sites
-
-    def _parseDDMEndpoints(self, filename):
-        self.osmap = {}
-        self.bucketmap = {}
-        with open(filename) as f:
-            self.ddmjson = json.load(f)
-        # make map of bucket_id: endpoint
-        for ep, info in self.ddmjson.items():
-            if info['state'] != 'ACTIVE':
-                continue
-            try:
-                bucket_id = info['id']
-            except:
-                self.log.info('No bucket_id info for %s', info['name'])
-                continue
-            try:
-                protocol = [p for p in info['aprotocols']['r'] if p[0].startswith('s3://')][0]
-                endpoint = '%s%s' % (protocol[0], protocol[2])
-            except:
-                self.log.info('No s3 endpoint for %s' % ep)
-                continue
-            endpoint = re.sub('s3:/', 's3://', re.sub('//', '/', endpoint))
-            self.osmap[bucket_id] = endpoint
-            self.bucketmap[ep] = {'bucket_id': bucket_id, 'type': info['type']}
 
     def _mergeSiteDicts(self, dict1, dict2):
         for d in dict2.keys():
@@ -183,7 +153,6 @@ class aCTCRICParser:
             pilotmgr = self.conf.cric.pilotmanager
             pilotver = self.conf.cric.pilotversion
             start_parsing = time.time()
-            self._parseDDMEndpoints(self.conf.cric.osfilename)
             self.sites = self._parseCRICJson(cricfile, pilotmgr, pilotver)
             self._mergeSiteDicts(self.sites, self._parseConfigSites())
             self.tparse = time.time()
@@ -202,14 +171,8 @@ class aCTCRICParser:
             return dict((k,v) for (k,v) in self.sites.items() if v.get('flavour') in flavour)
         return self.sites
 
-    def getOSMap(self):
-        ''' Return dictionary of OS ID to OS endpoint'''
-
-        return self.osmap
-
 if __name__ == '__main__':
 
-    from pprint import pprint
     log = logging.getLogger()
     log.setLevel("DEBUG")
     out = logging.StreamHandler(sys.stdout)
@@ -217,8 +180,4 @@ if __name__ == '__main__':
     cricparser = aCTCRICParser(log)
     sites = cricparser.getSites()
     sites = {s:i for s,i in sites.items() if i['enabled']}
-    for s,i in sites.items():
-        log.info(f'{s}, {i.get("ddmoses")}')
     log.info(f'{len(sites)} sites')
-    oses = cricparser.getOSMap()
-    pprint(oses)

@@ -77,7 +77,7 @@ class aCTAutopilotSent(aCTATLASProcess):
         Heartbeat status updates.
         """
         nthreads=self.conf.panda.threads
-        columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount', 'eventranges']
+        columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
         jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
         if not jobs:
             return
@@ -91,9 +91,6 @@ class aCTAutopilotSent(aCTATLASProcess):
 
         tlist=[]
         for j in jobs:
-            # Don't send transferring heartbeat for ES jobs, they must be in running while events are updated
-            if pstatus == 'transferring' and j['eventranges']:
-                pstatus = 'running'
             jd = {}
             if pstatus != 'starting':
                 jd['startTime'] = j['startTime']

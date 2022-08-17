@@ -49,7 +49,6 @@ class aCTATLASProcess:
         self.flavour = ceflavour
         self.cricparser = aCTCRICParser(self.log)
         self.sites = {}
-        self.osmap = {}
         self.sitesselect = ''
 
         # start time for periodic restart
@@ -58,7 +57,6 @@ class aCTATLASProcess:
 
     def setSites(self):
         self.sites = self.cricparser.getSites(flavour=self.flavour)
-        self.osmap = self.cricparser.getOSMap()
         # For DB queries
         self.sitesselect = "('%s')" % "','".join(self.sites.keys())
 

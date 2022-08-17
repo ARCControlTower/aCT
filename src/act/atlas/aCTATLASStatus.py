@@ -139,9 +139,9 @@ class aCTATLASStatus(aCTATLASProcess):
         # todo: pandajobs.starttime will not be updated if a job is resubmitted
         # internally by the ARC part.
         if state == "running":
-           select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate in ('running') and pandajobs.actpandastatus in ('starting', 'sent')"
+            select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate in ('running') and pandajobs.actpandastatus in ('starting', 'sent')"
         if state == "finishing":
-           select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate in ('finishing') and pandajobs.actpandastatus in ('starting', 'sent', 'running')"
+            select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate in ('finishing') and pandajobs.actpandastatus in ('starting', 'sent', 'running')"
         select += " and pandajobs.sitename in %s limit 100000" % self.sitesselect
 
         columns = ["arcjobs.id", "arcjobs.UsedTotalWalltime", "arcjobs.ExecutionNode",

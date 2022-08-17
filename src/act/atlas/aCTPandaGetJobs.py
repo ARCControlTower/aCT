@@ -12,19 +12,18 @@ class PandaGetThr(Thread):
     """
     Helper function for getting panda jobs
     """
-    def __init__ (self, func, siteName, prodSourceLabel=None, getEventRanges=True, push=True):
+    def __init__ (self, func, siteName, prodSourceLabel=None, push=True):
         Thread.__init__(self)
         self.func = func
         self.siteName = siteName
         self.prodSourceLabel = prodSourceLabel
-        self.getEventRanges = getEventRanges
         self.push = push
-        self.result = (None, None, None, None)
+        self.result = (None, None, None)
     def run(self):
         if not self.push:
-            self.result = (0, '', None, self.prodSourceLabel)
+            self.result = (0, '', self.prodSourceLabel)
         else:
-            self.result = self.func(self.siteName, self.prodSourceLabel, self.getEventRanges)
+            self.result = self.func(self.siteName, self.prodSourceLabel)
 
 
 class aCTPandaGetJobs(aCTATLASProcess):
@@ -171,35 +170,32 @@ class aCTPandaGetJobs(aCTATLASProcess):
             # if no jobs available
             stopflag=False
 
-            #getEventRanges = not attrs['truepilot']
-            getEventRanges = site in ['LRZ-LMU_MUC_MCORE1', 'BOINC-ES', 'IN2P3-CC_HPC_IDRIS_MCORE', 'praguelcg2_IT4I_MCORE']
             apfmonjobs = []
 
-            for nc in range(0, max(num//nthreads, 1)):
+            for _ in range(0, max(num//nthreads, 1)):
                 if stopflag:
                     continue
 
                 tlist = []
 
-                for i in range(0, nthreads):
+                for _ in range(0, nthreads):
                     r = random.Random()
                     if site in []:
-                        t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='ptest', getEventRanges=getEventRanges)
+                        t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='ptest')
                     elif r.randint(0,100) <= 2:
                         if (not self.getjob) and site in self.activated and self.activated[site]['rc_test'] == 0:
                             self.log.debug('%s: No rc_test activated jobs' % site)
-                            #t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='ptest', getEventRanges=getEventRanges)
                             continue
                         else:
-                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='rc_test', getEventRanges=getEventRanges, push=attrs['push'])
+                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='rc_test', push=attrs['push'])
                     else:
                         if (not self.getjob) and site in self.activated and self.activated[site]['rest'] == 0:
                             self.log.debug('%s: No activated jobs' % site)
                             continue
                         elif attrs['type'] == "analysis":
-                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='user', getEventRanges=getEventRanges, push=attrs['push'])
+                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='user', push=attrs['push'])
                         else:
-                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel=prodsourcelabel, getEventRanges=getEventRanges, push=attrs['push'])
+                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel=prodsourcelabel, push=attrs['push'])
                     tlist.append(t)
                     t.start()
                     nall += 1
@@ -211,7 +207,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
                 activatedjobs = False
                 for t in tlist:
                     t.join()
-                    (pandaid, pandajob, eventranges, prodsrclabel) = t.result
+                    (pandaid, pandajob, prodsrclabel) = t.result
                     if pandaid == -1: # No jobs available
                         continue
                     activatedjobs = True
@@ -220,20 +216,11 @@ class aCTPandaGetJobs(aCTATLASProcess):
                         continue
 
                     n = {}
-                    # Check eventranges is defined for ES jobs
-                    if re.search('eventService=True', pandajob) and getEventRanges and (eventranges is None or eventranges == '[]'):
-                        self.log.warning('%s: No event ranges given by panda' % pandaid)
-                        n['pandastatus'] = 'closed'
-                        n['actpandastatus'] = 'finished'
-                        # Assumes only ARC sites (not condor) pre-fetch events
-                        n['arcjobid'] = -1 # dummy id so job is not submitted
-                    else:
-                        n['pandastatus'] = 'sent'
-                        n['actpandastatus'] = 'sent'
+                    n['pandastatus'] = 'sent'
+                    n['actpandastatus'] = 'sent'
                     n['siteName'] = site
                     n['proxyid'] = self.proxymap.get(prodsrclabel, self.proxymap.get('managed'))
                     n['prodSourceLabel'] = prodsrclabel
-                    n['eventranges'] = eventranges
                     if pandaid != 0:
                         try:
                             n['corecount'] = int(re.search(r'coreCount=(\d+)', pandajob).group(1))
