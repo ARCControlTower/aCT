@@ -25,8 +25,7 @@ class aCTPanda2Arc(aCTATLASProcess):
             if job['proxyid'] not in proxies_map:
                 proxies_map[job['proxyid']] = self.dbarc.getProxyPath(job['proxyid'])
 
-            parser = aCTPanda2Xrsl(job, self.sites[job['siteName']], self.osmap,
-                                   self.tmpdir, self.conf, self.log)
+            parser = aCTPanda2Xrsl(job, self.sites[job['siteName']], self.tmpdir, self.conf, self.log)
 
             self.log.info("site %s maxwalltime %s", job['siteName'],self.sites[job['siteName']]['maxwalltime'] )
 
@@ -69,8 +68,6 @@ class aCTPanda2Arc(aCTATLASProcess):
                     pass
                 if not self.sites[job['siteName']]['truepilot']:
                     downloadfiles += ';heartbeat.json'
-                if job['eventranges']:
-                    downloadfiles += ';metadata-es.xml'
 
                 aid = self.dbarc.insertArcJobDescription(xrsl, maxattempts=maxattempts, clusterlist=cls,
                                                          proxyid=job['proxyid'], appjobid=str(job['pandaid']),

@@ -3,12 +3,10 @@ from act.common.aCTProxy import aCTProxy
 from act.common import aCTUtils
 from act.atlas.aCTPandaJob import aCTPandaJob
 import datetime
-import signal
 import os
 import shutil
 import time
 import arc
-from xml.dom import minidom
 import json
 import re
 
@@ -371,69 +369,6 @@ class aCTValidator(aCTATLASProcess):
             shutil.rmtree(pandainputdir, ignore_errors=True)
 
 
-    def validateEvents(self, arcjobid):
-        '''
-        Take successful event service jobs and modify the eventranges to
-        show what was actually processed.
-        '''
-
-        select = "arcjobid='"+str(arcjobid)+"'"
-        esjobs = self.dbpanda.getJobs(select, ['eventranges', 'pandaid'])
-        if len(esjobs) != 1:
-            # unexpected
-            self.log.error("Could not find eventranges for arcjobid %s" % str(arcjobid))
-            return
-
-        eventranges = esjobs[0]['eventranges']
-        if not eventranges:
-            # Not ES job
-            return
-
-        pandaid = esjobs[0]['pandaid']
-        eventranges = json.loads(eventranges)
-
-        # Get events processed from metadata-es.xml
-        try:
-            arcjob = self.dbarc.getArcJobInfo(arcjobid, ['JobID'])
-            jobid = arcjob['JobID']
-            sessionid = jobid[jobid.rfind('/')+1:]
-            metadata = os.path.join(self.tmpdir, sessionid, 'metadata-es.xml')
-            with open(metadata) as f:
-                processedevents = f.read()
-        except Exception as e:
-            self.log.error("%s: Failed to extract events processed from metadata-es.xml: %s" % (pandaid, str(e)))
-            # Safer to mark all events as failed
-            desc = {"eventranges": "[]"}
-            self.dbpanda.updateJobLazy(pandaid, desc)
-            return
-
-        eventsdone = {}
-        eventmeta = minidom.parseString(processedevents.read())
-        events = eventmeta.getElementsByTagName("POOLFILECATALOG")[0].getElementsByTagName("File")
-        for event in events:
-            try:
-                eventsdone[event.getAttribute('EventRangeID')] = event.getAttribute('Status')
-            except:
-                eventsdone[event.getAttribute('EventRangeID')] = 'finished'
-
-        # Check that events done corresponds to events asked
-        for event in list(eventsdone.keys()):
-            if event not in [e['eventRangeID'] for e in eventranges]:
-                self.log.warning("%s: Event ID %s was processed but was not in eventranges!" % (pandaid, event))
-                del eventsdone[event]
-
-        # Update DB with done events
-        self.log.info("%s: %d events successful, %d failed out of %d" % (pandaid, len([k for k,v in list(eventsdone.items()) if v == 'finished']), len([k for k,v in list(eventsdone.items()) if v == 'failed']), len(eventranges)))
-        finaleventranges = []
-        for e in eventranges:
-            if e['eventRangeID'] in eventsdone:
-                e['status'] = eventsdone[e['eventRangeID']]
-                finaleventranges.append(e)
-
-        desc = {"eventranges": json.dumps(finaleventranges)}
-        self.dbpanda.updateJobLazy(pandaid, desc)
-
-
     def validateFinishedJobs(self):
         '''
         Check for jobs with actpandastatus tovalidate and pandastatus running
@@ -496,9 +431,6 @@ class aCTValidator(aCTATLASProcess):
         checkedsurls = self.checkOutputFiles(surls)
         for id, result in checkedsurls.items():
             if result == self.ok:
-                # For ES jobs, modify eventranges to what was produced
-                self.validateEvents(id)
-
                 select = "arcjobid='"+str(id)+"'"
                 desc = {"pandastatus": "finished", "actpandastatus": "finished"}
                 self.dbpanda.updateJobsLazy(select, desc)

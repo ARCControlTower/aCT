@@ -30,7 +30,6 @@ class aCTMain:
         tmpdir = self.conf.tmp.dir
         self.makeDirs(tmpdir)
         self.makeDirs(os.path.join(tmpdir, 'inputfiles'))
-        self.makeDirs(os.path.join(tmpdir, 'eventranges'))
         self.makeDirs(os.path.join(tmpdir, 'failedlogs'))
         self.makeDirs(self.conf.voms.proxystoredir, 0o700)
         self.makeDirs(self.conf.logger.logdir)

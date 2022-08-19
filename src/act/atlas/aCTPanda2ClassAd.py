@@ -1,8 +1,7 @@
-import cgi
 import json
 import os
 import time
-
+from urllib.parse import parse_qs
 class aCTPanda2ClassAd:
 
     def __init__(self, pandajob, pandajobid, sitename, siteinfo, proxypath, tmpdir, atlasconf, metadata, log):
@@ -12,7 +11,7 @@ class aCTPanda2ClassAd:
         self.log = log
         self.pandajob = pandajob
         self.pandajobid = pandajobid
-        self.jobdesc = cgi.parse_qs(pandajob)
+        self.jobdesc = parse_qs(pandajob)
         self.pandaid = self.jobdesc['PandaID'][0]
         self.prodsourcelabel = self.jobdesc.get('prodSourceLabel', ['None'])[0]
         self.resourcetype = self.jobdesc.get('resourceType', ['None'])[0]
