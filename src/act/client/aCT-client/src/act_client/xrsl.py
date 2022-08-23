@@ -23,11 +23,12 @@ from lark import Lark, Transformer
 xRSLGrammar = r"""
     xrsl:     jobdesc | "+" "(" jobdesc+ ")"
     jobdesc:  "&" attrval+
-    attrval:  "(" (quoted | unquoted) "=" values ")"
+    attrval:  "(" (quoted | attrname) "=" values ")"
     values:   (quoted | unquoted | valist)+
     valist:   "(" quoted+ ")"
-    quoted:   ESCAPED_STRING
-    unquoted: /([A-Z]|[a-z]|[0-9]|\/|\\|-|_)+/
+    quoted:   ESCAPED_STRING | "'" unquoted? "'"
+    unquoted: /([A-Z]|[a-z]|[0-9]|\/|\\|-|_|\.|:|;|=)+/
+    attrname: /([A-Z]|[a-z]|[0-9]|-|_)+/
 
     COMMENT:  /\(\*(.|\n)*?\*\)/
 
@@ -43,7 +44,13 @@ class DescTransformer(Transformer):
     """Converts parsed tree into a list of description dicts."""
 
     def quoted(self, children):
-        return children[0].value[1:-1]
+        if not children:
+            return ""
+        else:
+            return children[0]
+
+    def ESCAPED_STRING(self, children):
+        return children[1:-1]
 
     def unquoted(self, children):
         return children[0].value
@@ -53,6 +60,9 @@ class DescTransformer(Transformer):
 
     def values(self, children):
         return children
+
+    def attrname(self, children):
+        return children[0].value
 
     def attrval(self, children):
         return (children[0].lower(), children[1])
