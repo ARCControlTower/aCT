@@ -36,6 +36,10 @@ needs to be activated. Your shell might indicate that the environment is active
 by prepending prefix to its prompt:  
 `(act-venv) $ `  
 
+## Upgrading to newest version
+`(act-venv) $ pip uninstall aCT-client`  
+`(act-venv) $ pip install git+https://github.com/ARCControlTower/aCT.git@test#subdirectory=src/act/client/aCT-client`  
+
 # Configuration
 Default location for aCT configuration file is `$HOME/.config/act-client/config.yaml`.
 Configuration file can also be passed to commands, e. g.:  
