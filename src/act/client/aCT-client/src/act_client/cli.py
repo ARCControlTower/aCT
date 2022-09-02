@@ -36,11 +36,13 @@ def addCommonJobFilterArgs(parser):
         help='all jobs that match other criteria'
     )
     parser.add_argument(
+        '-i',
         '--id',
         default=[],
         help='a list of IDs of jobs that should be queried'
     )
     parser.add_argument(
+        '-n',
         '--name',
         default='',
         help='substring that jobs should have in name'
@@ -49,6 +51,7 @@ def addCommonJobFilterArgs(parser):
 
 def addStateArg(parser):
     parser.add_argument(
+        '-s',
         '--state',
         default='',
         help='perform command only on jobs in given state'
