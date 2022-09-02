@@ -27,7 +27,7 @@ xRSLGrammar = r"""
     values:   (quoted | unquoted | valist)+
     valist:   "(" quoted+ ")"
     quoted:   ESCAPED_STRING | "'" unquoted? "'"
-    unquoted: /([A-Z]|[a-z]|[0-9]|\/|\\|-|_|\.|:|;|=)+/
+    unquoted: /([A-Z]|[a-z]|[0-9]|\/|\\|-|_|\.|:|;|=|\ )+/
     attrname: /([A-Z]|[a-z]|[0-9]|-|_)+/
 
     COMMENT:  /\(\*(.|\n)*?\*\)/
