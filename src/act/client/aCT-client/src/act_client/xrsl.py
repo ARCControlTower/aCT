@@ -27,7 +27,7 @@ xRSLGrammar = r"""
     values:   (quoted | unquoted | valist)+
     valist:   "(" quoted+ ")"
     quoted:   ESCAPED_STRING | "'" unquoted? "'"
-    unquoted: /([A-Z]|[a-z]|[0-9]|\/|\\|-|_|\.|:|;|=|\ )+/
+    unquoted: /([A-Z]|[a-z]|[0-9]|\/|\\|-|_|\.|:|;|=|\ |")+/
     attrname: /([A-Z]|[a-z]|[0-9]|-|_)+/
 
     COMMENT:  /\(\*(.|\n)*?\*\)/
@@ -107,10 +107,18 @@ class XRSLParser:
             for value in attrval:
                 xrslstr += " "
                 if isinstance(value, list):
-                    valist = [f'"{val}"' for val in value]
+                    valist = []
+                    for val in value:
+                        if '"' in val:
+                            valist.append(f"'{val}'")
+                        else:
+                            valist.append(f'"{val}"')
                     xrslstr += f'({" ".join(valist)})'
                 else:
-                    xrslstr += f'"{value}"'
+                    if '"' in value:
+                        xrslstr += f"'{value}'"
+                    else:
+                        xrslstr += f'"{value}"'
             xrslstr += ")"
 
         return xrslstr
