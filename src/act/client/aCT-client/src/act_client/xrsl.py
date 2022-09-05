@@ -26,13 +26,13 @@ xRSLGrammar = r"""
     attrval:  "(" (quoted | attrname) "=" values ")"
     values:   (quoted | unquoted | valist)+
     valist:   "(" quoted+ ")"
-    quoted:   ESCAPED_STRING | "'" unquoted? "'"
-    unquoted: /([A-Z]|[a-z]|[0-9]|\/|\\|-|_|\.|:|;|=|\ |")+/
+    quoted:   STRING
+    unquoted: /([A-Z]|[a-z]|[0-9]|\/|\\|-|_|\.|:|;|=)+/
     attrname: /([A-Z]|[a-z]|[0-9]|-|_)+/
 
     COMMENT:  /\(\*(.|\n)*?\*\)/
 
-    %import common.ESCAPED_STRING
+    %import python.STRING
     %import common.CNAME
     %import common.WS
     %ignore WS
@@ -49,7 +49,7 @@ class DescTransformer(Transformer):
         else:
             return children[0]
 
-    def ESCAPED_STRING(self, children):
+    def STRING(self, children):
         return children[1:-1]
 
     def unquoted(self, children):
@@ -92,8 +92,13 @@ class XRSLParser:
         xrsltree = self.parser.parse(xrslstr)
         return self.transformer.transform(xrsltree)
 
+    @staticmethod
+    def _unparsePlainValueList(value_list):
+        return " ".join([f"'{v}'" if '"' in v else f'"{v}"' for v in value_list])
+
     # saving space by not adding unnecessary whitespace
-    def _unparseSingleDesc(self, desc):
+    @classmethod
+    def _unparseSingleDesc(cls, desc):
         xrslstr = ""
         if len(desc) <= 0:
             return ""
@@ -101,37 +106,25 @@ class XRSLParser:
             xrslstr += "&"
 
         for attrname, attrval in desc.items():
-            #xrslstr += f"({attrname} ="
             xrslstr += f"({attrname}="
-
-            for value in attrval:
-                xrslstr += " "
-                if isinstance(value, list):
-                    valist = []
-                    for val in value:
-                        if '"' in val:
-                            valist.append(f"'{val}'")
-                        else:
-                            valist.append(f'"{val}"')
-                    xrslstr += f'({" ".join(valist)})'
-                else:
-                    if '"' in value:
-                        xrslstr += f"'{value}'"
-                    else:
-                        xrslstr += f'"{value}"'
+            if attrval and not isinstance(attrval[0], list):
+                xrslstr += cls._unparsePlainValueList(attrval)
+            else:
+                xrslstr += "".join([f"({cls._unparsePlainValueList(value)})" for value in attrval])
             xrslstr += ")"
 
         return xrslstr
 
-    def unparse(self, descs):
+    @classmethod
+    def unparse(cls, descs):
         if isinstance(descs, dict):
-            return self._unparseSingleDesc(descs)
+            return cls._unparseSingleDesc(descs)
         elif len(descs) <= 0:
             return None
         elif len(descs) == 1:
-            return self._unparseSingleDesc(descs[0])
+            return cls._unparseSingleDesc(descs[0])
         else:
             xrslstr = "+"
             for desc in descs:
-                xrslstr += f"({self._unparseSingleDesc(desc)})"
+                xrslstr += f"({cls._unparseSingleDesc(desc)})"
             return xrslstr
