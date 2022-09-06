@@ -100,6 +100,11 @@ def createParser():
     addCommonJobFilterArgs(parserGet)
     addStateArg(parserGet)
     addWebDAVArg(parserGet)
+    parserGet.add_argument(
+        '--use-jobname',
+        action='store_true',
+        help='name of download dir should be the same as job name'
+    )
 
     parserKill = subparsers.add_parser(
         'kill',
@@ -297,7 +302,11 @@ def subcommandGet(args, conf):
         jobs = actrest.getDownloadableJobs(jobids=ids, name=args.name, state=args.state)
         for job in jobs:
             try:
-                dirname = actrest.downloadJobResults(job['c_id'])
+                if args.use_jobname:
+                    dirname = job['c_jobname']
+                else:
+                    dirname = None
+                dirname = actrest.downloadJobResults(job['c_id'], dirname=dirname)
             except Exception as e:
                 print('Error downloading job {job["c_jobname"]}: {e}')
                 continue

@@ -1,6 +1,7 @@
 import http.client
 import json
 import os
+import sys
 import shutil
 import signal
 import zipfile
@@ -95,7 +96,7 @@ class ACTRest:
         return jobs
 
     # Returns path to results directory if results exist.
-    def downloadJobResults(self, jobid):
+    def downloadJobResults(self, jobid, dirname=None):
         filename = ''
         query = urlencode({'id': jobid})
         url = f'/results?{query}'
@@ -125,7 +126,6 @@ class ACTRest:
         if not filename:
             return ''
 
-        dirname = ''
         extractFailed = False
         try:
             # Unzip results. extractFailed is needed to exit with error after zip
@@ -133,9 +133,18 @@ class ACTRest:
             extractFailed = False
             if os.path.isfile(filename):
                 try:
-                    dirname = os.path.splitext(filename)[0]
+                    extractDir = dirname
+                    if not extractDir:
+                        extractDir = os.path.splitext(filename)[0]
+                    if os.path.isdir(extractDir):
+                        dirnum = 1
+                        while os.path.isdir(f'{extractDir}_{dirnum}'):
+                            dirnum += 1
+                            if dirnum > sys.maxsize:
+                                raise ACTClientError('Extraction directory already exists')
+                        extractDir = f'{extractDir}_{dirnum}'
                     with zipfile.ZipFile(filename, 'r') as zip_ref:
-                        zip_ref.extractall(dirname)
+                        zip_ref.extractall(extractDir)
                 except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
                     msg = f'Could not extract results zip: {e}'
                     extractFailed = True
@@ -147,10 +156,10 @@ class ACTRest:
 
             # exit with error on extraction failure
             if extractFailed:
-                shutil.rmtree(dirname, ignore_errors=True)
+                shutil.rmtree(extractDir, ignore_errors=True)
                 raise ACTClientError(msg)
 
-        return dirname
+        return extractDir
 
     def deleteProxy(self):
         resp = self.httpClient.request('DELETE', '/proxies', token=self.token)
