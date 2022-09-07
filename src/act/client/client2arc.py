@@ -148,10 +148,12 @@ class Client2Arc(object):
 
     def finish(self):
         """Log stop message."""
+        self.clidb.close()
+        self.arcdb.close()
         self.log.info(f'Stopped {self.name}')
+        os._exit(0)
 
 
 if __name__ == '__main__':
     proc = Client2Arc()
     proc.run()
-    proc.finish()
