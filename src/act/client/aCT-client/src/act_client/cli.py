@@ -105,6 +105,11 @@ def createParser():
         action='store_true',
         help='name of download dir should be the same as job name'
     )
+    parserGet.add_argument(
+        '--noclean',
+        action='store_true',
+        help='do not clean jobs'
+    )
 
     parserKill = subparsers.add_parser(
         'kill',
@@ -321,6 +326,9 @@ def subcommandGet(args, conf):
     except KeyboardInterrupt:
         print('Stopping job download ...')
     finally:
+        if args.noclean:
+            return
+
         disableSIGINT()
 
         # reconnect in case KeyboardInterrupt left connection in a weird state
