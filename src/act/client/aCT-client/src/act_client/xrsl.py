@@ -80,7 +80,7 @@ class DescTransformer(Transformer):
 class XRSLParser:
 
     def __init__(self):
-        self.parser = Lark(xRSLGrammar, start="xrsl")
+        self.parser = Lark(xRSLGrammar, parser="lalr", start="xrsl")
         self.transformer = DescTransformer()
 
     def parse(self, xrslstr):
