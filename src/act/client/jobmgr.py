@@ -465,7 +465,7 @@ class JobManager(object):
             A list of IDs of jobs that will be resubmitted.
         """
         # create query with filters
-        where = " a.arcstate = 'failed' AND c.proxyid = %s AND "
+        where = " (a.arcstate = 'failed' OR a.arcstate = 'donefailed') AND c.proxyid = %s AND "
         where_params = [proxyid]
         where, where_params = self._addNameFilter(name_filter, where, where_params)
         where, where_params = self._addIDFilter(jobids, where, where_params)
@@ -484,14 +484,11 @@ class JobManager(object):
         # set job state for resubmittion
         where = f' id IN ({self._createMysqlIntList([job["a_id"] for job in jobs])})'
 
-
         patch = {'arcstate': 'toresubmit', 'tarcstate': self.arcdb.getTimeStamp()}
         self.arcdb.updateArcJobs(patch, where)
 
-        return [job['c_id'] for job in jobs] # TODO: performance issue?
+        return [job['c_id'] for job in jobs]
 
-    # TODO: refactor to **kwargs
-    # TODO: should filters be used together or separately?
     def getJobStats(self, proxyid, jobids=[], state_filter='', name_filter='', clicols=[], arccols=[], jobname=''):
         """
         Return info for jobs that match optional filters.
