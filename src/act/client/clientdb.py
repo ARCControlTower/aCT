@@ -48,6 +48,7 @@ class ClientDB(aCTDB):
             self.Commit()
         except:
             self.log.exception('Error dropping clientjobs table')
+            c.close()
             raise
 
         # create table
@@ -68,6 +69,8 @@ class ClientDB(aCTDB):
         except:
             self.log.exception('Error creating clientjobs table')
             raise
+        finally:
+            c.close()
 
         return True
 
@@ -81,6 +84,8 @@ class ClientDB(aCTDB):
             raise
         else:
             self.Commit()
+        finally:
+            c.close()
 
     def insertJob(self, proxyid, clusterlist, lazy=False):
         """
@@ -115,6 +120,8 @@ class ClientDB(aCTDB):
             if not lazy:
                 self.Commit()
             return jobid
+        finally:
+            c.close()
 
     def insertJobAndDescription(self, jobdesc, proxyid, clusterlist, lazy=False):
         """
@@ -145,6 +152,7 @@ class ClientDB(aCTDB):
             jobdescid = c.fetchone()['LAST_INSERT_ID()']
         except:
             self.log.exception('Error inserting job description')
+            c.close()
             raise
 
         # get job name from xRSL
@@ -169,6 +177,8 @@ class ClientDB(aCTDB):
             if not lazy:
                 self.Commit()
             return jobid
+        finally:
+            c.close()
 
     def insertArcJob(self, jobdesc, jobdescid, proxyid='', maxattempts=0, clusterlist='', appjobid='', downloadfiles='', fairshare=''):
         '''
@@ -215,6 +225,7 @@ class ClientDB(aCTDB):
         c.execute("SELECT LAST_INSERT_ID()")
         row = c.fetchone()
         self.Commit()
+        c.close()
         return row
 
     def deleteJobs(self, where, params):
@@ -241,6 +252,8 @@ class ClientDB(aCTDB):
         else:
             self.Commit()
             return c.rowcount
+        finally:
+            c.close()
 
     # Although function is only used inside of aCT, column checking is still
     # done in case it gets into API.
@@ -285,6 +298,8 @@ class ClientDB(aCTDB):
             raise
         else:
             return c.fetchall()
+        finally:
+            c.close()
 
     def getProxies(self):
         """Return a list of all proxies in client engine's table."""
@@ -297,6 +312,8 @@ class ClientDB(aCTDB):
         else:
             rows = c.fetchall()
             return [row['proxyid'] for row in rows]
+        finally:
+            c.close()
 
     def updateJob(self, jobid, patch, lazy=False):
         """
@@ -332,6 +349,8 @@ class ClientDB(aCTDB):
         else:
             if not lazy:
                 self.Commit()
+        finally:
+            c.close()
 
     # TODO: mysql escaping
     def getJoinJobsInfo(self, clicols=[], arccols=[], **kwargs):
@@ -361,7 +380,6 @@ class ClientDB(aCTDB):
         self._checkColumns('clientjobs', clicols)
         self._checkColumns('arcjobs', arccols)
 
-        c = self.db.getCursor()
         query = "SELECT "
         # prepend table name for all columns and add them to query
         for col in clicols:
@@ -394,6 +412,8 @@ class ClientDB(aCTDB):
             raise
         else:
             return c.fetchall()
+        finally:
+            c.close()
 
     # TODO: Most of code is duplicated, refactor!
     # TODO: mysql escaping
@@ -428,7 +448,6 @@ class ClientDB(aCTDB):
         self._checkColumns('clientjobs', clicols)
         self._checkColumns('arcjobs', arccols)
 
-        c = self.db.getCursor()
         query = "SELECT "
         # prepend table name for all columns and add them to query
         for col in clicols:
@@ -461,6 +480,8 @@ class ClientDB(aCTDB):
             raise
         else:
             return c.fetchall()
+        finally:
+            c.close()
 
     # TODO: mysql escaping
     def getColumns(self, tableName):
@@ -487,6 +508,8 @@ class ClientDB(aCTDB):
         else:
             rows = c.fetchall()
             return [row['Field'] for row in rows]
+        finally:
+            c.close()
 
     def _checkColumns(self, tableName, columns):
         """Return True if all columns are in table, false otherwise."""

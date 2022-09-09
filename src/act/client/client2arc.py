@@ -38,7 +38,6 @@ class Client2Arc(object):
 
     def __init__(self):
         """Initialize all attributes."""
-
         # get name, remove .py from the end
         self.name = os.path.basename(sys.argv[0])[:-3]
 
