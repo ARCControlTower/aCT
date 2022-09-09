@@ -46,24 +46,36 @@ class ACTRest:
             raise ACTClientError(f'{errmsg}: {jsonData["msg"]}')
         return jsonData
 
+    def manageJobBatch(self, *args, batchSize=100, jobids=[], **kwargs):
+        if not jobids:
+            return self.manageJobs(*args, jobids=jobids, **kwargs)
+        results = []
+        ix = 0
+        while ix < len(jobids):
+            results.extend(
+                self.manageJobs(*args, jobids=jobids[ix:ix+batchSize], **kwargs)
+            )
+            ix += batchSize
+        return results
+
     def cleanJobs(self, jobids=[], name='', state=''):
-        return self.manageJobs(
-            'DELETE', 'Error cleaning jobs', jobids, name, state
+        return self.manageJobBatch(
+            'DELETE', 'Error cleaning jobs', jobids=jobids, name=name, state=state
         )
 
     def fetchJobs(self, jobids=[], name=''):
-        return self.manageJobs(
-            'PATCH', 'Error fetching jobs', jobids, name, actionParam='fetch'
+        return self.manageJobBatch(
+            'PATCH', 'Error fetching jobs', jobids=jobids, name=name, actionParam='fetch'
         )
 
     def killJobs(self, jobids=[], name='', state=''):
-        return self.manageJobs(
-            'PATCH', 'Error killing jobs', jobids, name, state, actionParam='cancel'
+        return self.manageJobBatch(
+            'PATCH', 'Error killing jobs', jobids=jobids, name=name, state=state, actionParam='cancel'
         )
 
     def resubmitJobs(self, jobids=[], name=''):
-        return self.manageJobs(
-            'PATCH', 'Error resubmitting jobs', jobids, name, actionParam='resubmit'
+        return self.manageJobBatch(
+            'PATCH', 'Error resubmitting jobs', jobids=jobids, name=name, actionParam='resubmit'
         )
 
     def uploadFile(self, jobid, name, path):
@@ -80,8 +92,8 @@ class ACTRest:
             raise ACTClientError(f"Error uploading file {path}: {jsonData['msg']}")
 
     def getJobStats(self, jobids=[], name='', state='', clienttab=[], arctab=[]):
-        return self.manageJobs(
-            'GET', 'Error getting job status', jobids, name, state, clienttab=clienttab, arctab=arctab
+        return self.manageJobBatch(
+            'GET', 'Error getting job status', jobids=jobids, name=name, state=state, clienttab=clienttab, arctab=arctab
         )
 
     def getDownloadableJobs(self, jobids=[], name='', state=''):
