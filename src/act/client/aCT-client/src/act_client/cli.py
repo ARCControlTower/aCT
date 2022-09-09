@@ -511,8 +511,6 @@ def subcommandSub(args, conf):
     except SubmissionInterrupt as exc:
         jobs = exc.results
     except Exception as exc:
-        import traceback
-        traceback.print_exc()
         raise ACTClientError(f'Error submitting jobs: {exc}')
     finally:
         disableSIGINT()
