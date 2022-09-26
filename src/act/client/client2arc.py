@@ -92,7 +92,7 @@ class Client2Arc(object):
         """
         proxies = self.clidb.getProxies()
         for proxyid in proxies:
-            self.insertNewJobs(proxyid, 100)
+            self.insertNewJobs(proxyid, 1000)
 
     def insertNewJobs(self, proxyid, num):
         """
