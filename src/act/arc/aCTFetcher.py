@@ -63,7 +63,7 @@ class aCTFetcher(aCTProcess):
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error killing jobs in ARC: {exc}")
+                self.log.error(f"Error fetching jobs in ARC: {exc}")
             finally:
                 arcrest.close()
 
@@ -75,7 +75,7 @@ class aCTFetcher(aCTProcess):
                         self.log.info(str(error))
                     else:
                         isError = True
-                        self.log.error(f"Error fetching  job {job.appid} {job.arcid}: {error}")
+                        self.log.error(f"Error fetching job {job.appid} {job.arcid}: {error}")
                 if isError:
                     # TODO: HARDCODED
                     if job.tstate + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
