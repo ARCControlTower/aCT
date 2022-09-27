@@ -258,7 +258,7 @@ class aCTStatus(aCTProcess):
 
                 # difference of two datetime objects yields timedelta object
                 # with seconds attribute
-                fromCreated = (datetime.utcnow() - job.tcreated).seconds // 60
+                fromCreated = int((datetime.utcnow() - job.tcreated).total_seconds()) // 60
 
                 if arcjob.UsedTotalWallTime and arcjob.RequestedSlots is not None:
                     wallTime = arcjob.UsedTotalWallTime // arcjob.RequestedSlots
