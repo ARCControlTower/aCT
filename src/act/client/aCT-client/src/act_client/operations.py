@@ -404,7 +404,7 @@ class WebDAVClient:
         if resp.status == 404:  # ignore, because we are just trying to delete
             return
         if resp.status >= 300:
-            raise ACTClientError('Unexpected response for removal of WebDAV directory: {text}')
+            raise ACTClientError(f'Unexpected response for removal of WebDAV directory: {text}')
 
     def mkdir(self, url):
         headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
