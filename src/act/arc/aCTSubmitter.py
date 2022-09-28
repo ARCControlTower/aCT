@@ -509,7 +509,7 @@ class aCTSubmitter(aCTProcess):
                                 # TODO: is just using error.__str__() good enough?
                                 self.log.error(f"Error rerunning job {job.appid} {job.arcid}: {error.status} {error.text}")
                         elif isinstance(error, NoValueInARCResult):
-                            self.log.error(f"{error}")
+                            self.log.error(f"Error rerunning job {job.appid} {job.arcid}: {error}")
                             self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
                             cannotRerun = True
                         else:
