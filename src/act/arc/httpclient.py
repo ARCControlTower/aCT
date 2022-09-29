@@ -91,8 +91,15 @@ class HTTPClient:
         # TODO: should the request be retried for aborted connection by peer?
         except (RemoteDisconnected, BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
             # retry request
-            self.conn.request(method, url, body=body, headers=headers)
-            resp = self.conn.getresponse()
+            try:
+                self.conn.request(method, url, body=body, headers=headers)
+                resp = self.conn.getresponse()
+            except:
+                self.close()
+                raise
+        except:
+            self.close()
+            raise
 
         return resp
 
