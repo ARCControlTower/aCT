@@ -61,6 +61,17 @@
 # - KILLING
 # - KILLED
 # - WIPED
+#
+#
+#
+# Notes:
+#
+# [1] There was a bug in ARC where some rare jobs didn't exist anymore but ARC
+#     would still return info on them because some files were left and job
+#     existence was not checked. Therefore, aCT had to check for every job if
+#     it is still on the list.
+#     TODO: check if bug has already been fixed and if not, put the reference
+#     to the bug here.
 
 
 import json
@@ -69,7 +80,6 @@ import time
 from datetime import datetime, timedelta
 from http.client import HTTPException
 from ssl import SSLError
-from urllib.parse import urlparse
 
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTJob import ACTJob
@@ -110,6 +120,11 @@ class aCTStatus(aCTProcess):
         # store the last checkJobs time to avoid overloading of GIIS
         self.checktime = time.time()
 
+        # this is required by both checkJobs and checkCancellingJobs
+        # and should be kept between the calls
+        self.joblist = []
+
+    # overwrites self.joblist
     def checkJobs(self):
         '''
         Query all running jobs
@@ -117,17 +132,11 @@ class aCTStatus(aCTProcess):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "created",
                    "State", "attemptsleft", "tstate"]
 
-        # minimum time between checks
-        if time.time() < self.checktime + self.conf.jobs.checkmintime:
-            self.log.debug("mininterval not reached")
-            return
-        self.checktime = time.time()
-
         # check jobs which were last checked more than checkinterval ago
         # TODO: HARDCODED
         tstampCond = self.db.timeStampLessThan("tarcstate", self.conf.jobs.checkinterval)
         jobstocheck = self.db.getArcJobsInfo(
-            "arcstate in ('submitted', 'running', 'finishing', 'cancelling', "
+            "arcstate in ('submitted', 'running', 'finishing', "
             f"'holding') and jobid not like '' and cluster='{self.cluster}' "
             f"and {tstampCond} limit 100000",
             COLUMNS
@@ -160,7 +169,7 @@ class aCTStatus(aCTProcess):
             arcrest = None
             try:
                 arcrest = ARCRest(self.cluster, proxypath=proxypath)
-                joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
+                self.joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(tocheck)
             except json.JSONDecodeError as exc:
                 self.log.error(f"Error parsing returned JSON document: {exc.doc}")
@@ -179,10 +188,10 @@ class aCTStatus(aCTProcess):
                 arcjob = job.arcjob
                 jobdict = {}
 
-                # cancel jobs that are stuck in tstate and not in job list anymore
+                # cancel jobs that are stuck in tstate and not in job list anymore [1]
                 # TODO: HARDCODED
                 if arcjob.tstate + timedelta(days=7) < datetime.utcnow():
-                    if arcjob.id not in joblist:
+                    if arcjob.id not in self.joblist:
                         self.log.error(f"Job {job.appid} {job.arcid} not in ARC anymore, cancelling")
                         jobdict.update({"arcstate": "tocancel", "tarcstate": tstamp})
                         self.db.updateArcJobLazy(job.arcid, jobdict)
@@ -425,20 +434,130 @@ class aCTStatus(aCTProcess):
                     # Otherwise mark cancelled
                     self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "tstate": tstamp})
 
-        # TODO: HARDCODED
-        jobs = self.db.getArcJobsInfo(
-            f"arcstate='cancelling' and cluster='{self.cluster}' and "
-            f"{self.db.timeStampLessThan('tstate', 3600)}",
-            ["id", "appjobid"]
-        )
-        for job in jobs:
-            self.log.info(f"Job {job['appjobid']} {job['id']} stuck in cancelling, marking cancelled")
-            self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "tstate": tstamp})
+        ## TODO: HARDCODED
+        #jobs = self.db.getArcJobsInfo(
+        #    f"arcstate='cancelling' and cluster='{self.cluster}' and "
+        #    f"{self.db.timeStampLessThan('tstate', 3600)}",
+        #    ["id", "appjobid"]
+        #)
+        #for job in jobs:
+        #    self.log.info(f"Job {job['appjobid']} {job['id']} stuck in cancelling, marking cancelled")
+        #    self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "tstate": tstamp})
 
         self.db.Commit()
 
+    # expects that checkJobs has fetched the job list into self.joblist,
+    # it should be called after checkJobs
+    def checkCancellingJobs(self):
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate", "created"]
+
+        # check jobs which were last checked more than checkinterval ago
+        # TODO: HARDCODED
+        tstampCond = self.db.timeStampLessThan("tarcstate", self.conf.jobs.checkinterval)
+        jobstocheck = self.db.getArcJobsInfo(
+            f"arcstate = 'cancelling' and jobid not like '' and cluster="
+            f"'{self.cluster}' and {tstampCond} limit 100000",
+            COLUMNS
+        )
+        if not jobstocheck:
+            return
+
+        self.log.info(f"Checking {len(jobstocheck)} jobs in cancelling state")
+
+        # aggregate jobs by proxyid
+        jobsdict = {}
+        for row in jobstocheck:
+            if not row["proxyid"] in jobsdict:
+                jobsdict[row["proxyid"]] = []
+            jobsdict[row["proxyid"]].append(row)
+
+        for proxyid, dbjobs in jobsdict.items():
+            # construct job objects from DB rows
+            totimeout = []
+            for dbjob in dbjobs:
+                job = ACTJob()
+                job.loadARCDBJob(dbjob)
+                totimeout.append(job)
+
+            tstamp = self.db.getTimeStamp()
+
+            # jobs too long in cancelling are considered to be cancelled
+            tocheck = []
+            toGetInfo = []
+            for job in totimeout:
+                if not job.tstate:
+                    job.tstate = job.tcreated
+                if job.tstate + timedelta(seconds=3600) < datetime.utcnow():
+                    self.log.error(f"Job {job.appid} {job.arcid} stuck in cancelling, setting to cancelled")
+                    self.db.updateArcJobLazy(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp})
+                else:
+                    tocheck.append(job)
+                    toGetInfo.append(job.arcjob)
+
+            # get job info from ARC
+            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
+            arcrest = None
+            try:
+                arcrest = ARCRest(self.cluster, proxypath=proxypath)
+                arcrest.getJobsInfo(toGetInfo)
+            except json.JSONDecodeError as exc:
+                self.log.error(f"Error parsing returned JSON document: {exc.doc}")
+                continue
+            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as e:
+                self.log.error(f"Error fetching job info from ARC: {e}")
+                continue
+            finally:
+                if arcrest:
+                    arcrest.close()
+
+            for job in tocheck:
+                arcjob = job.arcjob
+
+                # jobs that are not on the list anymore are considered to
+                # be cancelled [1]
+                if arcjob.id not in self.joblist:
+                    self.log.error(f"Job {job.appid} {job.arcid} not in ARC job list anymore, setting to cancelled")
+                    self.db.updateArcJobLazy(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp})
+                    continue
+
+                # set 404 jobs to cancelled
+                if arcjob.errors:
+                    cancelled = False
+                    for error in arcjob.errors:
+                        if isinstance(error, ARCHTTPError):
+                            if error.status == 404:
+                                self.log.error(f"Job {job.appid} {job.arcid} not found in ARC, setting to cancelled")
+                                self.db.updateArcJobLazy(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp})
+                                cancelled = True
+                                continue
+                        self.log.error(f"Error for job {job.appid} {job.arcid}: {error}")
+                    if cancelled:
+                        continue
+
+                # set to cancelled if in terminal state
+                try:
+                    mappedState = ARC_STATE_MAPPING[arcjob.state]
+                except KeyError:
+                    self.log.debug(f"STATE MAPPING KEY ERROR: state: {arcjob.state}")
+                    continue
+                if mappedState in ("Finished", "Failed", "Killed", "Deleted"):
+                    self.log.error(f"Job {job.appid} {job.arcid} is cancelled by ARC")
+                    self.db.updateArcJobLazy(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp, "State": mappedState, "tstate": tstamp})
+
+            self.db.Commit()
+
+        self.log.info('Done')
+
+
     def process(self):
+        # minimum time between checks
+        if time.time() < self.checktime + self.conf.jobs.checkmintime:
+            self.log.debug("mininterval not reached")
+            return
+        self.checktime = time.time()
+
         self.checkJobs()
+        self.checkCancellingJobs()
         self.checkLostJobs()
         self.checkStuckJobs()
 
