@@ -100,6 +100,11 @@ class Client2Arc(object):
 
         For now, the jobs with no arcjobid and lowest id get inserted.
         """
+        # client2arc races with jobmgr.killJobs for jobs that have no arcjobid
+        res = self.arcdb.db.getMutexLock('nulljobs')
+        if not res:
+            raise Exception("Could not acquire lock to insert jobs")
+
         # Get jobs that haven't been inserted to ARC table yet
         # (they don't have reference to ARC table, arcjobid is null).
         jobs = self.clidb.getJobsInfo(
@@ -144,6 +149,10 @@ class Client2Arc(object):
                     'modified': self.clidb.getTimeStamp()
                 })
                 self.log.info(f'Successfully inserted job {job["id"]} {row["LAST_INSERT_ID()"]} to ARC engine')
+
+        res = self.arcdb.db.releaseMutexLock('nulljobs')
+        if not res:
+            raise Exception("Could not release lock after inserting jobs")
 
     def finish(self):
         """Log stop message."""

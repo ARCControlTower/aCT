@@ -118,6 +118,7 @@ class JobManager(object):
             A list of IDs of deleted jobs.
         """
         # wrong state filter, return immediately
+        # Forgot why is '' used here ...
         if state_filter not in ('', 'done', 'donefailed', 'cancelled', 'failed'):
             return []
 
@@ -404,7 +405,14 @@ class JobManager(object):
         where, where_params = self._addIDFilter(jobids, where, where_params)
         where = where.rstrip('AND ')
 
-        res = self.arcdb.db.getMutexLock('arcjobs')
+        # This lock is for race with client2arc.
+        # Locking could otherwise be handled more systematically, elegantly and
+        # granularly for the entire aCT.
+        res = self.arcdb.db.getMutexLock('nulljobs', timeout=10)
+        if not res:
+            raise Exception("Could not lock null jobs")
+
+        res = self.arcdb.db.getMutexLock('arcjobs', timeout=10)
         if not res:
             raise Exception("Could not lock table for killing jobs")
 
@@ -446,6 +454,10 @@ class JobManager(object):
         res = self.arcdb.db.releaseMutexLock('arcjobs')
         if not res:
             raise Exception("Could not release lock after killing jobs")
+
+        res = self.arcdb.db.releaseMutexLock('nulljobs')
+        if not res:
+            raise Exception("Could not release lock for null jobs")
 
         return jobs
 
