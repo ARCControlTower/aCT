@@ -21,24 +21,20 @@ class aCTSubmitter(aCTProcess):
         Main function to submit jobs.
         """
 
-        ## check for stopsubmission flag
-        #if self.conf.downtime.stopsubmission:
-        #    self.log.info('Submission suspended due to downtime')
-        #    return
-
-        ## check for any site-specific limits or status
-        #clusterstatus = self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["status"]) or 'online'
-        #if clusterstatus == 'offline':
-        #    self.log.info('Site status is offline')
-        #    return
-
-        #clustermaxjobs = int(self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["maxjobs"]) or 999999)
-        #nsubmitted = self.db.getNArcJobs(f"cluster='{self.cluster}'")
-        #if nsubmitted >= clustermaxjobs:
-        #    self.log.info(f'{nsubmitted} submitted jobs is greater than or equal to max jobs {clustermaxjobs}')
-        #    return
         clustermaxjobs = 999999
+        # check for any site-specific limits or status
+        for site, info in self.conf.sites:
+            if info.endpoint == self.cluster:
+                if info.status == 'offline':
+                    self.log.info('Site status is offline')
+                    return
+                if isinstance(info.maxjobs, int):
+                    clustermaxjobs = info.maxjobs
+
         nsubmitted = self.db.getNArcJobs(f"cluster='{self.cluster}'")
+        if nsubmitted >= clustermaxjobs:
+            self.log.info(f'{nsubmitted} submitted jobs is greater than or equal to max jobs {clustermaxjobs}')
+            return
 
         # Apply fair-share
         if self.cluster:
@@ -55,17 +51,7 @@ class aCTSubmitter(aCTProcess):
         # For proxy bug - see below
         shuffle(fairshares)
 
-        ## apply maxjobs limit per submitter (check above should make sure greater than zero)
-        #nsubmitters = int(self.conf.getCond(["sites", "site"], f"endpoint={self.cluster}", ["submitters"]) or 1)
-        #limit = min(clustermaxjobs - nsubmitted, 100) // nsubmitters
-        #if limit == 0:
-        #    self.log.info(f'{clustermaxjobs} maxjobs - {nsubmitted} submitted is smaller than {nsubmitters} submitters')
-        #    return
-        nsubmitters = 1
-        limit = min(clustermaxjobs - nsubmitted, 100) // nsubmitters
-        if limit == 0:
-            self.log.info(f'{clustermaxjobs} maxjobs - {nsubmitted} submitted is smaller than {nsubmitters} submitters')
-            return
+        limit = min(clustermaxjobs - nsubmitted, 100)
 
         # Divide limit among fairshares, unless exiting after first loop due to
         # proxy bug, but make sure at least one job is submitted
@@ -251,6 +237,7 @@ class aCTSubmitter(aCTProcess):
                 self.db.updateArcJobLazy(job.arcid, jobdict)
 
             self.db.Commit()
+            nsubmitted += limit
 
         self.log.info("Done")
 
