@@ -4,7 +4,7 @@ import re
 import time
 from urllib.parse import parse_qs
 import uuid
-
+import random
 
 class aCTPanda2Xrsl:
 
@@ -51,6 +51,11 @@ class aCTPanda2Xrsl:
 
         if not self.truepilot and not self.piloturl:
             self.piloturl = atlasconf.executable.p3tarurl
+            # run 1% with rc
+            rint = random.randrange(100)
+            if rint == 0 :
+                self.piloturl = atlasconf.executable.p3tarurlrcp
+                self.log.info('%s: using pilotcode %s' % (self.pandaid, self.piloturl ))
 
         self.tmpdir = tmpdir
         self.inputfiledir = os.path.join(self.tmpdir, 'inputfiles')
@@ -302,7 +307,7 @@ class aCTPanda2Xrsl:
                 #    continue
                 # Hard-coded pilot rucio account - should change based on proxy
                 # Rucio does not expose mtime, set cache=invariant so not to download too much
-                lfn = '/'.join(["rucio://rucio-lb-prod.cern.ch;rucioaccount=pilot;transferprotocol=https;httpgetpartial=no;cache=invariant/replicas", scope, filename])
+                lfn = '/'.join(["rucio://rucio-lb-prod.cern.ch;rucioaccount=pilot;transferprotocol=https;httpgetpartial=no;cache=invariant;accesslatency=disk/replicas", scope, filename])
                 inf[filename] = lfn
                 dn = self.jobdesc.get('prodUserID', [])
                 eventType = 'get_sm'
