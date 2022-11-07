@@ -54,7 +54,7 @@ class aCTFetcher(aCTProcess):
 
             arcrest = None
             try:
-                arcrest = ARCRest(self.cluster, proxypath=proxypath)
+                arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
 
                 # fetch jobs
                 # TODO: HARDCODED
