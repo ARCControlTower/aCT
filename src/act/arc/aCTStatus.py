@@ -355,12 +355,12 @@ class aCTStatus(aCTProcess):
 
         # resubmit if certain errors
         elif resub:
-            if job.attemptsLeft <= 0:
+            if job.attemptsleft <= 0:
                 self.log.info(f"Job {job.appid} {job.arcid} out of retries")
             else:
                 job.attetmptsLeft -= 1
-                self.log.info(f"Job {job.appid} {job.arcid} will be resubmitted, {job.attemptsLeft} attempts left")
-                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "attemptsleft": job.attemptsLeft})
+                self.log.info(f"Job {job.appid} {job.arcid} will be resubmitted, {job.attemptsleft} attempts left")
+                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "attemptsleft": job.attemptsleft})
 
         return patchDict
 

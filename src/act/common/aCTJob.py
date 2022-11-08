@@ -11,7 +11,7 @@ class ACTJob:
         self.state = None
         self.tstate = None
         self.tcreated = None
-        self.attemptsLeft = None
+        self.attemptsleft = None
         self.clusterList = None
 
     def loadARCDBJob(self, dbdict):
@@ -45,8 +45,8 @@ class ACTJob:
         if "downloadfiles" in dbdict:
             self.arcjob.downloadFiles = dbdict["downloadfiles"].split(";")
 
-        if "attemptsLeft" in dbdict:
-            self.attemptsLeft = dbdict["attemptsLeft"]
+        if "attemptsleft" in dbdict:
+            self.attemptsleft = dbdict["attemptsleft"]
 
         if "clusterlist" in dbdict:
             self.clusterList = dbdict["clusterlist"].split(",")
