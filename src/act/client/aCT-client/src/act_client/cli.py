@@ -26,6 +26,12 @@ def addCommonArgs(parser):
         type=str,
         help='path to configuration file'
     )
+    parser.add_argument(
+        '-v',
+        '--verbose',
+        action='store_true',
+        help='output debug logs'
+    )
 
 
 def addCommonJobFilterArgs(parser):
@@ -223,7 +229,7 @@ def main():
 def subcommandInfo(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(conf)
+    actrest = getACTRestClient(args, conf)
     try:
         jsonData, status = actrest.getInfo()
         if status != 200:
@@ -242,7 +248,7 @@ def subcommandInfo(args, conf):
 def subcommandClean(args, conf):
     checkConf(conf, ['server', 'token', 'proxy'])
 
-    actrest = getACTRestClient(conf)
+    actrest = getACTRestClient(args, conf)
     ids = getIDParam(args)
     try:
         disableSIGINT()
@@ -269,7 +275,7 @@ def webdavCleanup(args, conf, jobids, webdavClient=None, webdavBase=None):
         if webdavClient:
             closeWebDAV = False
         else:
-            webdavClient = getWebDAVClient(conf, webdavBase)
+            webdavClient = getWebDAVClient(args, conf, webdavBase)
             closeWebDAV = True
 
         errors = webdavClient.cleanJobDirs(webdavBase, jobids)
@@ -285,7 +291,7 @@ def webdavCleanup(args, conf, jobids, webdavClient=None, webdavBase=None):
 def subcommandFetch(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(conf)
+    actrest = getACTRestClient(args, conf)
     ids = getIDParam(args)
     try:
         jsonData = actrest.fetchJobs(jobids=ids, name=args.name)
@@ -300,7 +306,7 @@ def subcommandFetch(args, conf):
 def subcommandGet(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(conf)
+    actrest = getACTRestClient(args, conf)
     ids = getIDParam(args)
     toclean = []
     try:
@@ -313,7 +319,7 @@ def subcommandGet(args, conf):
                     dirname = None
                 dirname = actrest.downloadJobResults(job['c_id'], dirname=dirname)
             except Exception as e:
-                print('Error downloading job {job["c_jobname"]}: {e}')
+                print(f'Error downloading job {job["c_jobname"]}: {e}')
                 continue
 
             if not dirname:
@@ -348,7 +354,7 @@ def subcommandGet(args, conf):
 def subcommandKill(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(conf)
+    actrest = getACTRestClient(args, conf)
     ids = getIDParam(args)
     try:
         disableSIGINT()
@@ -367,7 +373,7 @@ def subcommandKill(args, conf):
 def subcommandProxy(args, conf):
     checkConf(conf, ['server', 'token', 'proxy'])
 
-    actrest = getACTRestClient(conf, useToken=False)
+    actrest = getACTRestClient(args, conf, useToken=False)
     proxyStr = readFile(conf['proxy'])
     try:
         disableSIGINT()
@@ -383,7 +389,7 @@ def subcommandProxy(args, conf):
 def subcommandResub(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(conf)
+    actrest = getACTRestClient(args, conf)
     ids = getIDParam(args)
     try:
         jsonData = actrest.resubmitJobs(jobids=ids, name=args.name)
@@ -398,7 +404,7 @@ def subcommandResub(args, conf):
 def subcommandStat(args, conf):
     checkConf(conf, ['server', 'token'])
 
-    actrest = getACTRestClient(conf)
+    actrest = getACTRestClient(args, conf)
     try:
         if args.get_cols:
             getCols(actrest)
@@ -500,14 +506,14 @@ def subcommandSub(args, conf):
     else:
         clusterlist = args.clusterlist.split(',')
 
-    actrest = getACTRestClient(conf)
+    actrest = getACTRestClient(args, conf)
     webdavClient = None
     webdavBase = None
     jobs = []
     try:
         if args.webdav:
             webdavBase = getWebDAVBase(args, conf)
-            webdavClient = getWebDAVClient(conf, webdavBase)
+            webdavClient = getWebDAVClient(args, conf, webdavBase)
         jobs = actrest.submitJobs(args.xRSL, clusterlist, webdavClient, webdavBase)
     except SubmissionInterrupt as exc:
         jobs = exc.results
