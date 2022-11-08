@@ -1,4 +1,5 @@
 import json
+import logging
 import ssl
 from http.client import HTTPConnection, HTTPSConnection, RemoteDisconnected
 from urllib.parse import urlencode, urlparse
@@ -11,8 +12,14 @@ HTTP_BUFFER_SIZE = 2**23
 #       client
 class HTTPClient:
 
-    def __init__(self, url=None, host=None, port=None, proxypath=None, isHTTPS=False):
+    def __init__(self, url=None, host=None, port=None, proxypath=None, isHTTPS=False, logger=None):
         """Process parameters and create HTTP connection."""
+        self.logger = logger
+        if not self.logger:
+            self.logger = logging.getLogger("null")
+            if not self.logger.hasHandlers():
+                self.logger.addHandler(logging.NullHandler())
+
         if url:
             parts = urlparse(url)
 
@@ -86,6 +93,7 @@ class HTTPClient:
             url = endpoint
 
         try:
+            self.logger.debug(f"{method} {url} headers={headers}")
             self.conn.request(method, url, body=body, headers=headers)
             resp = self.conn.getresponse()
         # TODO: should the request be retried for aborted connection by peer?

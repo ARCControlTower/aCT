@@ -1,9 +1,10 @@
 import http.client
 import json
+import logging
 import os
-import sys
 import shutil
 import signal
+import sys
 import zipfile
 from urllib.parse import urlencode, urlparse
 
@@ -19,13 +20,18 @@ from act_client.xrsl import XRSLParser
 
 class ACTRest:
 
-    def __init__(self, url, token=None):
+    def __init__(self, url, token=None, logger=None):
+        self.logger = logger
+        if self.logger is None:
+            self.logger = getNullLogger()
+
         self.token = token
-        self.httpClient = HTTPClient(url)
+        self.httpClient = HTTPClient(url, logger=self.logger)
 
     def request(self, *args, **kwargs):
         resp = self.httpClient.request(*args, **kwargs)
-        return json.loads(resp.read()), resp.status
+        data = resp.read().decode()
+        return json.loads(data), resp.status
 
     def manageJobs(self, method, errmsg, jobids=[], name='', state='', actionParam=None, clienttab=[], arctab=[]):
         params = {}
@@ -42,6 +48,7 @@ class ACTRest:
         if arctab:
             params['arc'] = arctab
         jsonData, status = self.request(method, '/jobs', token=self.token, params=params)
+        self.logger.debug(f"Job manage response - {status} {jsonData}")
         if status != 200:
             raise ACTClientError(f'{errmsg}: {jsonData["msg"]}')
         return jsonData
@@ -78,6 +85,11 @@ class ACTRest:
             'PATCH', 'Error resubmitting jobs', jobids=jobids, name=name, actionParam='resubmit'
         )
 
+    def getJobStats(self, jobids=[], name='', state='', clienttab=[], arctab=[]):
+        return self.manageJobBatch(
+            'GET', 'Error getting job status', jobids=jobids, name=name, state=state, clienttab=clienttab, arctab=arctab
+        )
+
     def uploadFile(self, jobid, name, path):
         try:
             f = open(path, 'rb')
@@ -86,15 +98,11 @@ class ACTRest:
 
         params = {'id': jobid, 'filename': name}
         resp = self.httpClient.request('PUT', '/data', token=self.token, data=f, params=params)
-        text = resp.read()
+        text = resp.read().decode()
+        self.logger.debug(f"Upload of file {name} from path {path} for job {jobid} - {resp.status} {text}")
         if resp.status != 204:
             jsonData = json.loads(text)
             raise ACTClientError(f"Error uploading file {path}: {jsonData['msg']}")
-
-    def getJobStats(self, jobids=[], name='', state='', clienttab=[], arctab=[]):
-        return self.manageJobBatch(
-            'GET', 'Error getting job status', jobids=jobids, name=name, state=state, clienttab=clienttab, arctab=arctab
-        )
 
     def getDownloadableJobs(self, jobids=[], name='', state=''):
         clienttab = ['id', 'jobname']
@@ -115,19 +123,24 @@ class ACTRest:
         try:
             resp = self.httpClient.request('GET', url, token=self.token)
             if resp.status == 204:
-                resp.read()
+                text = resp.read().decode()
+                self.logger.debug(f"No results for job {jobid} - {resp.status} {text}")
             elif resp.status == 200:
                 # 'Content-Disposition': 'attachment; filename=ZrcMD...cmmzn.zip'
                 #filename = resp.getheader('Content-Disposition').split()[1].split('=')[1]
                 filename = resp.getheader('Content-Disposition').split('=')[1]
+                self.logger.debug(f"Downloading result file {filename} for job {jobid} - {resp.status}")
                 _storeResultChunks(resp, filename)
             else:
-                jsonData = json.loads(resp.read().decode())
+                text = resp.read().decode()
+                self.logger.debug(f"Error downloading results for job {jobid} - {resp.status} {text}")
+                jsonData = json.loads(text)
                 raise ACTClientError(f'Response error: {jsonData["msg"]}')
         except ACTClientError:
             raise
-        except Exception as e:
-            raise ACTClientError(f'Error downloading results: {e}')
+        except Exception as exc:
+            self.logger.debug(f"Error downloading results for job {jobid}: {exc}")
+            raise ACTClientError(f"Error downloading results for job {jobid}: {exc}")
         # Cleanup code required here in case keyboard interrupt happens somewhere
         # between the creation of result file and propagation of filename to the
         # function getJob that performs cleanup as well.
@@ -154,12 +167,15 @@ class ACTRest:
                         while os.path.isdir(f'{extractDir}_{dirnum}'):
                             dirnum += 1
                             if dirnum > sys.maxsize:
+                                self.logger.debug("Extraction directory already exists")
                                 raise ACTClientError('Extraction directory already exists')
                         extractDir = f'{extractDir}_{dirnum}'
                     with zipfile.ZipFile(filename, 'r') as zip_ref:
                         zip_ref.extractall(extractDir)
-                except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
-                    msg = f'Could not extract results zip: {e}'
+                    self.logger.debug(f"Extracted result file {filename} to {extractDir}")
+                except (zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+                    msg = f'Could not extract result file {filename} to {extractDir}: {exc}'
+                    self.logger.debug(msg)
                     extractFailed = True
             else:
                 raise ACTClientError(f'Path {filename} is not a file')
@@ -176,8 +192,10 @@ class ACTRest:
 
     def deleteProxy(self):
         resp = self.httpClient.request('DELETE', '/proxies', token=self.token)
+        text = resp.read().decode()
+        self.logger.debug(f"Proxy delete operation - {resp.status} {text}")
         if resp.status != 204:
-            jsonData = json.loads(resp.read().decode())
+            jsonData = json.loads(text)
             raise ACTClientError(f'Error deleting proxy: {jsonData["msg"]}')
 
     def uploadProxy(self, proxyStr, tokenPath):
@@ -185,8 +203,7 @@ class ACTRest:
         cert, _, chain = parsePEM(proxyStr)
         jsonData = {'cert': cert.public_bytes(serialization.Encoding.PEM).decode('utf-8'), 'chain': chain}
         jsonData, status = self.request('POST', '/proxies', jsonData=jsonData)
-        ## submit proxy cert part to get CSR
-        #jsonData, status = self.request('POST', '/proxies', jsonData={'cert': proxyStr})
+        self.logger.debug(f"Proxy POST response - {status} {jsonData}")
         if status != 200:
             raise ACTClientError(jsonData['msg'])  # message is attached by API user
         token = jsonData['token']
@@ -198,7 +215,8 @@ class ACTRest:
             csr = x509.load_pem_x509_csr(jsonData['csr'].encode(), default_backend())
             cert = signRequest(csr).decode()
             chain = proxyCert.public_bytes(serialization.Encoding.PEM).decode() + issuerChains + '\n'
-        except Exception:
+        except Exception as exc:
+            self.logger.debug(f"Error signing CSR: {exc}")
             self.deleteProxy()
             raise
 
@@ -206,10 +224,11 @@ class ACTRest:
         jsonData = {'cert': cert, 'chain': chain}
         try:
             jsonData, status = self.request('PUT', '/proxies', jsonData=jsonData, token=self.token)
-        except Exception:
+        except Exception as exc:
+            self.logger.debug(f"Proxy PUT error: {exc}")
             self.deleteProxy()
             raise
-
+        self.logger.debug(f"Proxy PUT response: {status} {jsonData}")
         if status != 200:
             raise ACTClientError(jsonData["msg"])  # message is attached by API user
 
@@ -221,7 +240,8 @@ class ACTRest:
             with open(tokenPath, 'w') as f:
                 f.write(token)
             os.chmod(tokenPath, 0o600)
-        except Exception:
+        except Exception as exc:
+            self.logger.debug(f"Error saving token to {tokenPath}: {exc}")
             self.deleteProxy()
             raise
 
@@ -243,6 +263,7 @@ class ACTRest:
 
         # submit jobs to aCT
         jsonData, status = self.request('POST', '/jobs', token=self.token, jsonData=jsonData)
+        self.logger.debug(f"Jobs POST response - {status} {jsonData}")
         if status != 200:
             raise ACTClientError(f'Error creating jobs: {jsonData["msg"]}')
 
@@ -295,8 +316,10 @@ class ACTRest:
         if jsonData:
             try:
                 jsonData, status = self.request('PUT', '/jobs', token=self.token, jsonData=jsonData)
-            except ACTClientError as e:
-                error = str(e)
+                self.logger.debug(f"Jobs PUT response - {status} {jsonData}")
+            except ACTClientError as exc:
+                self.logger.debug(f"Jobs PUT error: {exc}")
+                error = str(exc)
             if status != 200:
                 error = jsonData['msg']
             if error:
@@ -368,20 +391,27 @@ class ACTRest:
         # create job directory in WebDAV storage
         if webdavBase:
             try:
-                webdavClient.mkdir(f'{webdavBase}/{job["id"]}')
-            except Exception as e:
-                job['msg'] = str(e)
+                dirURL = f"{webdavBase}/{job['id']}"
+                webdavClient.mkdir(dirURL)
+                self.logger.debug(f"Created WebDAV directory {dirURL}")
+            except Exception as exc:
+                self.logger.debug(f"Error creating WebDAV directory {dirURL}: {exc}")
+                job['msg'] = str(exc)
                 return
 
         # upload input files
         for dst, src in files.items():
             try:
                 if webdavBase:
-                    webdavClient.uploadFile(f'{webdavBase}/{job["id"]}/{dst}', src)
+                    fileURL = f"{webdavBase}/{job['id']}/{dst}"
+                    webdavClient.uploadFile(fileURL, src)
+                    self.logger.debug(f"Uploaded {src} to {fileURL} for job {job['id']}")
                 else:
                     self.uploadFile(job['id'], dst, src)
-            except Exception as e:
-                job['msg'] = f'Error uploading {src} to {dst}: {e}'
+                    self.logger.debug(f"Uploaded {src} to {dst} for job {job['id']}")
+            except Exception as exc:
+                self.logger.debug(f"Error uploading {src} to {dst} for job {job['id']}: {exc}")
+                job['msg'] = f'Error uploading {src} to {dst}: {exc}'
                 return
 
     def getInfo(self):
@@ -393,13 +423,18 @@ class ACTRest:
 
 class WebDAVClient:
 
-    def __init__(self, url, proxypath=None):
-        self.httpClient = HTTPClient(url, proxypath=proxypath)
+    def __init__(self, url, proxypath=None, logger=None):
+        self.logger = logger
+        if self.logger is None:
+            self.logger = getNullLogger()
+
+        self.httpClient = HTTPClient(url, proxypath=proxypath, logger=self.logger)
 
     def rmdir(self, url):
         headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
         resp = self.httpClient.request('DELETE', url, headers=headers)
-        text = resp.read()
+        text = resp.read().decode()
+        self.logger.debug(f"WebDAV DELETE response - {resp.status} {text}")
 
         # TODO: should we rely on 204 and 404 being the only right answers?
         if resp.status == 404:  # ignore, because we are just trying to delete
@@ -410,25 +445,30 @@ class WebDAVClient:
     def mkdir(self, url):
         headers = {'Accept': '*/*', 'Connection': 'Keep-Alive'}
         resp = self.httpClient.request('MKCOL', url, headers=headers)
-        text = resp.read()
+        text = resp.read().decode()
+        self.logger.debug(f"WebDAV MKDIR response - {resp.status} {text}")
 
         if resp.status != 201:
             raise ACTClientError(f'Error creating WebDAV directory {url}: {text}')
 
     def uploadFile(self, url, path):
+        self.logger.debug(f"Uploading {path} to {url}")
         try:
             f = open(path, 'rb')
-        except Exception as e:
-            raise ACTClientError(f'Error opening file {path}: {e}')
+        except Exception as exc:
+            self.logger.debug(f"Error uploading {path} to {url}: {exc}")
+            raise ACTClientError(f'Error opening file {path}: {exc}')
 
         with f:
             resp = self.httpClient.request('PUT', url, headers={'Expect': '100-continue'})
             resp.read()
+            self.logger.debug(f"Upload redirect check status: {resp.status}")
             if resp.status == 307:
-                dstUrl = resp.getheader('Location')
-                parts = urlparse(dstUrl)
+                dstURL = resp.getheader('Location')
+                self.logger.debug(f"Redirecting upload to {dstURL}")
+                parts = urlparse(dstURL)
                 urlPath = f'{parts.path}?{parts.query}'
-                nodeClient = HTTPClient(dstUrl)
+                nodeClient = HTTPClient(dstURL, logger=self.logger)
                 try:
                     # if headers are not explicitly set to empty they will
                     # somehow be taken from previous separate connection
@@ -436,14 +476,17 @@ class WebDAVClient:
                     resp = nodeClient.request('PUT', urlPath, data=f, headers={})
                     text = resp.read()
                     status = resp.status
-                except http.client.HTTPException as e:
-                    raise ACTClientError(f'Error redirecting WebDAV upload for file {path}: {e}')
+                    self.logger.debug(f"Upload of {path} to {urlPath} response - {status} {text}")
+                except http.client.HTTPException as exc:
+                    self.logger.debug(f"Error uploading {path} to {urlPath}: {exc}")
+                    raise ACTClientError(f"Error uploading {path} to {urlPath}: {exc}")
                 finally:
                     nodeClient.close()
             else:
                 resp = self.httpClient.request('PUT', url, data=f)
                 text = resp.read()
                 status = resp.status
+                self.logger.debug(f"Upload of {path} to {url} response - {status} {text}")
 
         if status != 201:
             raise ACTClientError(f'Error uploading file {path}: {text}')
@@ -451,11 +494,11 @@ class WebDAVClient:
     def cleanJobDirs(self, url, jobids):
         errors = []
         for jobid in jobids:
-            dirUrl = f'{url}/{jobid}'
+            dirURL = f'{url}/{jobid}'
             try:
-                self.rmdir(dirUrl)
-            except Exception as e:
-                errors.append(str(e))
+                self.rmdir(dirURL)
+            except Exception as exc:
+                errors.append(str(exc))
         return errors
 
     def close(self):
@@ -469,8 +512,8 @@ def _storeResultChunks(resp, filename, chunksize=HTTP_BUFFER_SIZE):
             while chunk:
                 f.write(chunk)
                 chunk = resp.read(chunksize)
-    except Exception as e:
-        raise ACTClientError(f'Error storing job results to the file {filename}: {e}')
+    except Exception as exc:
+        raise ACTClientError(f'Error storing job results to the file {filename}: {exc}')
 
 
 def _prepareJobs(descs, clusterlist, parser):
@@ -505,28 +548,55 @@ def _sublistGenerator(lst, size=100):
         start += size
 
 
-def getACTRestClient(conf, useToken=True):
+def getACTRestClient(args, conf, useToken=True):
     try:
         if useToken:
             token = readFile(conf['token'])
         else:
             token = None
-        actrest = ACTRest(conf['server'], token=token)
+        logger = getLogger(args)
+        actrest = ACTRest(conf['server'], token=token, logger=logger)
     except Exception as exc:
         raise ACTClientError(f'Error creating aCT REST client: {exc}')
     return actrest
 
 
-def getWebDAVClient(conf, webdavBase, useProxy=True):
+def getWebDAVClient(args, conf, webdavBase, useProxy=True):
     try:
         if useProxy:
             proxypath = conf['proxy']
         else:
             proxypath = None
-        webdavClient = WebDAVClient(webdavBase, proxypath=proxypath)
+        logger = getLogger(args)
+        webdavClient = WebDAVClient(webdavBase, proxypath=proxypath, logger=logger)
     except Exception as exc:
         raise ACTClientError(f'Error creating WebDAV client: {exc}')
     return webdavClient
+
+
+def getLogger(args):
+    if args.verbose:
+        return getStdoutLogger()
+    else:
+        return getNullLogger()
+
+
+def getNullLogger():
+    logger = logging.getLogger('null')
+    if not logger.hasHandlers():
+        logger.addHandler(logging.NullHandler())
+    return logger
+
+
+def getStdoutLogger():
+    logger = logging.getLogger('logger')
+    if not logger.hasHandlers():
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+    return logger
 
 
 class SubmissionInterrupt(Exception):
