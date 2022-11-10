@@ -378,6 +378,8 @@ def confirm_jobs():
             job['msg'] = 'Server error'
             continue
 
+        del job['desc']  # don't want to return description in result
+
     return jsonify(jobs)
 
 
