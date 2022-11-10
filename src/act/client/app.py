@@ -327,7 +327,7 @@ def confirm_jobs():
         # get job's data directory
         try:
             jobDataDir = jmgr.getJobDataDir(job['id'])
-        except ConfigError as exp:
+        except ConfigError as e:
             print(f'{errpref}{e}')
             job['msg'] = 'Server error'
             continue
