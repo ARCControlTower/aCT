@@ -45,14 +45,6 @@ def getIDsFromStr(listStr):
     return ids
 
 
-def readFile(filename):
-    try:
-        with open(filename, 'r') as f:
-            return f.read()
-    except Exception as e:
-        raise ACTClientError(f'Error reading file {filename}: {e}')
-
-
 def deleteFile(filename):
     try:
         if os.path.isfile(filename):

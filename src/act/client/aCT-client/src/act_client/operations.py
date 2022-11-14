@@ -12,7 +12,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 
-from act_client.common import ACTClientError, Signal, deleteFile, readFile
+from act_client.common import ACTClientError, Signal, deleteFile
 from act_client.httpclient import HTTP_BUFFER_SIZE, HTTPClient
 from act_client.x509proxy import parsePEM, signRequest
 from act_client.xrsl import XRSLParser
@@ -31,7 +31,10 @@ class ACTRest:
     def request(self, *args, **kwargs):
         resp = self.httpClient.request(*args, **kwargs)
         data = resp.read().decode()
-        return json.loads(data), resp.status
+        try:
+            return json.loads(data), resp.status
+        except json.JSONDecodeError:
+            raise ACTClientError('Error decoding JSON: aCT REST might not be running')
 
     def manageJobs(self, method, errmsg, jobids=[], name='', state='', actionParam=None, clienttab=[], arctab=[]):
         params = {}
@@ -523,7 +526,8 @@ def _prepareJobs(descs, clusterlist, parser):
     jsonData = []
     for desc in descs:
         try:
-            xrslstr = readFile(desc)
+            with open(desc, 'r') as f:
+                xrslstr = f.read()
             descdicts = parser.parse(xrslstr)
         except Exception as exc:
             results.append({'msg': str(exc), 'descpath': desc, 'cleanup': False})
@@ -550,11 +554,14 @@ def _sublistGenerator(lst, size=100):
 def getACTRestClient(args, conf, useToken=True):
     try:
         if useToken:
-            token = readFile(conf['token'])
+            with open(conf['token'], 'r') as f:
+                token = f.read()
         else:
             token = None
         logger = getLogger(args)
         actrest = ACTRest(conf['server'], token=token, logger=logger)
+    except FileNotFoundError:
+        raise ACTClientError(f'Error reading token file {conf["token"]}. Run act proxy.')
     except Exception as exc:
         raise ACTClientError(f'Error creating aCT REST client: {exc}')
     return actrest
