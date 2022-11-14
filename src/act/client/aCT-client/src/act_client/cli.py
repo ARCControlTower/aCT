@@ -2,9 +2,10 @@ import argparse
 import sys
 
 from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
-                               getWebDAVBase, readFile)
+                               getWebDAVBase)
 from act_client.config import checkConf, expandPaths, loadConf
-from act_client.operations import getACTRestClient, getWebDAVClient, SubmissionInterrupt
+from act_client.operations import (SubmissionInterrupt, getACTRestClient,
+                                   getWebDAVClient)
 
 
 def addCommonArgs(parser):
@@ -221,7 +222,7 @@ def main():
         runSubcommand(args)
     except KeyboardInterrupt:
         sys.exit(1)
-    except ACTClientError as exc:
+    except Exception as exc:
         print(exc)
         sys.exit(1)
 
@@ -373,12 +374,14 @@ def subcommandProxy(args, conf):
     checkConf(conf, ['server', 'token', 'proxy'])
 
     actrest = getACTRestClient(args, conf, useToken=False)
-    proxyStr = readFile(conf['proxy'])
+    try:
+        with open(conf['proxy'], 'r') as f:
+            proxyStr = f.read()
+    except FileNotFoundError:
+        raise ACTClientError(f'Could not find proxy certificate in {conf["proxy"]}')
     try:
         disableSIGINT()
         actrest.uploadProxy(proxyStr, conf['token'])
-    except Exception as exc:
-        raise ACTClientError(f'Error uploading proxy: {exc}')
     finally:
         actrest.close()
 
