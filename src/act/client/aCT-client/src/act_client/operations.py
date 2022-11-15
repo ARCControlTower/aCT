@@ -99,8 +99,7 @@ class ACTRest:
         except Exception as e:
             raise ACTClientError(f'Error opening file {path}: {e}')
 
-        params = {'id': jobid, 'filename': name}
-        resp = self.httpClient.request('PUT', '/data', token=self.token, data=f, params=params)
+        resp = self.httpClient.request('PUT', f'/jobs/{jobid}/data/{name}', token=self.token, data=f)
         text = resp.read().decode()
         self.logger.debug(f"Upload of file {name} from path {path} for job {jobid} - {resp.status} {text}")
         if resp.status != 204:
