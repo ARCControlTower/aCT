@@ -561,45 +561,32 @@ def deleteProxy():
     return '', 204
 
 
-@app.route('/data', methods=['PUT'])
-def uploadFile():
+@app.route('/jobs/<int:jobid>/data/<path:path>', methods=['PUT'])
+def uploadFile(jobid, path):
     try:
         token = getToken()
-        jobids = getIDs()
     except RESTError as e:
-        print(f'error: PUT /data: {e}')
+        print(f'error: PUT /jobs/{jobid}/data/{path}: {e}')
         return {'msg': str(e)}, e.httpCode
     except Exception as e:
-        print(f'error: PUT /data: {e}')
+        print(f'error: PUT /jobs/{jobid}/data/{path}: {e}')
         return {'msg': 'Server error'}, 500
     proxyid = token['proxyid']
 
-    if not jobids:
-        print('error: PUT /data: no job ID given')
-        return {'msg': 'No job ID given'}, 400
-    elif len(jobids) > 1:
-        print('error: PUT /data: more than one job ID given')
-        return {'msg': 'More than one job ID given'}, 400
-
     try:
         jmgr = JobManager()
-        jobid = jmgr.checkJobExists(proxyid, jobids[0])
+        jobid = jmgr.checkJobExists(proxyid, jobid)
         if not jobid:
-            print('error: PUT /data: job ID does not exist')
-            return {'msg': f'Client Job ID {jobids[0]} does not exist'}, 400
+            print(f'error: PUT /jobs/{jobid}/data/{path}: job ID does not exist')
+            return {'msg': f'Client Job ID {jobid} does not exist'}, 400
     except Exception as e:
-        print(f'error: PUT /data: {e}')
+        print(f'error: PUT /jobs/{jobid}/data/{path}: {e}')
         return {'msg': 'Server error'}, 500
 
     try:
-        filename = request.args.get('filename', None)
-        if filename is None:
-            print('error: PUT /data: file name not given')
-            return {'msg': 'File name not given'}, 400
-
         jobDataDir = jmgr.getJobDataDir(jobid)
-        os.makedirs(jobDataDir, exist_ok=True)
-        filepath = os.path.join(jobDataDir, filename)
+        filepath = os.path.join(jobDataDir, path)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'wb') as f:
             while True:
                 chunk = request.stream.read(STREAM_CHUNK_SIZE)
@@ -607,7 +594,7 @@ def uploadFile():
                     break
                 f.write(chunk)
     except Exception as e:
-        print(f'error: PUT /data: {e}')
+        print(f'error: PUT /jobs/{jobid}/data/{path}: {e}')
         return {'msg': 'Server error'}, 500
 
     return '', 204
