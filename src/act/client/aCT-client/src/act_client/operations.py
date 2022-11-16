@@ -2,6 +2,7 @@ import http.client
 import json
 import logging
 import os
+import queue
 import shutil
 import signal
 import sys
@@ -108,88 +109,75 @@ class ACTRest:
 
     def getDownloadableJobs(self, jobids=[], name='', state=''):
         clienttab = ['id', 'jobname']
+        arctab = ['IDFromEndpoint']
         if state:
             if state not in ('done', 'donefailed'):
                 raise ACTClientError('State parameter not "done" or "donefailed"')
-            jobs = self.getJobStats(jobids=jobids, name=name, state=state, clienttab=clienttab)
+            jobs = self.getJobStats(jobids=jobids, name=name, state=state, clienttab=clienttab, arctab=arctab)
         else:
-            jobs = self.getJobStats(jobids=jobids, name=name, state='done', clienttab=clienttab)
-            jobs.extend(self.getJobStats(jobids=jobids, name=name, state='donefailed', clienttab=clienttab))
+            jobs = self.getJobStats(jobids=jobids, name=name, state='done', clienttab=clienttab, arctab=arctab)
+            jobs.extend(self.getJobStats(jobids=jobids, name=name, state='donefailed', clienttab=clienttab, arctab=arctab))
         return jobs
 
-    # Returns path to results directory if results exist.
-    def downloadJobResults(self, jobid, dirname=None):
-        filename = ''
-        query = urlencode({'id': jobid})
-        url = f'/results?{query}'
-        try:
-            resp = self.httpClient.request('GET', url, token=self.token)
-            if resp.status == 204:
-                text = resp.read().decode()
-                self.logger.debug(f"No results for job {jobid} - {resp.status} {text}")
-            elif resp.status == 200:
-                # 'Content-Disposition': 'attachment; filename=ZrcMD...cmmzn.zip'
-                #filename = resp.getheader('Content-Disposition').split()[1].split('=')[1]
-                filename = resp.getheader('Content-Disposition').split('=')[1]
-                self.logger.debug(f"Downloading result file {filename} for job {jobid} - {resp.status}")
-                _storeResultChunks(resp, filename)
-            else:
-                text = resp.read().decode()
-                self.logger.debug(f"Error downloading results for job {jobid} - {resp.status} {text}")
-                jsonData = json.loads(text)
-                raise ACTClientError(f'Response error: {jsonData["msg"]}')
-        except ACTClientError:
-            raise
-        except Exception as exc:
-            self.logger.debug(f"Error downloading results for job {jobid}: {exc}")
-            raise ACTClientError(f"Error downloading results for job {jobid}: {exc}")
-        # Cleanup code required here in case keyboard interrupt happens somewhere
-        # between the creation of result file and propagation of filename to the
-        # function getJob that performs cleanup as well.
-        except KeyboardInterrupt:
-            deleteFile(filename)
-            raise
+    def downloadJobResults(self, jobid, downloadDir=None):
+        transferQueue = queue.Queue()
+        transferQueue.put({
+            "url": f"/jobs/{jobid}/results/",
+            "type": "listing",
+            "path": downloadDir
+        })
+        errors = []
+        anyResults = False
+        while not transferQueue.empty():
+            trdict = transferQueue.get()
+            try:
+                resp = self.httpClient.request('GET', trdict["url"], token=self.token)
+            except Exception as exc:
+                msg = f"Error downloading {trdict['url']}: {exc}"
+                self.logger.debug(msg)
+                errors.append(msg)
 
-        if not filename:
-            return ''
+            if trdict["type"] == "listing":
+                text = resp.read().decode()
+                self.logger.debug(f"Response for listing {trdict['url']} - {resp.status} {text}")
+                if resp.status != 200:
+                    errors.append(f"Error fetching listing {trdict['url']}: {json.loads(text)['msg']}")
+                    continue
+                elif resp.status == 204:
+                    self.logger.debug(f"No results for job {jobid}")
+                    return anyResults, errors
+                listing = json.loads(text)
+                for filename in listing["file"]:
+                    transferQueue.put({
+                        "url": f"{trdict['url']}{filename}",
+                        "type": "file",
+                        "path": os.path.join(trdict['path'], filename)
+                    })
+                for dirname in listing["dir"]:
+                    transferQueue.put({
+                        "url": f"{trdict['url']}{dirname}/",
+                        "type": "listing",
+                        "path": os.path.join(trdict['path'], dirname)
+                    })
 
-        extractFailed = False
-        try:
-            # Unzip results. extractFailed is needed to exit with error after zip
-            # file removal if extraction failes.
-            extractFailed = False
-            if os.path.isfile(filename):
+            elif trdict["type"] == "file":
+                if resp.status != 200:
+                    text = resp.read().decode()
+                    self.logger.debug(f"Response for file {trdict['url']} - {resp.status} {text}")
+                    errors.append(f"Error fetching file {trdict['url']}: {json.loads(text)['msg']}")
+                    continue
                 try:
-                    extractDir = dirname
-                    if not extractDir:
-                        extractDir = os.path.splitext(filename)[0]
-                    if os.path.isdir(extractDir):
-                        dirnum = 1
-                        while os.path.isdir(f'{extractDir}_{dirnum}'):
-                            dirnum += 1
-                            if dirnum > sys.maxsize:
-                                self.logger.debug("Extraction directory already exists")
-                                raise ACTClientError('Extraction directory already exists')
-                        extractDir = f'{extractDir}_{dirnum}'
-                    with zipfile.ZipFile(filename, 'r') as zip_ref:
-                        zip_ref.extractall(extractDir)
-                    self.logger.debug(f"Extracted result file {filename} to {extractDir}")
-                except (zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
-                    msg = f'Could not extract result file {filename} to {extractDir}: {exc}'
+                    os.makedirs(os.path.dirname(trdict["path"]), exist_ok=True)
+                    _storeTransferChunks(resp, trdict["path"])
+                except Exception as exc:
+                    msg = f"Error downloading file {trdict['url']} to {trdict['path']}: {exc}"
                     self.logger.debug(msg)
-                    extractFailed = True
-            else:
-                raise ACTClientError(f'Path {filename} is not a file')
+                    errors.append(msg)
+                    continue
+                self.logger.debug(f"Downloaded file {trdict['url']} to {trdict['path']}")
+                anyResults = True
 
-        finally:
-            deleteFile(filename)
-
-            # exit with error on extraction failure
-            if extractFailed:
-                shutil.rmtree(extractDir, ignore_errors=True)
-                raise ACTClientError(msg)
-
-        return extractDir
+        return anyResults, errors
 
     def deleteProxy(self):
         resp = self.httpClient.request('DELETE', '/proxies', token=self.token)
@@ -506,7 +494,7 @@ class WebDAVClient:
         self.httpClient.close()
 
 
-def _storeResultChunks(resp, filename, chunksize=HTTP_BUFFER_SIZE):
+def _storeTransferChunks(resp, filename, chunksize=HTTP_BUFFER_SIZE):
     try:
         with open(filename, 'wb') as f:
             chunk = resp.read(chunksize)
@@ -514,7 +502,7 @@ def _storeResultChunks(resp, filename, chunksize=HTTP_BUFFER_SIZE):
                 f.write(chunk)
                 chunk = resp.read(chunksize)
     except Exception as exc:
-        raise ACTClientError(f'Error storing job results to the file {filename}: {exc}')
+        raise ACTClientError(f'Error storing transfer chunks to file {filename}: {exc}')
 
 
 def _prepareJobs(descs, clusterlist, parser):

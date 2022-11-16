@@ -1,13 +1,14 @@
 import argparse
 import json
+import os
 import sys
 
 from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
                                getWebDAVBase)
 from act_client.config import checkConf, expandPaths, loadConf
+from act_client.httpclient import HTTP_BUFFER_SIZE, HTTPClient
 from act_client.operations import (SubmissionInterrupt, getACTRestClient,
                                    getWebDAVClient)
-from act_client.httpclient import HTTPClient, HTTP_BUFFER_SIZE
 
 
 def addCommonArgs(parser):
@@ -337,14 +338,29 @@ def subcommandGet(args, conf):
                 if args.use_jobname:
                     dirname = job['c_jobname']
                 else:
-                    dirname = None
-                dirname = actrest.downloadJobResults(job['c_id'], dirname=dirname)
+                    dirname = job['a_IDFromEndpoint']
+
+                # if ouput directory already exists add a number to its name
+                if os.path.isdir(dirname):
+                    dirnum = 1
+                    while os.path.isdir(f'{dirname}_{dirnum}'):
+                        dirnum += 1
+                        if dirnum > sys.maxsize:
+                            raise ACTClientError('Extraction directory already exists')
+                    dirname = f'{dirname}_{dirnum}'
+
+                anyResults, errors = actrest.downloadJobResults(job['c_id'], downloadDir=dirname)
             except Exception as e:
                 print(f'Error downloading job {job["c_jobname"]}: {e}')
                 continue
 
-            if not dirname:
-                print(f'No results for job {job["c_jobname"]}')
+            if errors:
+                print(f'Errors downloading job {job["c_jobname"]}:')
+                for error in errors:
+                    print(f'    {error}')
+                continue
+            elif not anyResults:
+                print(f'No output files for job {job["c_jobname"]}')
             else:
                 print(f'Results for job {job["c_jobname"]} stored in {dirname}')
             toclean.append(job["c_id"])
