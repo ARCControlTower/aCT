@@ -383,40 +383,54 @@ def confirm_jobs():
     return jsonify(jobs)
 
 
-@app.route('/results', methods=['GET'])
-def getResults():
+@app.route('/jobs/<int:jobid>/results/', defaults={'path': ''}, methods=['GET'])
+@app.route('/jobs/<int:jobid>/results/<path:path>', methods=['GET'])
+def serveResults(jobid, path):
     try:
         token = getToken()
-        jobids = getIDs()
     except RESTError as e:
         return {'msg': str(e)}, e.httpCode
     proxyid = token['proxyid']
 
-    if not jobids:
-        return {'msg': 'No job ID given'}, 400
-    elif len(jobids) > 1:
-        return {'msg': 'Cannot fetch results of more than one job'}, 400
-    jobids = jobids[:1] # only take first job
-
     try:
-        # get job results
         jmgr = JobManager()
-        results = jmgr.getJobs(proxyid, jobids)
+
+        # The next two 404 conditions are an example how an error scheme is
+        # required that is different and separate from HTTP status codes, since
+        # it is impossible to deduce the error without comparing the string.
+        # The same goes for the error cases of files or dirs that do not exist
+        # in later parts of the code.
+        results = jmgr.getJobs(proxyid, [jobid])
         if not results.jobdicts:
-            return {'msg': 'Results for job not found'}, 404
+            return {'msg': 'No results in current job state'}, 404
         resultDir = results.jobdicts[0]['dir']
         if not resultDir:
-            return '', 204
+            return {'msg': 'Job has no results'}, 404
 
-        # create result archive in data dir
-        jobDataDir = jmgr.getJobDataDir(jobids[0])
-        path = os.path.join(jobDataDir, os.path.basename(resultDir))
-        archivePath = shutil.make_archive(path, 'zip', resultDir)
+        if path == '' or path.endswith('/'):
+            dirPath = os.path.join(resultDir, path)
+            if not os.path.isdir(dirPath):
+                return {'msg': 'Output directory does not exist'}, 404
+            listing = os.listdir(dirPath)
+
+            files = []
+            dirs = []
+            for entry in listing:
+                entryPath = os.path.join(dirPath, entry)
+                if os.path.isfile(entryPath):
+                    files.append(entry)
+                elif os.path.isdir(entryPath):
+                    dirs.append(entry)
+            return jsonify({'file': files, 'dir': dirs})
+        else:
+            filePath = os.path.join(resultDir, path)
+            if not os.path.isfile(filePath):
+                return {'msg': 'Output file does not exist'}, 404
+            return send_file(filePath)
+
     except Exception as e:
-        print(f'error: GET /results: {e}')
+        print(f'error: GET /jobs/{jobid}/results/{path}: {e}')
         return {'msg': 'Server error'}, 500
-
-    return send_file(archivePath)
 
 
 @app.route('/proxies', methods=['POST'])
