@@ -8,10 +8,10 @@ import sys
 import tempfile
 import traceback
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
-from act.common import aCTLogger
+from act.common.aCTLogger import aCTLogger
 from act.common.aCTSignal import aCTSignal
 from act.common import aCTUtils
-from act.common import aCTProcessManager
+from act.common.aCTProcessManager import aCTProcessManager
 
 class aCTMain:
     """
@@ -35,7 +35,7 @@ class aCTMain:
         self.makeDirs(self.conf.logger.logdir)
 
         # logger
-        self.logger = aCTLogger.aCTLogger("aCTMain")
+        self.logger = aCTLogger("aCTMain")
         self.log = self.logger()
 
         # set up signal handlers
@@ -53,7 +53,7 @@ class aCTMain:
         # process manager
         try:
             if self.shouldrun:
-                self.procmanager = aCTProcessManager.aCTProcessManager(self.log, self.conf, self.appconf)
+                self.procmanager = aCTProcessManager(self.log, self.conf, self.appconf)
         except Exception as e:
             self.log.critical("*** Unexpected exception! ***")
             self.log.critical(traceback.format_exc())

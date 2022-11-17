@@ -3,9 +3,9 @@ import itertools
 import subprocess
 import os
 
-from . import aCTUtils
-from act.arc import aCTDBArc
-from act.condor import aCTDBCondor
+from act.arc.common import aCTUtils
+from act.arc.aCTDBArc import aCTDBArc
+from act.condor.aCTDBCondor import aCTDBCondor
 from act.common.aCTConfig import aCTConfigARC
 
 class aCTProcessManager:
@@ -21,8 +21,8 @@ class aCTProcessManager:
         self.actlocation = self.conf.actlocation.dir
         self.logdir = self.conf.logger.logdir
         # DB connection
-        self.dbarc = aCTDBArc.aCTDBArc(self.log)
-        self.dbcondor = aCTDBCondor.aCTDBCondor(self.log)
+        self.dbarc = aCTDBArc(self.log)
+        self.dbcondor = aCTDBCondor(self.log)
         # list of processes to run per cluster
         self.arcprocesses = ['act/arc/aCTStatus', 'act/arc/aCTFetcher', 'act/arc/aCTCleaner']
         self.condorprocesses = ['act/condor/aCTStatus', 'act/condor/aCTFetcher', 'act/condor/aCTCleaner']
@@ -85,8 +85,8 @@ class aCTProcessManager:
             del self.dbcondor
         except AttributeError: # Already deleted
             pass
-        self.dbarc = aCTDBArc.aCTDBArc(self.log)
-        self.dbcondor = aCTDBCondor.aCTDBCondor(self.log)
+        self.dbarc = aCTDBArc(self.log)
+        self.dbcondor = aCTDBCondor(self.log)
 
 
     def checkARCClusters(self):
