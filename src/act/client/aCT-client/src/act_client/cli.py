@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 
 from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
@@ -6,6 +7,7 @@ from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
 from act_client.config import checkConf, expandPaths, loadConf
 from act_client.operations import (SubmissionInterrupt, getACTRestClient,
                                    getWebDAVClient)
+from act_client.httpclient import HTTPClient, HTTP_BUFFER_SIZE
 
 
 def addCommonArgs(parser):
@@ -174,6 +176,22 @@ def createParser():
         nargs='+',
         help='path to job description file'
     )
+
+    parserCat = subparsers.add_parser(
+        'cat',
+        help='print stdout or stderr of the job'
+    )
+    addCommonJobFilterArgs(parserCat)
+    addStateArg(parserCat)
+    parserCat.add_argument(
+        '-o', '--stdout', action='store_true', default=True,
+        help='print job\'s stdout'
+    )
+    parserCat.add_argument(
+        '-e', '--stderr', action='store_true',
+        help='print job\'s stderr'
+    )
+
     return parser
 
 
@@ -206,6 +224,8 @@ def runSubcommand(args):
         commandFun = subcommandStat
     elif args.command == 'sub':
         commandFun = subcommandSub
+    elif args.command == 'cat':
+        commandFun = subcommandCat
 
     commandFun(args, conf)
 
@@ -560,3 +580,81 @@ def submitCleanup(args, conf, actrest, jobs, webdavClient, webdavBase):
             raise ACTClientError(f'Error cleaning up after job submission: {exc}')
         toclean = [job['c_id'] for job in jobs]
         webdavCleanup(args, conf, toclean, webdavClient, webdavBase)
+
+
+def subcommandCat(args, conf):
+    checkConf(conf, ['server', 'token', 'proxy'])
+
+    if args.stderr:
+        infoKey = "StdErr"
+    else:
+        infoKey = "StdOut"
+
+    actrest = getACTRestClient(args, conf)
+    ids = getIDParam(args)
+    try:
+
+        try:
+            jsonData = actrest.getJobStats(
+                jobids=ids,
+                name=args.name,
+                state=args.state,
+                clienttab=['id', 'jobname'],
+                arctab=['IDFromEndpoint', 'cluster', infoKey]
+            )
+        except Exception as exc:
+            raise ACTClientError(f'Error fetching job {infoKey.lower()}: {exc}')
+
+        if not jsonData:
+            return
+
+        # per cluster ARCRest; maybe there could be connect method on clients
+        # to allow reconnection to another host?
+        clients = {}
+
+        for job in jsonData:
+            # skip if required path not in DB yet
+            if f'a_{infoKey}' not in job or job[f'a_{infoKey}'] is None:
+                print(f"{infoKey.lower()} not yet available for job {job['c_id']} {job['c_jobname']}")
+                continue
+
+            # create a client for the cluster if it does not exist
+            if job['a_cluster'] not in clients:
+                try:
+                    httpClient = HTTPClient(url=job['a_cluster'], proxypath=conf['proxy'], logger=actrest.logger)
+                except Exception as exc:
+                    print(f'Error creating REST client for ARC cluster {job["a_cluster"]} for job {job["c_id"]} {job["c_jobname"]}: {exc}')
+                    continue
+                clients[job['a_cluster']] = httpClient
+            else:
+                httpClient = clients[job['a_cluster']]
+
+            # initiate file download
+            url = f'/arex/rest/1.0/jobs/{job["a_IDFromEndpoint"]}/session/{job["a_"+infoKey]}'
+            try:
+                resp = httpClient.request('GET', url)
+            except Exception as exc:
+                print(f'Error fetching {infoKey.lower()} from {url} for job {job["c_id"]} {job["c_jobname"]}: {exc}')
+                continue
+            if resp.status != 200:
+                text = resp.read().decode()
+                httpClient.logger.debug(f"Response for {url} - {resp.status} {text}")
+                try:
+                    msg = (json.loads(text))['msg']
+                    print(f'Error fetching {infoKey.lower()} from {url} for job {job["c_id"]} {job["c_jobname"]}: {msg}')
+                except json.JSONDecodeError:
+                    print(f'Error parsing JSON response from {url} for job {job["c_id"]} {job["c_jobname"]} - {resp.status} {text}')
+                continue
+
+            # stream file to stdout
+            try:
+                data = resp.read(HTTP_BUFFER_SIZE)
+                while data:
+                    print(data.decode(), end='')
+                    data = resp.read(HTTP_BUFFER_SIZE)
+            except Exception as exc:
+                print(f'Error fetching {infoKey.lower()} from {url} for job {job["c_id"]} {job["c_jobname"]}: {exc}')
+                continue
+
+    finally:
+        actrest.close()
