@@ -13,10 +13,9 @@ from act.common.aCTSignal import aCTSignal
 from act.common import aCTUtils
 from act.common.aCTProcessManager import aCTProcessManager
 
+
 class aCTMain:
-    """
-    Main class to run aCT.
-    """
+    '''Main class to run aCT.'''
 
     def __init__(self, args):
         # Check we have the right ARC version
@@ -28,23 +27,22 @@ class aCTMain:
 
         # Create required directories
         tmpdir = self.conf.tmp.dir
-        self.makeDirs(tmpdir)
-        self.makeDirs(os.path.join(tmpdir, 'inputfiles'))
-        self.makeDirs(os.path.join(tmpdir, 'failedlogs'))
-        self.makeDirs(self.conf.voms.proxystoredir, 0o700)
-        self.makeDirs(self.conf.logger.logdir)
+        os.makedirs(os.path.join(tmpdir, 'inputfiles'), mode=0o755, exist_ok=True)
+        os.makedirs(os.path.join(tmpdir, 'failedlogs'), mode=0o755, exist_ok=True)
+        os.makedirs(self.conf.voms.proxystoredir, mode=0o700, exist_ok=True)
+        os.makedirs(self.conf.logger.logdir, mode=0o755, exist_ok=True)
 
         # logger
-        self.logger = aCTLogger("aCTMain")
+        self.logger = aCTLogger('aCTMain')
         self.log = self.logger()
 
         # set up signal handlers
         self.signal = aCTSignal(self.log)
 
         # Check if we should run
-        self.shouldrun = not os.path.exists(os.path.join(self.conf.actlocation.dir, "act.stop"))
+        self.shouldrun = not os.path.exists(os.path.join(self.conf.actlocation.dir, 'act.stop'))
         if not self.shouldrun:
-            self.log.warning("Detected act.stop file, won't start child processes")
+            self.log.warning('Detected act.stop file, won\'t start child processes')
 
         # daemon operations
         if len(args) >= 2:
@@ -55,16 +53,13 @@ class aCTMain:
             if self.shouldrun:
                 self.procmanager = aCTProcessManager(self.log, self.conf, self.appconf)
         except Exception as e:
-            self.log.critical("*** Unexpected exception! ***")
+            self.log.critical('*** Unexpected exception! ***')
             self.log.critical(traceback.format_exc())
-            self.log.critical("*** Process exiting ***")
+            self.log.critical('*** Process exiting ***')
             raise e
 
-
     def checkARC(self):
-        """
-        Check ARC can be used and is correct version
-        """
+        '''Check ARC can be used and is correct version.'''
         try:
             import arc
         except ImportError:
@@ -72,33 +67,20 @@ class aCTMain:
             sys.exit(1)
 
         if arc.ARC_VERSION_MAJOR < 4:
-            print('Error: Found ARC version %s. aCT requires 4.0.0 or higher' % arc.ARC_VERSION)
+            print(f'Error: Found ARC version {arc.ARC_VERSION}. aCT requires 4.0.0 or higher')
             sys.exit(1)
 
-    def makeDirs(self, dir, mode=0o755):
-        """
-        Make a directory if it doesn't exist already
-        """
-        try:
-            os.makedirs(dir, mode)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                raise
-
     def start(self):
-        """
-        Start daemon
-        """
+        '''Start daemon.'''
         pidfile = self.conf.actlocation.pidfile
         try:
             with open(pidfile) as f:
                 pid = f.read()
                 if pid:
-                    print("aCT already running (pid %s)" % pid)
+                    print(f'aCT already running (pid {pid})')
                     sys.exit(1)
         except IOError:
             pass
-
 
         print('Starting aCT... ')
         # do double fork
@@ -108,7 +90,7 @@ class aCTMain:
                 # exit first parent
                 sys.exit(0)
         except OSError as e:
-            print("fork #1 failed: %d (%s)" % (e.errno, e.strerror))
+            print(f'fork #1 failed: {e.errno} ({e.strerror})')
             sys.exit(1)
 
         # decouple from parent environment
@@ -122,7 +104,7 @@ class aCTMain:
                 # exit from second parent
                 sys.exit(0)
         except OSError as e:
-            print("fork #2 failed: %d (%s)" % (e.errno, e.strerror))
+            print(f'fork #2 failed: {e.errno} ({e.strerror})')
             sys.exit(1)
 
         # redirect standard file descriptors
@@ -142,11 +124,8 @@ class aCTMain:
         with open(pidfile,'w+') as f:
             f.write(str(os.getpid()))
 
-
     def stop(self):
-        """
-        Stop daemon
-        """
+        '''Stop daemon.'''
         pidfile = self.conf.actlocation.pidfile
         pid = None
         try:
@@ -179,9 +158,7 @@ class aCTMain:
 
 
     def daemon(self, operation):
-        """
-        Start or stop process
-        """
+        '''Start or stop process.'''
 
         if operation == 'start':
             self.start()
@@ -196,22 +173,19 @@ class aCTMain:
 
 
     def logrotate(self):
-        """
-        Run logrotate to rotate all logs
-        """
-
-        logrotateconf = '''
-            %s/*.log {
+        '''Run logrotate to rotate all logs.'''
+        # double braces are escaped braces
+        logrotateconf = f'''
+            {self.conf.logger.logdir}/*.log {{
                 daily
                 dateext
                 missingok
-                rotate %s
+                rotate {self.conf.logger.rotate}
                 maxsize 100M
                 nocreate
                 nocompress
-            }''' % (self.conf.logger.logdir,
-                    self.conf.logger.rotate)
-        logrotatestatus = os.path.join(self.conf.tmp.dir, "logrotate.status")
+            }}'''
+        logrotatestatus = os.path.join(self.conf.tmp.dir, 'logrotate.status')
 
         # Make a temp file with conf and call logrotate
         with tempfile.NamedTemporaryFile() as temp:
@@ -221,14 +195,11 @@ class aCTMain:
             try:
                 subprocess.run(command, check=True)
             except (FileNotFoundError, subprocess.CalledProcessError) as e:
-                self.log.warning("Failed to run logrotate: %s" % str(e))
-
+                self.log.warning(f'Failed to run logrotate: {e}')
 
     def run(self):
-        """
-        Main loop
-        """
-        self.log.info("Running")
+        '''Run main loop.'''
+        self.log.info('Running')
         while 1:
             try:
                 # Rotate logs
@@ -241,11 +212,11 @@ class aCTMain:
                 aCTUtils.sleep(10)
 
                 if self.signal.isInterrupted():
-                    self.log.info("*** Exiting on exit interrupt ***")
+                    self.log.info('*** Exiting on exit interrupt ***')
                     break
 
             except:
-                self.log.critical("*** Unexpected exception! ***")
+                self.log.critical('*** Unexpected exception! ***')
                 self.log.critical(traceback.format_exc())
                 # Reconnect database, in case there was a DB interruption
                 try:
@@ -255,16 +226,15 @@ class aCTMain:
                 aCTUtils.sleep(10)
 
     def finish(self):
-        """
-        clean finish handled by signals
-        """
-        self.log.info("Cleanup")
+        '''Do cleanup on normal exit by signal.'''
+        self.log.info('Cleanup')
+
 
 def main():
     am = aCTMain(sys.argv)
     am.run()
     am.finish()
 
+
 if __name__ == '__main__':
     main()
-
