@@ -161,6 +161,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
         Read new job files in buffer dir and create necessary job descriptions
         '''
 
+        # TODO: Change to scan all users' $HOME
         bufferdir = self.conf.jobs.bufferdir
         configsdir = os.path.join(bufferdir, 'configs')
         os.makedirs(configsdir, 0o755, exist_ok=True)

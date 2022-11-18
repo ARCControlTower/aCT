@@ -9,6 +9,7 @@ requests                # for APF mon calls
 prometheus_client       # Prometheus monitoring
 selinux                 # SELinux context handling
 psutil                  # Reports of processes kills
+tabulate                # Pretty tables
 
 # For aCT client
 flask

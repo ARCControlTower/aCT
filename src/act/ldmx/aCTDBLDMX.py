@@ -33,10 +33,19 @@ class aCTDBLDMX(aCTDB):
            - endtime: Job end time
            - computingelement: CE where the job is running
            - proxyid: ID of proxy in proxies table to use for this job
+           - batchid: Batch ID of job
+           - userid: UID of user owning the job
 
         ldmxarchive:
           - Selected fields from above list:
             - id, siteName, ldmxstatus, starttime, endtime
+
+        ldmxusers:
+          - id: uid of user
+          - name: Real name
+          - role: Role of user
+          - login: Login on aCT machine
+          - ruciouser: Rucio username
         '''
 
         table_create = """
@@ -54,7 +63,8 @@ class aCTDBLDMX(aCTDB):
         endtime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         computingElement VARCHAR(255),
         proxyid integer,
-        batchid VARCHAR(255)
+        batchid VARCHAR(255),
+        userid INTEGER
         )
 """
 
@@ -75,6 +85,7 @@ class aCTDBLDMX(aCTDB):
             c.execute("ALTER TABLE ldmxjobs ADD INDEX (arcjobid)")
             c.execute("ALTER TABLE ldmxjobs ADD INDEX (ldmxstatus)")
             c.execute("ALTER TABLE ldmxjobs ADD INDEX (sitename)")
+            c.execute("ALTER TABLE ldmxjobs ADD INDEX (userid)")
         except Exception as x:
             self.log.error(f"Failed to create table ldmxjobs: {x}")
             return False
@@ -100,11 +111,30 @@ class aCTDBLDMX(aCTDB):
             self.log.error(f"Failed to create table ldmxarchive: {x}")
             return False
 
+        users_table_create = """
+        create table ldmxusers (
+            id INTEGER,
+            name VARCHAR(255),
+            role VARCHAR(255),
+            login VARCHAR(255),
+            ruciouser VARCHAR(255)
+        )
+"""
+        try:
+            c.execute("drop table ldmxusers")
+        except:
+            self.log.warning("no ldmxusers table")
+        try:
+            c.execute(users_table_create)
+        except Exception as x:
+            self.log.error(f"Failed to create table ldmxusers: {x}")
+            return False
+
         self.Commit()
         return True
 
 
-    def insertJob(self, description, template, proxyid, batchid=None, priority=0):
+    def insertJob(self, description, template, proxyid, user, batchid=None, priority=0):
         '''Insert new job description'''
         desc = {'description': description,
                 'template': template,
@@ -183,6 +213,36 @@ class aCTDBLDMX(aCTDB):
         rows = c.fetchall()
         return rows
 
+    def insertUser(self, uid, login, role, name='', ruciouser=''):
+        desc = {'id': uid,
+                'login': login,
+                'role': role,
+                'name': name or login,
+                'ruciouser': ruciouser or login}
+        s = f"insert into ldmxusers ({','.join([k for k in desc.keys()])}) values ({','.join(['%s' for k in desc.keys()])})"
+        c = self.db.getCursor()
+        c.execute(s, list(desc.values()))
+        c.execute("SELECT LAST_INSERT_ID()")
+        row = c.fetchone()
+        self.Commit()
+        return row
+
+    def getUser(self, uid):
+        c = self.db.getCursor()
+        c.execute(f"SELECT * FROM ldmxusers WHERE id={uid}")
+        row = c.fetchone()
+        return row
+
+    def getUsers(self):
+        c = self.db.getCursor()
+        c.execute("SELECT * FROM ldmxusers")
+        rows = c.fetchall()
+        return rows
+
+    def deleteUser(self, uid):
+        c = self.db.getCursor()
+        c.execute(f"delete from ldmxusers where id={uid}")
+        self.Commit()
 
 if __name__ == '__main__':
     import logging
