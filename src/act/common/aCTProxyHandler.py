@@ -1,19 +1,28 @@
-# aCTProxyHandler.py
-#
-# Handles proxy updates in proxies table
-#
+import datetime
+import time
+import random
 
-from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
 from act.common.aCTProxy import aCTProxy
+from act.common.aCTConfig import aCTConfigARC
 
-import datetime
 
 class aCTProxyHandler(aCTProcess):
 
+    # override parent's init method to not take the cluster argument
     def __init__(self):
-        aCTProcess.__init__(self)
+        super().__init__()
+
+    def loadConf(self):
         self.conf = aCTConfigARC()
+
+    def wait(self):
+        time.sleep(random.randint(5, 11))
+
+    def setup(self):
+        super().setup()
+
+        self.loadConf()
         self.pm = aCTProxy(self.log)
         self.tstamp = datetime.datetime.utcnow()-datetime.timedelta(0,self.pm.interval)
         if self._updateLocalProxies() == 0:
@@ -47,7 +56,7 @@ class aCTProxyHandler(aCTProcess):
         Function to get local proxies to be updated in proxies table.
         """
         select = "proxytype='local'"
-        columns = ["dn","attribute","proxypath","id"]
+        columns = ["dn", "attribute", "proxypath", "id"]
         ret_columns = self.pm.db.getProxiesInfo(select, columns)
         vo = self.conf.voms.vo
         validTime = self._checkProxyLifetime(self.conf.voms.proxylifetime)
@@ -68,12 +77,7 @@ class aCTProxyHandler(aCTProcess):
 
     def process(self):
         # renew proxies
-        t=datetime.datetime.utcnow()
+        t = datetime.datetime.utcnow()
         if self.pm._timediffSeconds(t, self.tstamp) >= self.pm.interval:
             self.renewProxies()
             self.tstamp = t
-
-if __name__ == '__main__':
-    st=aCTProxyHandler()
-    st.run()
-    st.finish()

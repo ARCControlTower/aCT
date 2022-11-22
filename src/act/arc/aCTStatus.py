@@ -81,9 +81,9 @@ from datetime import datetime, timedelta
 from http.client import HTTPException
 from ssl import SSLError
 
+from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTJob import ACTJob
-from act.common.aCTProcess import aCTProcess
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
@@ -107,19 +107,16 @@ ARC_STATE_MAPPING = {
 }
 
 
-class aCTStatus(aCTProcess):
+class aCTStatus(aCTARCProcess):
     '''
     Class for checking the status of submitted ARC jobs and updating their
     status in the DB.
     '''
 
-    def __init__(self):
-
-        aCTProcess.__init__(self)
-
+    def setup(self):
+        super().setup()
         # store the last checkJobs time to avoid overloading of GIIS
         self.checktime = time.time()
-
         # this is required by both checkJobs and checkCancellingJobs
         # and should be kept between the calls
         self.joblist = []
@@ -560,9 +557,3 @@ class aCTStatus(aCTProcess):
         self.checkCancellingJobs()
         self.checkLostJobs()
         self.checkStuckJobs()
-
-
-if __name__ == '__main__':
-    st = aCTStatus()
-    st.run()
-    st.finish()

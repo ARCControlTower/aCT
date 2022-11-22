@@ -10,11 +10,11 @@ from act.arc.aCTStatus import ARC_STATE_MAPPING
 from act.arc.rest import (ARCError, ARCHTTPError, DescriptionParseError,
                           DescriptionUnparseError, InputFileError,
                           NoValueInARCResult, ARCRest)
-from act.common.aCTProcess import aCTProcess
 from act.common.aCTJob import ACTJob
+from act.arc.aCTARCProcess import aCTARCProcess
 
 
-class aCTSubmitter(aCTProcess):
+class aCTSubmitter(aCTARCProcess):
 
     def submit(self):
         """
@@ -519,10 +519,3 @@ class aCTSubmitter(aCTProcess):
         self.submit()
         # check jobs which failed to submit
         self.checkFailedSubmissions()
-
-
-# Main
-if __name__ == '__main__':
-    asb = aCTSubmitter()
-    asb.run()
-    asb.finish()

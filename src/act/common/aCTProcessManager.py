@@ -67,13 +67,13 @@ class aCTProcessManager:
             # create process if it doesn't exist
             elif procName not in clusterProcs:
                 self.log.debug(f'Starting process {procName} for cluster {cluster}')
-                clusterProcs[procName] = multiprocessing.Process(target=procClass())
+                clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
                 clusterProcs[procName].start()
             # close not alive process and create new one
             elif not clusterProcs[procName].is_alive():
                 self.log.debug(f'Process {procName} for cluster {cluster} not alive, restarting')
                 clusterProcs[procName].close()
-                clusterProcs[procName] = multiprocessing.Process(target=procClass())
+                clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
                 clusterProcs[procName].start()
             else:
                 self.log.debug(f'Process {procName} running for cluster {cluster}')

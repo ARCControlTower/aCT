@@ -1,19 +1,14 @@
-# aCTCleaner.py
-#
-# Cleans jobs from CE and ARC DB
-#
 import os
 from http.client import HTTPException
 from json import JSONDecodeError
 from ssl import SSLError
-from urllib.parse import urlparse
 
+from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
-from act.common.aCTProcess import aCTProcess
 from act.common.aCTJob import ACTJob
 
 
-class aCTCleaner(aCTProcess):
+class aCTCleaner(aCTARCProcess):
 
     def processToClean(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
@@ -74,9 +69,3 @@ class aCTCleaner(aCTProcess):
 
     def process(self):
         self.processToClean()
-
-
-if __name__ == '__main__':
-    st = aCTCleaner()
-    st.run()
-    st.finish()

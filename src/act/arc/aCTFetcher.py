@@ -1,8 +1,3 @@
-# aCTFetcher.py
-#
-# Fetches output from finished jobs
-#
-
 import datetime
 import os
 import shutil
@@ -10,15 +5,12 @@ from http.client import HTTPException
 from json import JSONDecodeError
 from ssl import SSLError
 
+from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest, MissingDiagnoseFile
-from act.common.aCTProcess import aCTProcess
 from act.common.aCTJob import ACTJob
 
 
-class aCTFetcher(aCTProcess):
-    '''
-    Downloads output data for finished ARC jobs.
-    '''
+class aCTFetcher(aCTARCProcess):
 
     def fetchJobs(self, arcstate, nextarcstate):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "tarcstate"]
@@ -98,9 +90,3 @@ class aCTFetcher(aCTProcess):
         self.fetchJobs('tofetch', 'donefailed')
         # download finished job outputs
         self.fetchJobs('finished', 'done')
-
-
-if __name__ == '__main__':
-    st = aCTFetcher()
-    st.run()
-    st.finish()
