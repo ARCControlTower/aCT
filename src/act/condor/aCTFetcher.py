@@ -5,6 +5,7 @@
 
 from act.common.aCTProcess import aCTProcess
 
+
 class aCTFetcher(aCTProcess):
     '''
     Moves finished/failed jobs to the next state
@@ -13,23 +14,21 @@ class aCTFetcher(aCTProcess):
     def fetchJobs(self, condorstate, nextcondorstate):
 
         # Get list of jobs in the right state
-        select = "condorstate='%s' and cluster='%s' limit 100" % (condorstate, self.cluster)
+        select = f"condorstate='{condorstate}' and cluster='{self.cluster}' limit 100")
         columns = ['id', 'ClusterId', 'appjobid']
         jobstofetch = self.dbcondor.getCondorJobsInfo(select, columns)
 
         if not jobstofetch:
             return
 
-        self.log.info("Fetching %d jobs" % len(jobstofetch))
+        self.log.info(f"Fetching {len(jobstofetch)} jobs")
 
         for job in jobstofetch:
-            self.log.info("%s: Finished with job %s" % (job['appjobid'], job['ClusterId']))
+            self.log.info(f"{job['appjobid']}: Finished with job {job['ClusterId']}")
             self.dbcondor.updateCondorJob(job['id'], {"condorstate": nextcondorstate,
                                                       "tcondorstate": self.dbcondor.getTimeStamp()})
 
-
     def process(self):
-
         # failed jobs
         self.fetchJobs('tofetch', 'donefailed')
         # finished jobs

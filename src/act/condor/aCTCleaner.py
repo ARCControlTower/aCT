@@ -5,21 +5,22 @@
 
 from act.common.aCTProcess import aCTProcess
 
+
 class aCTCleaner(aCTProcess):
 
     def processToClean(self):
 
-        select = "condorstate='toclean' and cluster='%s' limit 100" % self.cluster
+        select = f"condorstate='toclean' and cluster='{self.cluster}' limit 100"
         columns = ['id', 'ClusterId', 'appjobid']
         jobstoclean = self.dbcondor.getCondorJobsInfo(select, columns)
 
         if not jobstoclean:
             return
 
-        self.log.info("Cleaning %d jobs" % len(jobstoclean))
+        self.log.info(f"Cleaning {len(jobstoclean)} jobs")
 
         for job in jobstoclean:
-            self.log.info("%s: Cleaning job %s" % (job['appjobid'], job['ClusterId']))
+            self.log.info(f"{job['appjobid']}: Cleaning job {job['ClusterId']}")
             self.dbcondor.deleteCondorJob(job['id'])
 
     def process(self):

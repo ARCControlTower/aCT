@@ -6,8 +6,10 @@ import htcondor
 from threading import Thread
 from act.common.aCTProcess import aCTProcess
 
+
 class SubmitThr(Thread):
-    def __init__ (self, func, id, appjobid, jobdesc, logger, schedd):
+
+    def __init__(self, func, id, appjobid, jobdesc, logger, schedd):
         Thread.__init__(self)
         self.func = func
         self.id = id
@@ -16,6 +18,7 @@ class SubmitThr(Thread):
         self.log = logger
         self.schedd = schedd
         self.jobid = None
+
     def run(self):
         self.jobid = self.func(self.jobdesc, self.log, self.appjobid, self.schedd)
 
@@ -24,8 +27,8 @@ def Submit(jobdesc, log, appjobid, schedd):
 
     global queuelist
 
-    if len(queuelist) == 0  :
-        log.error("%s: no cluster free for submission" % appjobid)
+    if len(queuelist) == 0:
+        log.error(f"{appjobid}: no cluster free for submission")
         return None
 
     # This method only works with condor version >= 8.5.8 but is needed to
@@ -57,14 +60,14 @@ class aCTSubmitter(aCTProcess):
             errfl = False
             for t in tl:
                 t.join(60.0)
-                if t.isAlive() :
+                if t.isAlive():
                     # abort due to timeout and try again
-                    self.log.error("%s: submission timeout: exit and try again" % t.appjobid)
+                    self.log.error(f"{t.appjobid}: submission timeout: exit and try again")
                     errfl = True
                     continue
                 # updatedb
                 if t.jobid is None:
-                    self.log.error("%s: no job defined for %d" % (t.appjobid, t.id))
+                    self.log.error(f"{t.appjobid}: no job defined for {t.id}")
                     errfl = True
                     continue
                 jd = {}
@@ -73,17 +76,15 @@ class aCTSubmitter(aCTProcess):
                 jd['tcondorstate'] = self.dbcondor.getTimeStamp(time.time() - self.conf.jobs.checkinterval + 120)
                 jd['cluster'] = self.cluster
                 jd['ClusterId'] = t.jobid
-                self.log.info("%s: Job submitted with ClusterId %d" % (t.appjobid, t.jobid))
+                self.log.info(f"{t.appjobid}: Job submitted with ClusterId {t.jobid}")
                 self.dbcondor.updateCondorJobLazy(t.id, jd)
             if errfl:
                 break
-
 
     def submit(self):
         """
         Main function to submit jobs.
         """
-
         if not self.cluster:
             self.log.error('Cluster must be defined for condor jobs')
             return 0
@@ -96,7 +97,7 @@ class aCTSubmitter(aCTProcess):
             return 0
 
         # Apply fair-share
-        fairshares = self.dbcondor.getCondorJobsInfo("condorstate='tosubmit' and clusterlist like '%"+self.cluster+"%'", ['fairshare'])
+        fairshares = self.dbcondor.getCondorJobsInfo(f"condorstate='tosubmit' and clusterlist like '%{self.cluster}%'", ['fairshare'])
 
         if not fairshares:
             self.log.info('Nothing to submit')
@@ -106,14 +107,15 @@ class aCTSubmitter(aCTProcess):
         count = 0
 
         for fairshare in fairshares:
-
             try:
                 # catch any exceptions here to avoid leaving lock
                 # Lock row for update in case multiple clusters are specified
-                jobs = self.dbcondor.getCondorJobsInfo("condorstate='tosubmit' and ( clusterlist like '% {0}%' or clusterlist like '%{0},%' ) and fairshare='{1}' limit 10".format(self.cluster, fairshare),
-                                            columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"], lock=True)
+                jobs = self.dbcondor.getCondorJobsInfo(
+                    "condorstate='tosubmit' and ( clusterlist like '% {0}%' or clusterlist like '%{0},%' ) and fairshare='{1}' limit 10".format(self.cluster, fairshare),
+                    columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"], lock=True
+                )
                 if jobs:
-                    self.log.debug("started lock for writing %d jobs" % len(jobs))
+                    self.log.debug(f"started lock for writing {len(jobs)} jobs")
 
                 # mark submitting in db
                 jobs_taken = []
@@ -133,25 +135,25 @@ class aCTSubmitter(aCTProcess):
             if len(jobs) == 0:
                 #self.log.debug("No jobs to submit")
                 continue
-            self.log.info("Submitting %d jobs for fairshare %s" % (len(jobs), fairshare))
+            self.log.info(f"Submitting {len(jobs)} jobs for fairshare {fairshare}")
 
             # max waiting priority
             try:
-                maxpriowaiting = max(jobs,key = lambda x : x['priority'])['priority']
+                maxpriowaiting = max(jobs, key=lambda x: x['priority'])['priority']
             except:
                 maxpriowaiting = 0
-            self.log.info("Maximum priority of waiting jobs: %d" % maxpriowaiting)
+            self.log.info(f"Maximum priority of waiting jobs: {maxpriowaiting}")
 
             # Filter only sites for this process
             queuelist = []
 
             # Check queued jobs and limits
-            qjobs=self.dbcondor.getCondorJobsInfo("cluster='" +str(self.cluster)+ "' and ( condorstate='submitted' or condorstate='holding' ) and fairshare='%s'" % fairshare, ['id', 'priority'])
-            rjobs=self.dbcondor.getCondorJobsInfo("cluster='" +str(self.cluster)+ "' and condorstate='running' and fairshare='%s'" % fairshare, ['id'])
+            qjobs = self.dbcondor.getCondorJobsInfo(f"cluster='{self.cluster}' and ( condorstate='submitted' or condorstate='holding' ) and fairshare='{fairshare}'", ['id', 'priority'])
+            rjobs = self.dbcondor.getCondorJobsInfo(f"cluster='{self.cluster}' and condorstate='running' and fairshare='{fairshare}'", ['id'])
 
             # max queued priority
             try:
-                maxprioqueued = max(qjobs,key = lambda x : x['priority'])['priority']
+                maxprioqueued = max(qjobs, key=lambda x: x['priority'])['priority']
             except:
                 maxprioqueued = 0
             self.log.info("Max priority queued: %d" % maxprioqueued)
@@ -161,15 +163,15 @@ class aCTSubmitter(aCTProcess):
             qfraction = self.conf.jobs.queuefraction if self.conf.jobs.queuefraction else 0.15
             qoffset = self.conf.jobs.queueoffset if self.conf.jobs.queueoffset else 100
             jlimit = (len(rjobs)*qfraction + qoffset/len(fairshares)) / len(jobs[0]['clusterlist'].split(','))
-            self.log.debug("running %d, queued %d, queue limit %d" % (len(rjobs), len(qjobs), jlimit))
+            self.log.debug(f"running {len(rjobs)}, queued {len(qjobs)}, queue limit {jlimit}")
 
-            if len(qjobs) < jlimit or ( ( maxpriowaiting > maxprioqueued ) and ( maxpriowaiting > 10 ) ) :
-                if maxpriowaiting > maxprioqueued :
-                    self.log.info("Overriding limit, maxpriowaiting: %d > maxprioqueued: %d" % (maxpriowaiting, maxprioqueued))
+            if len(qjobs) < jlimit or ((maxpriowaiting > maxprioqueued) and (maxpriowaiting > 10)):
+                if maxpriowaiting > maxprioqueued:
+                    self.log.info(f"Overriding limit, maxpriowaiting: {maxpriowaiting} > maxprioqueued: {maxprioqueued}")
                 queuelist.append(self.cluster)
-                self.log.debug("Adding target %s" % (self.cluster))
+                self.log.debug(f"Adding target {self.cluster}")
             else:
-                self.log.info("%s already at limit of submitted jobs for fairshare %s" % (self.cluster, fairshare))
+                self.log.info(f"{self.cluster} already at limit of submitted jobs for fairshare {fairshare}")
 
             # check if any queues are available, if not leave and try again next time
             if not queuelist:
@@ -181,14 +183,14 @@ class aCTSubmitter(aCTProcess):
 
             # Just run one thread for each job in sequence.
             for j in jobs:
-                self.log.debug("%s: preparing submission" % j['appjobid'])
+                self.log.debug(f"{j['appjobid']}: preparing submission")
                 jobdescstr = self.dbcondor.getCondorJobDescription(str(j['jobdesc']))
                 try:
                     # Not so nice using eval but condor doesn't accept unicode
                     # strings returned from json.loads()
                     jobdesc = ast.literal_eval(jobdescstr)
                 except:
-                    self.log.error("%s: Failed to prepare job description" % j['appjobid'])
+                    self.log.error(f"{j['appjobid']}: Failed to prepare job description")
                     continue
 
                 # Extract the GridResource
@@ -200,10 +202,10 @@ class aCTSubmitter(aCTProcess):
                     gridresource = re.sub(r' %s$' % queue, '', gridresource)
                 jobdesc['GridResource'] = gridresource
                 # Set the remote queue
-                jobdesc['+queue'] = '"%s"' % queue
+                jobdesc['+queue'] = f'"{queue}"'
                 # Set tag for aCTStatus to query
-                jobdesc['+ACTCluster'] = '"%s"' % self.cluster
-                self.log.debug('%s: Set GridResource to %s, queue %s' % (j['appjobid'], gridresource, queue))
+                jobdesc['+ACTCluster'] = f'"{self.cluster}"'
+                self.log.debug(f'{j["appjobid"]}: Set GridResource to {gridresource}, queue {queue}')
                 self.log.debug(jobdesc)
                 t = SubmitThr(Submit, j['id'], j['appjobid'], jobdesc, self.log, self.schedd)
                 self.RunThreadsSplit([t], 1)
@@ -217,66 +219,61 @@ class aCTSubmitter(aCTProcess):
 
         return count
 
-
     def checkFailedSubmissions(self):
-
-        jobs = self.dbcondor.getCondorJobsInfo("condorstate='submitting' and cluster='"+self.cluster+"'",
+        jobs = self.dbcondor.getCondorJobsInfo(f"condorstate='submitting' and cluster='{self.cluster}'",
                                                ["id"])
-
         for job in jobs:
             # set to toresubmit and the application should figure out what to do
             self.dbcondor.updateCondorJob(job['id'], {"condorstate": "toresubmit",
                                                       "tcondorstate": self.dbcondor.getTimeStamp()})
 
     def processToCancel(self):
-
-        jobstocancel = self.dbcondor.getCondorJobsInfo("condorstate='tocancel' and (cluster='{0}' or clusterlist like '%{0}' or clusterlist like '%{0},%')".format(self.cluster),
-                                                       ['id', 'appjobid', 'ClusterId'])
+        jobstocancel = self.dbcondor.getCondorJobsInfo(
+            "condorstate='tocancel' and (cluster='{0}' or clusterlist like '%{0}' or clusterlist like '%{0},%')".format(self.cluster),
+            ['id', 'appjobid', 'ClusterId']
+        )
         if not jobstocancel:
             return
 
         for job in jobstocancel:
-            self.log.info("%s: Cancelling condor job" % job['appjobid'])
+            self.log.info(f"{job['appjobid']}: Cancelling condor job")
 
             if not job['ClusterId']:
                 # Job not submitted
-                self.log.info("%s: Marking unsubmitted job cancelled" % job['appjobid'])
+                self.log.info(f"{job['appjobid']}: Marking unsubmitted job cancelled")
                 self.dbcondor.updateCondorJob(job['id'], {"condorstate": "cancelled",
                                                           "tcondorstate": self.dbcondor.getTimeStamp()})
                 continue
 
             try:
-                remove = self.schedd.act(htcondor.JobAction.Remove, ['%d.0' % job['ClusterId']])
+                remove = self.schedd.act(htcondor.JobAction.Remove, [f'{job["ClusterId"]}.0'])
             except RuntimeError as e:
-                self.log.error("%s: Failed to cancel in condor: %s" % (job['appjobid'], str(e)))
+                self.log.error(f"{job['appjobid']}: Failed to cancel in condor: {e}")
                 continue
-            self.log.debug("%s: Cancellation returned %s" % (job['appjobid'], remove))
+            self.log.debug(f"{job['appjobid']}: Cancellation returned {remove}")
             self.dbcondor.updateCondorJob(job['id'], {"condorstate": "cancelling",
                                                       "tcondorstate": self.dbcondor.getTimeStamp()})
             # TODO deal with failed cancel
             continue
 
-
     def processToResubmit(self):
-
-        jobstoresubmit = self.dbcondor.getCondorJobsInfo("condorstate='toresubmit' and cluster='"+self.cluster+"'",
-                                                         ['id', 'appjobid', 'ClusterId'])
-
+        jobstoresubmit = self.dbcondor.getCondorJobsInfo(
+            f"condorstate='toresubmit' and cluster='{self.cluster}'",
+            ['id', 'appjobid', 'ClusterId']
+        )
         for job in jobstoresubmit:
-
             # Clean up jobs which were submitted
             if job['ClusterId']:
                 try:
-                    self.schedd.act(htcondor.JobAction.Remove, ['%d.0' % job['ClusterId']])
+                    self.schedd.act(htcondor.JobAction.Remove, [f'{job["ClusterId"]}.0'])
                 except RuntimeError as e:
-                    self.log.error("%s: Failed to cancel in condor: %s" % (job['appjobid'], str(e)))
+                    self.log.error(f"{job['appjobid']}: Failed to cancel in condor: {e}")
                 # TODO handle failed clean
 
             self.dbcondor.updateCondorJob(job['id'], {"condorstate": "tosubmit",
                                                       "tcondorstate": self.dbcondor.getTimeStamp(),
                                                       "cluster": None,
                                                       "ClusterId": None})
-
 
     def process(self):
 
@@ -293,7 +290,6 @@ class aCTSubmitter(aCTProcess):
 
 # Main
 if __name__ == '__main__':
-    asb=aCTSubmitter()
+    asb = aCTSubmitter()
     asb.run()
     asb.finish()
-
