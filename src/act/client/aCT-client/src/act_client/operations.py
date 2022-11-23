@@ -562,6 +562,8 @@ def getWebDAVClient(args, conf, webdavBase, useProxy=True):
             proxypath = None
         logger = getLogger(args)
         webdavClient = WebDAVClient(webdavBase, proxypath=proxypath, logger=logger)
+    except FileNotFoundError:
+        raise ACTClientError(f'Could not find proxy file {proxypath}')
     except Exception as exc:
         raise ACTClientError(f'Error creating WebDAV client: {exc}')
     return webdavClient

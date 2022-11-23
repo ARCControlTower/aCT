@@ -297,8 +297,8 @@ def webdavCleanup(args, conf, jobids, webdavClient=None, webdavBase=None):
         if webdavClient:
             closeWebDAV = False
         else:
-            webdavClient = getWebDAVClient(args, conf, webdavBase)
             closeWebDAV = True
+            webdavClient = getWebDAVClient(args, conf, webdavBase)
 
         errors = webdavClient.cleanJobDirs(webdavBase, jobids)
         for error in errors:
@@ -306,7 +306,7 @@ def webdavCleanup(args, conf, jobids, webdavClient=None, webdavBase=None):
     except Exception as exc:
         raise ACTClientError(f'Error cleaning up WebDAV dirs: {exc}')
     finally:
-        if closeWebDAV:
+        if closeWebDAV and webdavClient:
             webdavClient.close()
 
 
