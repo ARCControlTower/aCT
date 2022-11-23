@@ -305,7 +305,7 @@ def webdavCleanup(args, conf, jobids, webdavClient=None, webdavBase=None):
     except Exception as exc:
         raise ACTClientError(f'Error cleaning up WebDAV dirs: {exc}')
     finally:
-        if closeWebDAV:
+        if closeWebDAV and webdavClient:
             webdavClient.close()
 
 
