@@ -3,16 +3,16 @@
 # Cleans jobs from Condor table
 #
 
-from act.common.aCTProcess import aCTProcess
+from act.condor.aCTCondorProcess import aCTCondorProcess
 
 
-class aCTCleaner(aCTProcess):
+class aCTCleaner(aCTCondorProcess):
 
     def processToClean(self):
 
         select = f"condorstate='toclean' and cluster='{self.cluster}' limit 100"
         columns = ['id', 'ClusterId', 'appjobid']
-        jobstoclean = self.dbcondor.getCondorJobsInfo(select, columns)
+        jobstoclean = self.db.getCondorJobsInfo(select, columns)
 
         if not jobstoclean:
             return
@@ -21,15 +21,8 @@ class aCTCleaner(aCTProcess):
 
         for job in jobstoclean:
             self.log.info(f"{job['appjobid']}: Cleaning job {job['ClusterId']}")
-            self.dbcondor.deleteCondorJob(job['id'])
+            self.db.deleteCondorJob(job['id'])
 
     def process(self):
-
         # clean jobs
         self.processToClean()
-
-
-if __name__ == '__main__':
-    st = aCTCleaner()
-    st.run()
-    st.finish()

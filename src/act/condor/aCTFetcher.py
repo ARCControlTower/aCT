@@ -3,10 +3,10 @@
 # Condor automatically collects the stdout for the job so this Fetcher simply
 # moves the job to the next state.
 
-from act.common.aCTProcess import aCTProcess
+from act.condor.aCTCondorProcess import aCTCondorProcess
 
 
-class aCTFetcher(aCTProcess):
+class aCTFetcher(aCTCondorProcess):
     '''
     Moves finished/failed jobs to the next state
     '''
@@ -16,7 +16,7 @@ class aCTFetcher(aCTProcess):
         # Get list of jobs in the right state
         select = f"condorstate='{condorstate}' and cluster='{self.cluster}' limit 100")
         columns = ['id', 'ClusterId', 'appjobid']
-        jobstofetch = self.dbcondor.getCondorJobsInfo(select, columns)
+        jobstofetch = self.db.getCondorJobsInfo(select, columns)
 
         if not jobstofetch:
             return
@@ -25,17 +25,11 @@ class aCTFetcher(aCTProcess):
 
         for job in jobstofetch:
             self.log.info(f"{job['appjobid']}: Finished with job {job['ClusterId']}")
-            self.dbcondor.updateCondorJob(job['id'], {"condorstate": nextcondorstate,
-                                                      "tcondorstate": self.dbcondor.getTimeStamp()})
+            self.db.updateCondorJob(job['id'], {"condorstate": nextcondorstate,
+                                                "tcondorstate": self.db.getTimeStamp()})
 
     def process(self):
         # failed jobs
         self.fetchJobs('tofetch', 'donefailed')
         # finished jobs
         self.fetchJobs('finished', 'done')
-
-
-if __name__ == '__main__':
-    st = aCTFetcher()
-    st.run()
-    st.finish()
