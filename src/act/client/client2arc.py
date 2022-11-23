@@ -5,21 +5,16 @@ This program creates an object that acts as a long running process.
 It is managed by another process, defined in
 :mod:`act.common.aCTProcessManager`.
 """
-
-import os
-import sys
-import traceback
 import time
+
 import arc
-
 from act.arc.aCTDBArc import aCTDBArc
-from act.common.aCTConfig import aCTConfigARC
-from act.common.aCTLogger import aCTLogger
-from act.common.aCTSignal import aCTSignal
 from act.client.clientdb import ClientDB
+from act.common.aCTConfig import aCTConfigARC
+from act.common.aCTProcess import aCTProcess
 
 
-class Client2Arc(object):
+class Client2Arc(aCTProcess):
     """
     Object that runs until interrupted and periodically submits new jobs.
 
@@ -36,50 +31,20 @@ class Client2Arc(object):
         arcdb: An object that provides interface to ARC engine's table.
     """
 
+    # overriding to prevent cluster argument
     def __init__(self):
-        """Initialize all attributes."""
-        # get name, remove .py from the end
-        self.name = os.path.basename(sys.argv[0])[:-3]
+        super().__init__()
 
-        self.arcconf = aCTConfigARC()
+    def loadConf(self):
+        self.conf = aCTConfigARC()
 
-        self.logger = aCTLogger(self.name)
-        self.log = self.logger()
+    def wait(self):
+        time.sleep(10)
 
-        # set up signal handlers
-        self.signal = aCTSignal(self.log)
-
+    def setup(self):
+        super().setup()
         self.clidb = ClientDB(self.log)
         self.arcdb = aCTDBArc(self.log)
-
-        self.log.info(f'Started {self.name}')
-
-    def run(self):
-        """
-        Run until interrupted by signal.
-
-        The actual work of object is done in :meth:`process` which is
-        called every iteration. Interrupt signal comes from
-        :class:~`act.common.aCTProcessManager.aCTProcessManager`.
-        """
-        try:
-            while True:
-                # TODO: this parsing does not make any difference
-                self.arcconf = aCTConfigARC()
-                self.process()
-                time.sleep(10)  # TODO: HARDCODED
-
-                if self.signal.isInterrupted():
-                    self.log.info("*** Exiting on exit interrupt ***")
-                    break
-
-        except:
-            self.log.critical('*** Unexpected exception! ***')
-            self.log.critical(traceback.format_exc())
-            self.log.critical('*** Process exiting ***')
-
-        finally:
-            self.finish()
 
     def process(self):
         """
@@ -155,13 +120,6 @@ class Client2Arc(object):
             raise Exception("Could not release lock after inserting jobs")
 
     def finish(self):
-        """Log stop message."""
         self.clidb.close()
         self.arcdb.close()
-        self.log.info(f'Stopped {self.name}')
-        os._exit(0)
-
-
-if __name__ == '__main__':
-    proc = Client2Arc()
-    proc.run()
+        super().finish()
