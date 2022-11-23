@@ -1,7 +1,7 @@
 import http.client
+import json
 import os
 import traceback
-import json
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPanda2Xrsl import aCTPanda2Xrsl
@@ -11,9 +11,6 @@ class aCTPanda2Arc(aCTATLASProcess):
     '''
     Take new jobs in Panda table and insert then into the arcjobs table.
     '''
-
-    def __init__(self):
-        aCTATLASProcess.__init__(self, ceflavour=['ARC-CE'])
 
     def createArcJobs(self):
 
@@ -113,10 +110,3 @@ class aCTPanda2Arc(aCTATLASProcess):
                 conn.close()
             except Exception as error:
                 self.log.error("Error sending trace: %s" % error)
-
-
-if __name__ == '__main__':
-
-    am = aCTPanda2Arc()
-    am.run()
-    am.finish()

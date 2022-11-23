@@ -1,19 +1,20 @@
 # Handler for fetching site info from CRIC. Fetches data and stores it in json file.
 
-from datetime import datetime, timedelta
 import os
 import time
-import urllib.request, urllib.error
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 
+
 class aCTCRICFetcher(aCTATLASProcess):
 
-    def __init__(self):
-        aCTATLASProcess.__init__(self)
+    def setup(self):
+        super().setup()
         self.queues = self.conf.cric.server
         self.queuesfile = self.conf.cric.jsonfilename
-
 
     def fetchFromCRIC(self, url, filename):
         try:
@@ -63,7 +64,3 @@ class aCTCRICFetcher(aCTATLASProcess):
         self.storeToFile(queuesjson, self.queuesfile)
         # temporary hack to avoid too much cric fetching
         time.sleep(600)
-
-if __name__ == '__main__':
-    acf=aCTCRICFetcher()
-    acf.run()

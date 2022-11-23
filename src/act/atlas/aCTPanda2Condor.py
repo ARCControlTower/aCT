@@ -1,4 +1,5 @@
 import os
+
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPanda2ClassAd import aCTPanda2ClassAd
 
@@ -9,7 +10,7 @@ class aCTPanda2Condor(aCTATLASProcess):
     '''
 
     def __init__(self):
-        aCTATLASProcess.__init__(self, ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
+        super().__init__(ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
 
     def createCondorJobs(self):
 
@@ -68,9 +69,3 @@ class aCTPanda2Condor(aCTATLASProcess):
     def process(self):
         self.setSites()
         self.createCondorJobs()
-
-if __name__ == '__main__':
-
-    am = aCTPanda2Condor()
-    am.run()
-    am.finish()

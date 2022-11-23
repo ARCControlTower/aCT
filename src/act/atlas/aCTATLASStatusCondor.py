@@ -2,13 +2,14 @@ import datetime
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 
+
 class aCTATLASStatusCondor(aCTATLASProcess):
     '''
     Checks the status of condor jobs and reports back to pandajobs
     '''
 
     def __init__(self):
-        aCTATLASProcess.__init__(self, ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
+        super().__init__(ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
 
     def checkJobstoKill(self):
         """
@@ -319,8 +320,3 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         self.updateFailedJobs()
         # Clean up jobs left behind in condorjobs table
         self.cleanupLeftovers()
-
-
-if __name__ == '__main__':
-    aas = aCTATLASStatusCondor()
-    aas.run()

@@ -1,15 +1,16 @@
-from threading import Thread
 import datetime
 import os
-import time
 import shutil
+import time
+from threading import Thread
 from urllib.parse import parse_qs
+
 import arc
-from act.common import aCTProxy
-from act.common import aCTUtils
 from act.atlas import aCTPanda
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
+from act.common import aCTProxy, aCTUtils
+
 
 class PandaThr(Thread):
     """
@@ -23,13 +24,16 @@ class PandaThr(Thread):
         self.status = status
         self.args = args
         self.result = None
+
     def run(self):
         self.result=self.func(self.id,self.status,self.args)
+
 
 class PandaBulkThr(Thread):
     """
     Bulk update pandaStatus
     """
+
     def __init__ (self,func,ids,args):
         Thread.__init__(self)
         self.func=func
@@ -39,14 +43,14 @@ class PandaBulkThr(Thread):
     def run(self):
         self.result=self.func(self.args)
 
-class aCTAutopilot(aCTATLASProcess):
 
+class aCTAutopilot(aCTATLASProcess):
     """
     Main class for Panda interaction. Three major functions: init, run, finish
     """
 
-    def __init__(self):
-        aCTATLASProcess.__init__(self)
+    def setup(self):
+        super().setup()
 
         # Get DN from configured proxy file
         uc = arc.UserConfig()
@@ -441,9 +445,3 @@ class aCTAutopilot(aCTATLASProcess):
             self.log.info("Checking for jobs to archive")
             self.updateArchive()
             self.starttime = time.time()
-
-
-if __name__ == '__main__':
-    am=aCTAutopilot()
-    am.run()
-    #am.finish()

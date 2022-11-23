@@ -1,16 +1,18 @@
-from threading import Thread
 import time
+from threading import Thread
+
 import arc
-from act.common import aCTProxy
-from act.common import aCTUtils
 from act.atlas import aCTPanda
 from act.atlas.aCTATLASProcess import aCTATLASProcess
+from act.common import aCTProxy, aCTUtils
+
 
 class PandaThr(Thread):
     """
     Helper function for threaded panda status update calls.
     func is generic, but it is only used for aCTPanda.updateStatus call.
     """
+
     def __init__ (self,func,id,status,args={}):
         Thread.__init__(self)
         self.func=func
@@ -28,8 +30,8 @@ class aCTAutopilotSent(aCTATLASProcess):
     Main class for Panda interaction. Three major functions: init, run, finish
     """
 
-    def __init__(self):
-        aCTATLASProcess.__init__(self)
+    def setup(self):
+        super().setup()
 
         # Get DN from configured proxy file
         uc = arc.UserConfig()
@@ -156,8 +158,3 @@ class aCTAutopilotSent(aCTATLASProcess):
 
         # Update all jobs currently in the system
         self.updatePandaHeartbeat('sent')
-
-if __name__ == '__main__':
-    am=aCTAutopilotSent()
-    am.run()
-    #am.finish()

@@ -1,6 +1,8 @@
 import os
 import shutil
+
 from act.atlas.aCTATLASProcess import aCTATLASProcess
+
 
 class aCTValidatorCondor(aCTATLASProcess):
     '''
@@ -8,8 +10,8 @@ class aCTValidatorCondor(aCTATLASProcess):
     condorjobs to clean, and cleans up any leftover temp files
     '''
 
-    def __init__(self):
-        aCTATLASProcess.__init__(self, ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
+    def __init__(self, name):
+        super().__init__(name, ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
 
     def cleanFinishedJob(self, pandaid):
         '''
@@ -125,10 +127,3 @@ class aCTValidatorCondor(aCTATLASProcess):
         self.validateFinishedJobs()
         self.cleanFailedJobs()
         self.cleanResubmittingJobs()
-
-
-if __name__ == '__main__':
-
-    am = aCTValidatorCondor()
-    am.run()
-    am.finish()

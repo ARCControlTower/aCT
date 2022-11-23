@@ -1,23 +1,25 @@
-from act.atlas.aCTATLASProcess import aCTATLASProcess
-from act.common.aCTProxy import aCTProxy
-from act.common import aCTUtils
-from act.atlas.aCTPandaJob import aCTPandaJob
 import datetime
 import errno
+import json
 import os
+import re
 import shutil
 import time
+
 import arc
-import json
-import re
+from act.atlas.aCTATLASProcess import aCTATLASProcess
+from act.atlas.aCTPandaJob import aCTPandaJob
+from act.common import aCTUtils
+from act.common.aCTProxy import aCTProxy
+
 
 class aCTValidator(aCTATLASProcess):
     '''
     Validate output files for finished jobs, cleanup output files for failed jobs.
     '''
 
-    def __init__(self):
-        aCTATLASProcess.__init__(self, ceflavour=['ARC-CE'])
+    def setup(self):
+        super().setup()
 
         # Use production role proxy for checking and removing files
         # Get DN from configured proxy file
@@ -639,6 +641,7 @@ class aCTValidator(aCTATLASProcess):
         self.dbarc.Commit()
 
 
+    # TODO: need a mechanism for stopping the process
     def process(self):
         self.logger.arclog.setReopen(True)
         self.logger.arclog.setReopen(False)
@@ -651,10 +654,3 @@ class aCTValidator(aCTATLASProcess):
         if time.time() - self.starttime > 60*60*24:
             self.log.info("%s exited for periodic restart", self.name)
             self.finish()
-
-
-if __name__ == '__main__':
-
-    am=aCTValidator()
-    am.run()
-    am.finish()

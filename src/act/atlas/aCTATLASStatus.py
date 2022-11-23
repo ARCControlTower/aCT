@@ -3,18 +3,16 @@
 
 import datetime
 import json
-import re
 import os
+import re
 import shutil
 from urllib.parse import urlparse
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
 
-class aCTATLASStatus(aCTATLASProcess):
 
-    def __init__(self):
-        aCTATLASProcess.__init__(self, ceflavour=['ARC-CE'])
+class aCTATLASStatus(aCTATLASProcess):
 
     def checkJobstoKill(self):
         """
@@ -594,8 +592,3 @@ class aCTATLASStatus(aCTATLASProcess):
         self.updateFailedJobs()
         # Clean up jobs left behind in arcjobs table
         self.cleanupLeftovers()
-
-
-if __name__ == '__main__':
-    aas=aCTATLASStatus()
-    aas.run()
