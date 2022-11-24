@@ -2,13 +2,11 @@ import os
 
 from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
 
+
 class aCTLDMX2Arc(aCTLDMXProcess):
     '''
     Pick up new jobs in the db and create ARC jobs
     '''
-
-    def __init__(self):
-        aCTLDMXProcess.__init__(self)
 
     def processNewJobs(self):
 
@@ -82,7 +80,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         if 'SimExecutable' in config :
             wpath, wname = os.path.split(wrapper)
             wrapper = os.path.join(wpath, config.get('SimExecutable'))
- 
+
         #keep executable naming as is but point to actual wrapper script
         xrsl['executable'] = f"(executable = ldmxsim.sh)"
         inputfiles = f'(ldmxsim.sh {wrapper})\n \
@@ -130,12 +128,5 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         return self.rses.get(localrse)
 
     def process(self):
-
+        self.setSites()
         self.processNewJobs()
-
-
-if __name__ == '__main__':
-
-    ar = aCTLDMX2Arc()
-    ar.run()
-    ar.finish()

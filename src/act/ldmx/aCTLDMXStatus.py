@@ -1,21 +1,19 @@
 import os
 import shutil
+
+from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
+
 try:
     import selinux
 except:
     selinux = None
 
-from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
 
 class aCTLDMXStatus(aCTLDMXProcess):
     '''
     Check the status of submitted and running jobs, handle resubmission or
     cleanup of failed and cancelled jobs.
     '''
-
-    def __init__(self):
-        aCTLDMXProcess.__init__(self)
-
 
     def checkSubmittedJobs(self):
         '''
@@ -336,16 +334,9 @@ class aCTLDMXStatus(aCTLDMXProcess):
 
 
     def process(self):
-
+        self.setSites()
         self.checkToCancelJobs()
         self.checkToResubmitJobs()
         self.checkSubmittedJobs()
         self.checkFailedJobs()
         self.cleanupLeftovers()
-
-
-if __name__ == '__main__':
-
-    ar = aCTLDMXStatus()
-    ar.run()
-    ar.finish()

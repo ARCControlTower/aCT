@@ -1,19 +1,19 @@
-from datetime import datetime, timezone, timedelta
 import json
 import os
 import shutil
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
+
+from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
+from rucio.common.exception import (DataIdentifierAlreadyExists,
+                                    DataIdentifierNotFound, FileAlreadyExists,
+                                    FileReplicaAlreadyExists, RucioException)
+
 try:
     import selinux
 except:
     selinux = None
 
-from urllib.parse import urlparse
-
-from rucio.common.exception import RucioException, DataIdentifierNotFound, \
-                                   FileAlreadyExists, FileReplicaAlreadyExists, \
-                                   DataIdentifierAlreadyExists
-
-from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
 
 class aCTLDMXRegister(aCTLDMXProcess):
     '''
@@ -21,12 +21,9 @@ class aCTLDMXRegister(aCTLDMXProcess):
     files in Rucio.
     '''
 
-    def __init__(self):
-
-        aCTLDMXProcess.__init__(self)
-        # Store a list of known scopes
+    def setup(self):
+        super().setup()
         self.scopes = self.rucio.list_scopes()
-
 
     def processDoneJobs(self):
         '''
@@ -267,13 +264,6 @@ class aCTLDMXRegister(aCTLDMXProcess):
 
 
     def process(self):
-
+        self.setSites()
         # Look for done jobs and process the metadata
         self.processDoneJobs()
-
-
-if __name__ == '__main__':
-
-    ar = aCTLDMXRegister()
-    ar.run()
-    ar.finish()

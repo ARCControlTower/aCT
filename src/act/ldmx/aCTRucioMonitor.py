@@ -2,11 +2,11 @@
 # Should eventually move to Rucio probes
 
 import time
-from rucio.client import Client
-from prometheus_client import start_http_server
-from prometheus_client.core import GaugeMetricFamily, REGISTRY
 
 from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
+from prometheus_client import start_http_server
+from prometheus_client.core import REGISTRY, GaugeMetricFamily
+
 
 class aCTRucioCollector:
 
@@ -39,9 +39,8 @@ class aCTRucioCollector:
 
 class aCTRucioMonitor(aCTLDMXProcess):
 
-    def __init__(self):
-        aCTLDMXProcess.__init__(self)
-        self.rucio = Client()
+    def setup(self):
+        super().setup()
         self.rucio_prometheus_port = self.arcconf.monitor.rucioprometheusport or 0
 
         if self.rucio_prometheus_port:
@@ -53,6 +52,7 @@ class aCTRucioMonitor(aCTLDMXProcess):
 
     def process(self):
         '''Actual metric gathering from Rucio is done at a low frequency here'''
+        self.setSites()
 
         if not self.rucio_prometheus_port:
             return
@@ -71,9 +71,3 @@ class aCTRucioMonitor(aCTLDMXProcess):
 
         self.collector.metrics = metrics
         time.sleep(120)
-
-
-if __name__ == '__main__':
-    am = aCTRucioMonitor()
-    am.run()
-    am.finish()

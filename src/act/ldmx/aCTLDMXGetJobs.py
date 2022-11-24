@@ -1,23 +1,19 @@
-from collections import defaultdict
-from itertools import groupby
 import json
-import math
 import os
 import random
 import tempfile
 import time
-
-from rucio.common.exception import RucioException, DataIdentifierNotFound
+from collections import defaultdict
+from itertools import groupby
 
 from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
+from rucio.common.exception import RucioException
+
 
 class aCTLDMXGetJobs(aCTLDMXProcess):
     '''
     Pick up new jobs and register them in the LDMX db
     '''
-
-    def __init__(self):
-        aCTLDMXProcess.__init__(self)
 
     def generateJobs(self, config):
 
@@ -378,7 +374,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
 
     def process(self):
-
+        self.setSites()
         self.getNewJobs()
 
         # Move old jobs to archive - every hour
@@ -386,10 +382,3 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             self.log.info("Checking for jobs to archive")
             self.archiveBatches()
             self.starttime = time.time()
-
-
-if __name__ == '__main__':
-
-    ar = aCTLDMXGetJobs()
-    ar.run()
-    ar.finish()
