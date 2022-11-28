@@ -154,7 +154,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         # Look for failed final states in ARC which are still starting or running in LDMX
         select = "arcstate in ('donefailed', 'cancelled', 'lost') and arcjobs.id=ldmxjobs.arcjobid"
         columns = ['arcstate', 'arcjobs.id', 'cluster', 'JobID', 'ldmxjobs.created', 'stdout', 'ldmxstatus',
-                   'description', 'template', 'sitename', 'ldmxjobs.proxyid', 'batchid', 'Error', 'appjobid']
+                   'description', 'template', 'sitename', 'ldmxjobs.proxyid', 'userid', 'batchid', 'Error', 'appjobid']
 
         jobstoupdate = self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs,ldmxjobs')
 
@@ -266,7 +266,8 @@ class aCTLDMXStatus(aCTLDMXProcess):
 
         self.log.info(f"{arcjob['appjobid']} will be resubmitted")
         self.dbldmx.insertJob(arcjob['description'], arcjob['template'],
-                              arcjob['proxyid'], batchid=arcjob['batchid'])
+                              arcjob['proxyid'], arcjob['userid'],
+                              batchid=arcjob['batchid'])
 
 
     def copyOutputFiles(self, arcjob):

@@ -1,9 +1,12 @@
 import argparse
 import logging
 import os
+import pwd
 import re
 import shutil
 import sys
+import time
+from pathlib import Path
 
 from act.ldmx import aCTDBLDMX
 from act.common.aCTConfig import aCTConfigAPP
@@ -16,7 +19,8 @@ logger.addHandler(hdlr)
 def submit(args):
 
     try:
-        with open(args.conffile) as f:
+        config_file = os.path.abspath(args.conffile)
+        with open(config_file) as f:
             try:
                 config = {l.split('=')[0]: l.split('=')[1].strip() for l in f if '=' in l}
             except IndexError:
@@ -34,12 +38,8 @@ def submit(args):
                 return 1
 
     actconf = aCTConfigAPP()
-    bufferdir = actconf.jobs.bufferdir
-    if not bufferdir:
-        logger.error(f"Error: bufferdir not found in aCT configuration")
-        return 1
 
-    template_file = os.path.join(bufferdir, 'templates', config['JobTemplate'])
+    template_file = os.path.abspath(os.path.join(args.templatedir, config['JobTemplate']))
     if not os.path.exists(template_file):
         logger.error(f"Error: template not found at {template_file}")
         return 1
@@ -52,11 +52,15 @@ def submit(args):
             logger.info(f"Interrupting submission on request by user. Modify log keeping settings in aCTConfigAPP.xml.")
             return 1
 
-    # Everything looks ok, so submit the job
+    # Get batch name or set default
+    batchname = config.get('BatchID', f'Batch-{time.strftime("%Y-%m-%dT%H:%M:%S")}')
+
+    # Everything looks ok, so submit the batch
     try:
-        shutil.copy(args.conffile, os.path.join(bufferdir, 'configs'))
+        dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
+        dbldmx.insertBatch(config_file, template_file, batchname, args.uid)
     except Exception as e:
-        logger.error(f"Failed to copy {args.conffile} to {os.path.join(bufferdir, 'configs')}: {str(e)}")
+        logger.error(f"Failed to submit {args.conffile}: {str(e)}")
         return 1
 
     logger.info(f"Submitted job configuration at {args.conffile} to create {config.get('NumberofJobs', '')} jobs")
@@ -80,12 +84,17 @@ def cancel(args):
             return 1
         constraints.append(f"sitename='{args.site}'")
 
+    # Check if there are jobs to cancel and if they are all owned by the current user
     dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
-    jobs = dbldmx.getNJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}")
+    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}", columns=['userid'])
 
     if not jobs:
         logger.error('No matching jobs found')
         return 0
+
+    if [j for j in jobs if j['userid'] != args.uid]:
+        logger.error('Found jobs owned by another user which cannot be cancelled')
+        return 1
 
     answer = input(f'This will cancel {jobs} jobs, are you sure? (y/n) ')
     if answer != 'y':
@@ -115,12 +124,17 @@ def resubmit(args):
             return 1
         constraints.append(f"sitename='{args.site}'")
 
+    # Check if there are jobs to resubmit and if they are all owned by the current user
     dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
-    jobs = dbldmx.getNJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}")
+    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}", columns=['userid'])
 
     if not jobs:
         logger.error('No matching jobs found')
         return 0
+
+    if [j for j in jobs if j['userid'] != args.uid]:
+        logger.error('Found jobs owned by another user which cannot be resubmitted')
+        return 1
 
     answer = input(f'This will resubmit {jobs} jobs, are you sure? (y/n) ')
     if answer != 'y':
@@ -144,12 +158,33 @@ def sanitise(query_string):
     """
     return re.match('^[a-zA-Z0-9_\-\.]+$', query_string)
 
+def is_user_allowed(uid, username):
+    """
+    Check if the current user is allowed to run a command on behalf of another
+    """
+    dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
+
+    # Check if this user has admin rights
+    ldmxuser = dbldmx.getUser(os.getuid())
+    if not ldmxuser or ldmxuser['role'] != 'admin':
+        print("You do not have privileges to run commands on behalf of other users")
+        return False
+
+    # Check if the other user exists
+    ldmxuser = dbldmx.getUser(uid)
+    if not ldmxuser:
+        print(f"No such user {username}")
+        return False
+
+    return True
+
 def get_parser():
     """
     Returns the argparse parser.
     """
     oparser = argparse.ArgumentParser(prog=os.path.basename(sys.argv[0]), add_help=True)
     oparser.add_argument('-v', '--verbose', default=False, action='store_true', help="Print more verbose output")
+    oparser.add_argument('-u', '--user', dest='username', action='store', help='Username to run command on behalf of')
 
     subparsers = oparser.add_subparsers()
 
@@ -157,6 +192,7 @@ def get_parser():
     submit_parser.set_defaults(function=submit)
     submit_parser.add_argument('-c', '--config', dest='conffile', action='store', help='Job configuration file')
     submit_parser.add_argument('-k', '--keepLogs', dest='keepLogs', default=False, action='store_true', help='Assertion that we want to keep succesful job logs')
+    submit_parser.add_argument('-t', '--templatedir', dest='templatedir', default=str(Path.home()), action='store', help='Template directory (default $HOME/templates)')
 
     cancel_parser = subparsers.add_parser('cancel', help='Cancel jobs')
     cancel_parser.set_defaults(function=cancel)
@@ -183,9 +219,21 @@ def main():
         oparser.print_help()
         sys.exit(1)
 
+    if args.username:
+        try:
+            args.uid = pwd.getpwnam(args.username)[2]
+        except:
+            logger.error(f'User {args.username} does not exist')
+            sys.exit(1)
+        if not is_user_allowed(args.uid, args.username):
+            sys.exit(1)
+    else:
+        args.uid = os.getuid()
+
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+
     try:
-        if args.verbose:
-            logger.setLevel(logging.DEBUG)
         result = args.function(args)
         sys.exit(result)
     except Exception as error:

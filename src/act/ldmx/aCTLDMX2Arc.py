@@ -13,7 +13,10 @@ class aCTLDMX2Arc(aCTLDMXProcess):
     def processNewJobs(self):
 
         # Submit new jobs
-        newjobs = self.dbldmx.getJobs("ldmxstatus='new' order by modified limit 100")
+        select = "ldmxstatus='new' order by ldmxjobs.modified limit 100"
+        columns = ['ldmxjobs.id', 'ldmxjobs.created', 'ldmxjobs.description',
+                   'ldmxjobs.template', 'proxyid', 'batchname']
+        newjobs = self.dbldmx.getJobs(select, columns=columns, tables='ldmxjobs, ldmxbatches')
         for job in newjobs:
 
             with open(job['description']) as f:
@@ -34,7 +37,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
                                                        clusterlist=clusterlist,
                                                        downloadfiles='diagnose=gmlog/errors;stdout;rucio.metadata',
                                                        appjobid=str(job['id']),
-                                                       fairshare=job['batchid'][:50])
+                                                       fairshare=job['batchname'])
 
             if not arcid:
                 self.log.error('Failed to insert arc job')

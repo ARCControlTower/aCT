@@ -14,9 +14,9 @@ def report(actconfs):
               "toclean", "finished", "failed", "tocancel", "cancelling", "cancelled"]
 
     db = aCTDBLDMX(logger)
-    rows = db.getGroupedJobs('batchid, ldmxstatus')
+    rows = db.getGroupedJobs('batchname, ldmxstatus')
     for r in rows:
-        count, state, site = (r['count(*)'], r['ldmxstatus'], r['batchid'] or 'None')
+        count, state, site = (r['count(*)'], r['ldmxstatus'], r['batchname'] or 'None')
         rep[site][state] += count
         rtot[state] += count
 
