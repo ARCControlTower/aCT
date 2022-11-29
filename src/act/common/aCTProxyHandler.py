@@ -1,10 +1,10 @@
 import datetime
-import time
 import random
+import time
 
+from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
 from act.common.aCTProxy import aCTProxy
-from act.common.aCTConfig import aCTConfigARC
 
 
 class aCTProxyHandler(aCTProcess):

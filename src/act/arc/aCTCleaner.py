@@ -10,7 +10,15 @@ from act.common.aCTJob import ACTJob
 
 class aCTCleaner(aCTARCProcess):
 
+    # TODO: refactor to some library aCT job operation
     def processToClean(self):
+        """
+        Clean designated jobs from ARC cluster and DB.
+
+        Signal handling strategy:
+        - Per proxyid signal defer since the batch of jobs that is cleaned from
+          ARC has to be deleted from DB to not leak the jobs.
+        """
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
 
         # Fetch all jobs that can be cleaned from database.
@@ -32,7 +40,6 @@ class aCTCleaner(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-
             jobs = []
             toARCClean = []
             for dbjob in dbjobs:
@@ -44,28 +51,33 @@ class aCTCleaner(aCTARCProcess):
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
-            arcrest = None
-            try:
-                arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
-                arcrest.cleanJobs(toARCClean)
-            except JSONDecodeError as exc:
-                self.log.error(f"Invalid JSON response from ARC: {exc}")
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error killing jobs in ARC: {exc}")
-            finally:
-                arcrest.close()
+            # exit handling context manager
+            with self.sigdefer:
 
-            # log results and update DB
-            for job in jobs:
-                if job.arcjob.errors:
-                    for error in job.arcjob.errors:
-                        self.log.error(f"Error cleaning job {job.appid} {job.arcid}: {error}")
-                else:
-                    self.log.debug(f"Successfully cleaned job {job.appid} {job.arcid}")
-                self.db.deleteArcJob(job.arcid)
-            self.db.Commit()
+                # clean jobs in ARC
+                arcrest = None
+                try:
+                    arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
+                    arcrest.cleanJobs(toARCClean)
+                except JSONDecodeError as exc:
+                    self.log.error(f"Invalid JSON response from ARC: {exc}")
+                except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+                    self.log.error(f"Error killing jobs in ARC: {exc}")
+                finally:
+                    if arcrest:
+                        arcrest.close()
 
-        self.log.debug("Done")
+                # log results and update DB
+                for job in jobs:
+                    if job.arcjob.errors:
+                        for error in job.arcjob.errors:
+                            self.log.error(f"Error cleaning job {job.appid} {job.arcid}: {error}")
+                    else:
+                        self.log.debug(f"Successfully cleaned job {job.appid} {job.arcid}")
+                    self.db.deleteArcJob(job.arcid)
+                self.db.Commit()
+
+            self.log.debug("Done")
 
     def process(self):
         self.processToClean()

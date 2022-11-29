@@ -1,7 +1,8 @@
+import signal
 import traceback
 
 from act.common.aCTLogger import aCTLogger
-from act.common.aCTSignal import aCTSignal
+from act.common.aCTSignal import aCTSignalDeferrer
 
 
 class aCTProcess:
@@ -26,7 +27,9 @@ class aCTProcess:
         self.log = self.logger()
         self.criticallog = self.criticallogger()
 
-        self.signal = aCTSignal(self.log)
+        signal.signal(signal.SIGINT, stopProcess)
+        signal.signal(signal.SIGTERM, stopProcess)
+        self.sigdefer = aCTSignalDeferrer(self.log, signal.SIGINT, signal.SIGTERM)
 
         msg = f'Starting process {self.name}'
         if self.cluster:
@@ -55,6 +58,8 @@ class aCTProcess:
                 self.loadConf()
                 self.process()
                 self.wait()
+        except ExitProcessException:
+            self.log.info("*** Process exiting normally ***")
         except:
             self.log.critical("*** Unexpected exception! ***")
             self.log.critical(traceback.format_exc())
@@ -62,3 +67,16 @@ class aCTProcess:
             self.criticallog.critical(traceback.format_exc())
         finally:
             self.finish()
+
+
+def exitHandler():
+    stopProcess()
+
+
+def stopProcess(signum, frame):
+    """Throw exception for normal process exit."""
+    raise ExitProcessException()
+
+
+class ExitProcessException(Exception):
+    pass

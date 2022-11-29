@@ -124,7 +124,9 @@ class ARCRest:
 
         self.logger.debug(f"Successfully deleted delegation {delegationID}")
 
-    def submitJobs(self, queue, jobs):
+    # TODO: determine if this interface for optional data upload should be
+    # used.
+    def submitJobs(self, queue, jobs, uploadData=True):
         """
         Submit jobs specified in given list of job objects.
 
@@ -208,7 +210,8 @@ class ARCRest:
                 job.id = result["id"]
                 job.state = result["state"]
                 toupload.append(job)
-        self.uploadJobFiles(toupload)
+        if uploadData:
+            self.uploadJobFiles(toupload)
 
     def getInputUploads(self, job):
         """
