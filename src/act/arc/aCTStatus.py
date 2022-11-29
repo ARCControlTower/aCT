@@ -117,11 +117,7 @@ class aCTStatus(aCTARCProcess):
         super().setup()
         # store the last checkJobs time to avoid overloading of GIIS
         self.checktime = time.time()
-        # this is required by both checkJobs and checkCancellingJobs
-        # and should be kept between the calls
-        self.joblist = []
 
-    # overwrites self.joblist
     def checkJobs(self):
         '''
         Query all running jobs
@@ -166,7 +162,7 @@ class aCTStatus(aCTARCProcess):
             arcrest = None
             try:
                 arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
-                self.joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
+                joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(tocheck)
             except json.JSONDecodeError as exc:
                 self.log.error(f"Error parsing returned JSON document: {exc.doc}")
@@ -188,7 +184,7 @@ class aCTStatus(aCTARCProcess):
                 # cancel jobs that are stuck in tstate and not in job list anymore [1]
                 # TODO: HARDCODED
                 if arcjob.tstate + timedelta(days=7) < datetime.utcnow():
-                    if arcjob.id not in self.joblist:
+                    if arcjob.id not in joblist:
                         self.log.error(f"Job {job.appid} {job.arcid} not in ARC anymore, cancelling")
                         jobdict.update({"arcstate": "tocancel", "tarcstate": tstamp})
                         self.db.updateArcJobLazy(job.arcid, jobdict)
@@ -443,8 +439,6 @@ class aCTStatus(aCTARCProcess):
 
         self.db.Commit()
 
-    # expects that checkJobs has fetched the job list into self.joblist,
-    # it should be called after checkJobs
     def checkCancellingJobs(self):
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate", "created"]
 
@@ -496,6 +490,7 @@ class aCTStatus(aCTARCProcess):
             arcrest = None
             try:
                 arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
+                joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(toGetInfo)
             except json.JSONDecodeError as exc:
                 self.log.error(f"Error parsing returned JSON document: {exc.doc}")
@@ -512,7 +507,7 @@ class aCTStatus(aCTARCProcess):
 
                 # jobs that are not on the list anymore are considered to
                 # be cancelled [1]
-                if arcjob.id not in self.joblist:
+                if arcjob.id not in joblist:
                     self.log.error(f"Job {job.appid} {job.arcid} not in ARC job list anymore, setting to cancelled")
                     self.db.updateArcJobLazy(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp})
                     continue
