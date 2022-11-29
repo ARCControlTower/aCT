@@ -16,6 +16,19 @@ from act.arc.aCTARCProcess import aCTARCProcess
 
 class aCTSubmitter(aCTARCProcess):
 
+    def setup(self):
+        super().setup()
+        # parse queue from cluster URL
+        try:
+            url = urlparse(self.cluster)
+        except ValueError as exc:
+            self.log.error(f"Error parsing cluster URL {url}: {exc}")
+            raise
+        self.queue = url.path.split("/")[-1]
+        self.hostname = url.hostname
+        self.port = url.port
+
+    # TODO: refactor to some library aCT job operation
     def submit(self):
         """
         Main function to submit jobs.
@@ -138,28 +151,7 @@ class aCTSubmitter(aCTARCProcess):
             #
             ##################################################################
 
-            # For now in case of certain errors (when setJobsArcstate is used)
-            # we don't bother to create job objects from DB dicts.
-
             self.log.info(f"Submitting {len(jobs)} jobs")
-
-            # parse cluster URL and queue
-            # TODO: make queue object attribute
-            url = None
-            try:
-                url = urlparse(self.cluster)
-            except ValueError as exc:
-                self.log.error(f"Error parsing cluster URL {url}: {exc}")
-                self.setJobsArcstate(jobs, "tosubmit", commit=True)
-                continue
-            queue = url.path.split("/")[-1]
-
-            # get proxy path
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            if not os.path.isfile(proxypath):
-                self.log.error(f"Proxy path {proxypath} is not a file")
-                self.setJobsArcstate(jobs, "tosubmit", commit=True)
-                continue
 
             # read job descriptions from DB
             actjobs = []
@@ -172,11 +164,13 @@ class aCTSubmitter(aCTARCProcess):
                 actjobs.append(job)
                 arcjobs.append(job.arcjob)
 
+            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
+
             # submit jobs to ARC
             arcrest = None
             try:
                 arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
-                arcrest.submitJobs(queue, arcjobs)
+                arcrest.submitJobs(self.queue, arcjobs)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit", commit=True)
@@ -211,21 +205,6 @@ class aCTSubmitter(aCTARCProcess):
                 jobdict["tarcstate"] = tstamp
                 jobdict["tstate"] = tstamp
                 jobdict["cluster"] = self.cluster
-
-                if url.port is None:
-                    port = 443
-                else:
-                    port = url.port
-                interface = f"https://{url.hostname}:{port}/arex"
-
-                if job.arcjob.delegid:
-                    jobdict["DelegationID"] = job.arcjob.delegid
-                if job.arcjob.id:
-                    jobdict["IDFromEndpoint"] = job.arcjob.id
-                    jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job.arcjob.id}"
-                if job.arcjob.state:
-                    jobdict["State"] = ARC_STATE_MAPPING[job.arcjob.state]
-
                 jobdict["ExecutionNode"] = ""
                 jobdict["UsedTotalWallTime"] = 0
                 jobdict["UsedTotalCPUTime"] = 0
@@ -233,6 +212,14 @@ class aCTSubmitter(aCTARCProcess):
                 jobdict["RequestedTotalCPUTime"] = 0
                 jobdict["RequestedSlots"] = -1
                 jobdict["Error"] = ""
+                if job.arcjob.delegid:
+                    jobdict["DelegationID"] = job.arcjob.delegid
+                if job.arcjob.id:
+                    jobdict["IDFromEndpoint"] = job.arcjob.id
+                    interface = f"https://{self.hostname}:{self.port}/arex"
+                    jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job.arcjob.id}"
+                if job.arcjob.state:
+                    jobdict["State"] = ARC_STATE_MAPPING[job.arcjob.state]
 
                 self.db.updateArcJobLazy(job.arcid, jobdict)
 
