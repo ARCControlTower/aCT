@@ -57,7 +57,8 @@ class aCTFetcher(aCTARCProcess):
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error fetching jobs in ARC: {exc}")
             finally:
-                arcrest.close()
+                if arcrest:
+                    arcrest.close()
 
             for job in jobs:
                 isError = False
