@@ -535,11 +535,11 @@ class ARCRest:
 
 class ARCJob:
 
-    def __init__(self):
-        self.id = None
+    def __init__(self, id=None, descstr=None):
+        self.id = id
+        self.descstr = descstr
         self.name = None
         self.delegid = None
-        self.descstr = None
         self.desc = None
         self.state = None
         self.tstate = None
