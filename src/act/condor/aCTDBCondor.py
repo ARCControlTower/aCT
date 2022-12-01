@@ -1,5 +1,7 @@
 import json
+
 from act.db.aCTDB import aCTDB
+
 
 class aCTDBCondor(aCTDB):
 
@@ -259,7 +261,8 @@ class aCTDBCondor(aCTDB):
         return rows
 
 if __name__ == '__main__':
-    import logging, sys
+    import logging
+    import sys
     log = logging.getLogger()
     out = logging.StreamHandler(sys.stdout)
     log.addHandler(out)
