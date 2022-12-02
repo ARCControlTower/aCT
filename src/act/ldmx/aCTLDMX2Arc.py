@@ -13,7 +13,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
     def processNewJobs(self):
 
         # Submit new jobs
-        select = "ldmxstatus='new' order by ldmxjobs.modified limit 100"
+        select = "ldmxstatus='new' and ldmxjobs.batchid = ldmxbatches.id order by ldmxjobs.modified limit 100"
         columns = ['ldmxjobs.id', 'ldmxjobs.created', 'ldmxjobs.description',
                    'ldmxjobs.template', 'proxyid', 'batchname']
         newjobs = self.dbldmx.getJobs(select, columns=columns, tables='ldmxjobs, ldmxbatches')

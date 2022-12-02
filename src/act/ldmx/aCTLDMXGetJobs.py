@@ -176,6 +176,11 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             self.log.info(f"New batch {batch['batchname']}")
             configfile = batch['description']
             templatefile = batch['template']
+            user = self.dbldmx.getUser(batch['userid'])
+            if not user:
+                self.log.error(f"No such user with userid {batch['userid']}")
+                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
+                continue
 
             try:
                 with open(configfile) as f:
@@ -240,8 +245,16 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                                 ntf.write(f'/random/setSeeds {jobconfig.get("RandomSeed1", 0)} {jobconfig.get("RandomSeed2", 0)}\n')
                             elif l.startswith('/ldmx/persistency/root/runNumber'):
                                 ntf.write(f'/ldmx/persistency/root/runNumber {jobconfig["runNumber"]}\n')
+                            # If user is not admin, remove scope and set after to user.ruciouser
+                            elif l.startswith('Scope=') and user['role'] != 'admin':
+                                pass
                             else:
                                 ntf.write(l)
+                        # Add user info
+                        ntf.write(f"username={user['username']}")
+                        ntf.write(f"ruciouser={user['ruciouser']}")
+                        if user['role'] != 'admin':
+                            ntf.write(f"Scope=user.{user['ruciouser']}")
                     jobfiles.append((newjobfile, newtemplatefile))
 
                 for (newjobfile, newtemplatefile) in jobfiles:
@@ -269,8 +282,8 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
             # All jobs are finished, so archive
             select = f"batchid='{batchid}'" if batchid else 'batchid is NULL'
-            select += ' AND ldmxjobs.batchid = ldmxbatches.batchname'
-            columns = ['id', 'sitename', 'ldmxstatus', 'starttime', 'endtime', 'batchname']
+            select += ' AND ldmxjobs.batchid = ldmxbatches.id'
+            columns = ['ldmxjobs.id', 'sitename', 'ldmxstatus', 'starttime', 'endtime', 'batchname']
             jobs = self.dbldmx.getJobs(select, columns, tables='ldmxjobs, ldmxbatches')
             if not jobs:
                 continue
