@@ -247,6 +247,15 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                                 ntf.write(f'/random/setSeeds {jobconfig.get("RandomSeed1", 0)} {jobconfig.get("RandomSeed2", 0)}\n')
                             elif l.startswith('/ldmx/persistency/root/runNumber'):
                                 ntf.write(f'/ldmx/persistency/root/runNumber {jobconfig["runNumber"]}\n')
+                            elif  l.startswith('sim.setDetector(') :
+                                ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", False )\n')
+                            elif  l.startswith('sim.scoringPlanes') :  #overwrite use SP false-->true by reconfiguring
+                                ntf.write(f'sim.scoringPlanes = makeScoringPlanesPath("ldmx-det-v{jobconfig["DetectorVersion"]}")\n')
+                                ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", True )\n')
+                            elif  l.startswith('nElectrons =') or l.startswith('nElectrons='):
+                                ntf.write(f'nElectrons = {jobconfig["ElectronNumber"]}\n')              
+                            elif  l.startswith('beamEnergy =') or l.startswith('beamEnergy='):
+                                ntf.write(f'beamEnergy = {jobconfig["BeamEnergy"]}\n')              
                             else:
                                 ntf.write(l)
                     jobfiles.append((newjobfile, newtemplatefile))
