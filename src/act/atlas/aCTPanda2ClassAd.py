@@ -51,8 +51,7 @@ class aCTPanda2ClassAd:
         now = time.gmtime() # gmtime() is like localtime() but in UTC
         today = "%04d-%02d-%02d" % (now[0], now[1], now[2])
         self.logdir = os.path.join(atlasconf.joblog.dir, today, sitename)
-        try: os.makedirs(self.logdir)
-        except: pass
+        os.makedirs(self.logdir, exist_ok=True)
 
         self.logurl = f'{atlasconf.joblog.urlprefix}/{today}/{sitename}'
 
@@ -180,10 +179,7 @@ class aCTPanda2ClassAd:
         # allow different src and dest filenames so make a dir per panda job id
         if not self.siteinfo['push']:
             return
-        try:
-            os.makedirs(self.inputjobdir)
-        except:
-            pass
+        os.makedirs(self.inputjobdir, exist_ok=True)
         tmpfile = os.path.join(self.inputjobdir, "pandaJobData.out")
         with open(tmpfile, "w") as f:
             f.write(self.pandajob)

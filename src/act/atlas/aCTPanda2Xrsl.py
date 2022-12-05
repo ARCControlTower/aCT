@@ -260,10 +260,7 @@ class aCTPanda2Xrsl:
         x = ""
         if self.siteinfo['push']:
             # create input file with job desc
-            try:
-                os.makedirs(self.inputjobdir)
-            except:
-                pass
+            os.makedirs(self.inputjobdir, exist_ok=True)
             tmpfile = self.inputjobdir+"/pandaJobData.out"
             with open(tmpfile, "w") as f:
                 f.write(self.pandajob)

@@ -53,11 +53,7 @@ class aCTPandaJob:
         '''
         Write json of job info to filename. Overwrites an existing file.
         '''
-        try:
-            os.makedirs(os.path.dirname(filename), 0o755)
-        except:
-            pass
-
+        os.makedirs(os.path.dirname(filename), 0o755, exist_ok=True)
         with open(filename, 'w') as f:
             json.dump(self.dictionary(), f)
 
@@ -73,4 +69,3 @@ if __name__ == '__main__':
     with open('/tmp/x/pickle') as f:
         pj3 = aCTPandaJob(filehandle=f)
         print(pj3.dictionary())
-

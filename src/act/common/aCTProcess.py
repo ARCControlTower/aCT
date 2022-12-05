@@ -68,7 +68,6 @@ class aCTProcess:
         finally:
             self.finish()
 
-
 def exitHandler():
     stopProcess()
 

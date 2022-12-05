@@ -2,125 +2,174 @@ import os
 import shutil
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
+from act.common.aCTProcess import ExitProcessException
 
 
 class aCTValidatorCondor(aCTATLASProcess):
-    '''
+    """
     Condor is truepilot-only so validator just moves jobs to final state, sets
     condorjobs to clean, and cleans up any leftover temp files
-    '''
+    """
 
     def __init__(self, name):
         super().__init__(name, ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
 
     def cleanFinishedJob(self, pandaid):
-        '''
-        Remove temporary files needed for this job
-        '''
-
+        """Remove temporary files needed for this job."""
         pandainputdir = os.path.join(self.tmpdir, 'inputfiles', str(pandaid))
         shutil.rmtree(pandainputdir, ignore_errors=True)
 
-
     def validateFinishedJobs(self):
-        '''
+        """
         Check for jobs with actpandastatus tovalidate and pandastatus transferring
         and move to actpandastatus to finished
-        '''
 
-        # get all jobs with pandastatus running and actpandastatus tovalidate
-        select = "(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in %s limit 100000" % self.sitesselect
-        columns = ["condorjobid", "pandaid"]
-        jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
+        Signal handling strategy:
+        - all updates are executed in one transaction which gets rolled back on
+          signal
+        - if cleanFinishedJob() happens before the transaction is commited, it
+          is not a problem
+        """
+        # exit handling try block
+        try:
 
-        if len(jobstoupdate) == 0:
-            # nothing to do
-            return
+            # get all jobs with pandastatus running and actpandastatus tovalidate
+            select = "(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in %s limit 100000" % self.sitesselect
+            columns = ["condorjobid", "pandaid"]
+            jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
 
-        # Skip validation for the true pilot jobs, just copy logs, set to done and clean condor job
-        for job in jobstoupdate:
-            self.log.info('%s: Skip validation' % job['pandaid'])
-            select = "condorjobid='"+str(job["condorjobid"])+"'"
-            desc = {"pandastatus": None, "actpandastatus": "finished"}
-            self.dbpanda.updateJobs(select, desc)
-            # set condorjobs state toclean
-            desc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
-            self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
-            self.cleanFinishedJob(job['pandaid'])
+            if len(jobstoupdate) == 0:
+                # nothing to do
+                return
 
-        self.dbcondor.Commit()
+            # Skip validation for the true pilot jobs, just copy logs, set to done and clean condor job
+            for job in jobstoupdate:
+                self.log.info('%s: Skip validation' % job['pandaid'])
+                select = "condorjobid='"+str(job["condorjobid"])+"'"
+                desc = {"pandastatus": None, "actpandastatus": "finished"}
+                self.dbpanda.updateJobsLazy(select, desc)
+                # set condorjobs state toclean
+                desc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
+                self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
+                self.cleanFinishedJob(job['pandaid'])
 
+        except Exception as exc:
+            if isinstance(exc, ExitProcessException):
+                self.log.info("Rolling back DB transaction on process exit")
+            else:
+                self.log.error(f"Rolling back DB transaction on error: {exc}")
+            self.dbpanda.db.conn.rollback()
+            self.dbcondor.db.conn.rollback()
+            raise
+        else:
+            self.dbpanda.Commit()
+            self.dbcondor.Commit()
 
     def cleanFailedJobs(self):
-        '''
+        """
         Check for jobs with actpandastatus toclean and pandastatus transferring.
         Move actpandastatus to failed.
-        '''
-        # get all jobs with pandastatus transferring and actpandastatus toclean
-        select = "(pandastatus='transferring' and actpandastatus='toclean') and siteName in %s limit 100000" % self.sitesselect
-        columns = ["condorjobid", "pandaid"]
-        jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
 
-        if len(jobstoupdate) == 0:
-            # nothing to do
-            return
+        Signal handling strategy:
+        - all updates are executed in one transaction which gets rolled back on
+          signal
+        - if cleanFinishedJob() happens before the transaction is commited, it
+          is not a problem
+        """
+        # exit handling try block
+        try:
 
-        # For truepilot jobs, don't try to clean outputs (too dangerous), just clean condor job
-        for job in jobstoupdate[:]:
-            self.log.info("%s: Skip cleanup of output files" % job['pandaid'])
-            select = "condorjobid='"+str(job["condorjobid"])+"'"
-            desc = {"pandastatus": None, "actpandastatus": "failed"}
-            self.dbpanda.updateJobs(select, desc)
-            # set condorjobs state toclean
-            desc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
-            self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
-            self.cleanFinishedJob(job['pandaid'])
+            # get all jobs with pandastatus transferring and actpandastatus toclean
+            select = "(pandastatus='transferring' and actpandastatus='toclean') and siteName in %s limit 100000" % self.sitesselect
+            columns = ["condorjobid", "pandaid"]
+            jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
 
-        self.dbcondor.Commit()
+            if len(jobstoupdate) == 0:
+                # nothing to do
+                return
 
+            # For truepilot jobs, don't try to clean outputs (too dangerous), just clean condor job
+            for job in jobstoupdate[:]:
+                self.log.info("%s: Skip cleanup of output files" % job['pandaid'])
+                select = "condorjobid='"+str(job["condorjobid"])+"'"
+                desc = {"pandastatus": None, "actpandastatus": "failed"}
+                self.dbpanda.updateJobsLazy(select, desc)
+                # set condorjobs state toclean
+                desc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
+                self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
+                self.cleanFinishedJob(job['pandaid'])
+
+        except Exception as exc:
+            if isinstance(exc, ExitProcessException):
+                self.log.info("Rolling back DB transaction on process exit")
+            else:
+                self.log.error(f"Rolling back DB transaction on error: {exc}")
+            self.dbpanda.db.conn.rollback()
+            self.dbcondor.db.conn.rollback()
+            raise
+        else:
+            self.dbpanda.Commit()
+            self.dbcondor.Commit()
 
     def cleanResubmittingJobs(self):
-        '''
+        """
         Check for jobs with actpandastatus toresubmit and pandastatus starting.
         Move actpandastatus to starting and set condorjobid to NULL.
         For Condor true pilot, resubmission should never be automatic, so this
         workflow only happens when the DB is manually changed.
-        '''
 
-        # First check for resubmitting jobs with no arcjob id defined
-        select = "(actpandastatus='toresubmit' and condorjobid=NULL) and siteName in %s limit 100000" % self.sitesselect
-        columns = ["pandaid", "id"]
+        Signal handling strategy:
+        - all updates are executed in one transaction which gets rolled back on
+          signal
+        """
+        # exit handling try block
+        try:
 
-        jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
+            # First check for resubmitting jobs with no arcjob id defined
+            select = "(actpandastatus='toresubmit' and condorjobid=NULL) and siteName in %s limit 100000" % self.sitesselect
+            columns = ["pandaid", "id"]
 
-        for job in jobstoupdate:
-            self.log.info('%s: resubmitting' % job['pandaid'])
-            select = "id="+str(job['id'])
-            desc = {"actpandastatus": "starting", "condorjobid": None}
-            self.dbpanda.updateJobs(select, desc)
+            jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
 
-        # Get all other jobs with actpandastatus toresubmit
-        select = "actpandastatus='toresubmit' and condorjobs.id=pandajobs.condorjobid and siteName in %s limit 100" % self.sitesselect
-        columns = ["pandajobs.condorjobid", "pandajobs.pandaid", "condorjobs.ClusterId", "condorjobs.condorstate"]
-        jobstoupdate = self.dbcondor.getCondorJobsInfo(select, columns=columns, tables='condorjobs, pandajobs')
+            for job in jobstoupdate:
+                self.log.info('%s: resubmitting' % job['pandaid'])
+                select = "id="+str(job['id'])
+                desc = {"actpandastatus": "starting", "condorjobid": None}
+                self.dbpanda.updateJobsLazy(select, desc)
 
-        if len(jobstoupdate) == 0:
-            # nothing to do
-            return
+            # Get all other jobs with actpandastatus toresubmit
+            select = "actpandastatus='toresubmit' and condorjobs.id=pandajobs.condorjobid and siteName in %s limit 100" % self.sitesselect
+            columns = ["pandajobs.condorjobid", "pandajobs.pandaid", "condorjobs.ClusterId", "condorjobs.condorstate"]
+            jobstoupdate = self.dbcondor.getCondorJobsInfo(select, columns=columns, tables='condorjobs, pandajobs')
 
-        for job in jobstoupdate:
-            # Only try to cancel jobs which are not finished
-            if job['condorstate'] not in ('donefailed', 'done', 'lost', 'cancelled'):
-                self.log.info('%s: manually asked to resubmit, cancelling condor job %s' %
-                              (job['pandaid'], job['ClusterId']))
-                desc = {'condorstate': 'tocancel', 'tcondorstate': self.dbcondor.getTimeStamp()}
-                self.dbcondor.updateCondorJob(job['condorjobid'], desc)
+            if len(jobstoupdate) == 0:
+                # nothing to do
+                return
 
-            self.log.info('%s: resubmitting' % job['pandaid'])
-            select = "pandaid="+str(job['pandaid'])
-            desc = {"actpandastatus": "starting", "condorjobid": None}
-            self.dbpanda.updateJobs(select, desc)
+            for job in jobstoupdate:
+                # Only try to cancel jobs which are not finished
+                if job['condorstate'] not in ('donefailed', 'done', 'lost', 'cancelled'):
+                    self.log.info('%s: manually asked to resubmit, cancelling condor job %s' %
+                                  (job['pandaid'], job['ClusterId']))
+                    desc = {'condorstate': 'tocancel', 'tcondorstate': self.dbcondor.getTimeStamp()}
+                    self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
 
+                self.log.info('%s: resubmitting' % job['pandaid'])
+                select = "pandaid="+str(job['pandaid'])
+                desc = {"actpandastatus": "starting", "condorjobid": None}
+                self.dbpanda.updateJobsLazy(select, desc)
+
+        except Exception as exc:
+            if isinstance(exc, ExitProcessException):
+                self.log.info("Rolling back DB transaction on process exit")
+            else:
+                self.log.error(f"Rolling back DB transaction on error: {exc}")
+            self.dbpanda.db.conn.rollback()
+            self.dbcondor.db.conn.rollback()
+            raise
+        else:
+            self.dbpanda.Commit()
+            self.dbcondor.Commit()
 
     def process(self):
         self.setSites()

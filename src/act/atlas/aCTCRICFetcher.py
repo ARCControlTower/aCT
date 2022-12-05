@@ -16,6 +16,10 @@ class aCTCRICFetcher(aCTATLASProcess):
         self.queues = self.conf.cric.server
         self.queuesfile = self.conf.cric.jsonfilename
 
+    def wait(self):
+        # avoid too much cric fetching
+        time.sleep(600)
+
     def fetchFromCRIC(self, url, filename):
         try:
             self.log.debug("Downloading from %s" % url)
@@ -41,13 +45,9 @@ class aCTCRICFetcher(aCTATLASProcess):
         if not cricjson:
             return
         tmpfile=filename+'_'
-        try:
-            with open(tmpfile, 'w') as f:
-                f.write(cricjson)
-        except:
-            os.makedirs(tmpfile[:tmpfile.rfind('/')], 0o755)
-            with open(tmpfile, 'w') as f:
-                f.write(cricjson)
+        os.makedirs(tmpfile[:tmpfile.rfind('/')], 0o755, exist_ok=True)
+        with open(tmpfile, 'w') as f:
+            f.write(cricjson)
 
         os.rename(tmpfile, filename)
         self.log.debug("Wrote "+filename)
@@ -62,5 +62,3 @@ class aCTCRICFetcher(aCTATLASProcess):
         queuesjson = self.fetchFromCRIC(self.queues, self.queuesfile)
         # store data to file
         self.storeToFile(queuesjson, self.queuesfile)
-        # temporary hack to avoid too much cric fetching
-        time.sleep(600)

@@ -11,7 +11,7 @@ from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
 from act.common import aCTUtils
 from act.common.aCTProxy import aCTProxy
-from act.common.aCTProcess import stopProcess
+from act.common.aCTProcess import stopProcess, ExitProcessException
 
 
 class aCTValidator(aCTATLASProcess):
@@ -117,10 +117,7 @@ class aCTValidator(aCTATLASProcess):
 
         # copy to joblog dir files downloaded for the job: gmlog errors and pilot log
         outd = os.path.join(self.conf.joblog.dir, date, aj['fairshare'])
-        try:
-            os.makedirs(outd, 0o755)
-        except:
-            pass
+        os.makedirs(outd, 0o755, exist_ok=True)
 
         localdir = os.path.join(self.tmpdir, sessionid)
         gmlogerrors = os.path.join(localdir, "gmlog", "errors")
@@ -345,10 +342,7 @@ class aCTValidator(aCTATLASProcess):
             sessionid = jobid[jobid.rfind('/'):]
             localdir = self.tmpdir + sessionid
 
-            try:
-                os.makedirs(localdir, 0o755)
-            except:
-                pass
+            os.makedirs(localdir, 0o755, exist_ok=True)
 
             source = aCTUtils.DataPoint(str(jobid + '/heartbeat.json'), self.uc)
             dest = aCTUtils.DataPoint(str(localdir + '/heartbeat.json'), self.uc)
@@ -374,13 +368,34 @@ class aCTValidator(aCTATLASProcess):
 
 
     def validateFinishedJobs(self):
-        '''
+        """
         Check for jobs with actpandastatus tovalidate and pandastatus running
         Check if the output files in pilot heartbeat json are valid.
         If yes, move to actpandastatus to finished, if not, move pandastatus
         and actpandastatus to failed.
-        '''
 
+        Signal handling strategy:
+        - notes:
+          - copyFinishedFiles() and cleanDownloadedJob() can be interrupted and
+            rerun without problems.
+
+          - Previous solution committed immediately in some places when
+            updating arcjobs and pandajobs. This is not good because if the
+            operation is interrupted, the cleanDownloadedJob() might not be
+            finished or even called yet which would leave files behind. Unless
+            those left behind files are handled somewhere else, this is a
+            problem. Also, the operation could be interrupted between updates
+            in both tables which would cause inconsistency of states in DB. A
+            better solution is to make all database updates lazy and have one
+            big transaction that only succeeds if everything gets through.
+
+        - all operations are done in one big transaction that is rolled back
+          on signal
+
+        - TODO: review: Is it really true that all operations can be
+                interrupted and rerun and no consistency needs to be enforced
+                beyond the single transaction?
+        """
         # get all jobs with pandastatus running and actpandastatus tovalidate
         select = "(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in %s limit 1000" % self.sitesselect
         columns = ["arcjobid", "pandaid", "siteName", "metadata"]
@@ -390,79 +405,104 @@ class aCTValidator(aCTATLASProcess):
             # nothing to do
             return
 
-        # Skip validation for the true pilot jobs, just copy logs, set to done and clean arc job
-        for job in jobstoupdate[:]:
-            if self.sites[job['siteName']]['truepilot']:
-                self.log.info('%s: Skip validation' % job['pandaid'])
-                if not self.copyFinishedFiles(job["arcjobid"], False):
-                    self.log.warning("%s: Failed to copy log files" % job['pandaid'])
-                # set arcjobs state toclean
-                desc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
-                self.dbarc.updateArcJob(job['arcjobid'], desc)
-                # set pandajob done
-                select = "arcjobid='"+str(job["arcjobid"])+"'"
-                desc = {"pandastatus": None, "actpandastatus": "done"}
-                self.dbpanda.updateJobs(select, desc)
-                self.cleanDownloadedJob(job['arcjobid'])
-                jobstoupdate.remove(job)
+        # exit handling try block
+        try:
 
-        # pull out output file info from pilot heartbeat json into dict, order by SE
-        surls = {}
-        for job in jobstoupdate:
-            jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
-            if not jobsurls:
-                # Problem extracting files, fail the job
-                self.log.error("%s: Cannot validate output of arc job %s" % (job['pandaid'], job["arcjobid"]))
-                # set arcjobs state toclean
-                desc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
-                self.dbarc.updateArcJob(job['arcjobid'], desc)
-                # set pandajob failed
-                select = "arcjobid='"+str(job["arcjobid"])+"'"
-                desc = {"actpandastatus": "failed", "pandastatus": "failed"}
-                self.dbpanda.updateJobs(select, desc)
-                self.cleanDownloadedJob(job['arcjobid'])
+            # Skip validation for the true pilot jobs, just copy logs, set to done and clean arc job
+            for job in jobstoupdate[:]:
+                if self.sites[job['siteName']]['truepilot']:
+                    self.log.info('%s: Skip validation' % job['pandaid'])
+                    if not self.copyFinishedFiles(job["arcjobid"], False):
+                        self.log.warning("%s: Failed to copy log files" % job['pandaid'])
+                    # set arcjobs state toclean
+                    desc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+                    self.dbarc.updateArcJobLazy(job['arcjobid'], desc)
+                    # set pandajob done
+                    select = "arcjobid='"+str(job["arcjobid"])+"'"
+                    desc = {"pandastatus": None, "actpandastatus": "done"}
+                    self.dbpanda.updateJobsLazy(select, desc)
+                    self.cleanDownloadedJob(job['arcjobid'])
+                    jobstoupdate.remove(job)
+
+            # pull out output file info from pilot heartbeat json into dict, order by SE
+            surls = {}
+            for job in jobstoupdate:
+                jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
+                if not jobsurls:
+                    # Problem extracting files, fail the job
+                    self.log.error("%s: Cannot validate output of arc job %s" % (job['pandaid'], job["arcjobid"]))
+                    # set arcjobs state toclean
+                    desc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+                    self.dbarc.updateArcJobLazy(job['arcjobid'], desc)
+                    # set pandajob failed
+                    select = "arcjobid='"+str(job["arcjobid"])+"'"
+                    desc = {"actpandastatus": "failed", "pandastatus": "failed"}
+                    self.dbpanda.updateJobsLazy(select, desc)
+                    self.cleanDownloadedJob(job['arcjobid'])
+                else:
+                    for se in jobsurls:
+                        try:
+                            surls[se].extend(jobsurls[se])
+                        except:
+                            surls[se] = jobsurls[se]
+            if not surls:
+                # nothing to validate
+                return
+
+            # check if surls valid, update pandastatus accordingly
+            checkedsurls = self.checkOutputFiles(surls)
+            for id, result in checkedsurls.items():
+                if result == self.ok:
+                    select = "arcjobid='"+str(id)+"'"
+                    desc = {"pandastatus": "finished", "actpandastatus": "finished"}
+                    self.dbpanda.updateJobsLazy(select, desc)
+                    if not self.copyFinishedFiles(id, True):
+                        # id was gone already
+                        continue
+                    # set arcjobs state toclean
+                    desc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+                    self.dbarc.updateArcJobLazy(id, desc)
+                    self.cleanDownloadedJob(id)
+                elif result == self.failed:
+                    select = "arcjobid='"+str(id)+"'"
+                    # output file failed, set to toresubmit to clean up output and resubmit
+                    desc = {"pandastatus": "starting", "actpandastatus": "toresubmit"}
+                    self.dbpanda.updateJobsLazy(select, desc)
+                else:
+                    # Retry next time
+                    pass
+
+        except Exception as exc:
+            if isinstance(exc, ExitProcessException):
+                self.log.info("Rolling back DB transaction on process exit")
             else:
-                for se in jobsurls:
-                    try:
-                        surls[se].extend(jobsurls[se])
-                    except:
-                        surls[se] = jobsurls[se]
-        if not surls:
-            # nothing to validate
-            return
-
-        # check if surls valid, update pandastatus accordingly
-        checkedsurls = self.checkOutputFiles(surls)
-        for id, result in checkedsurls.items():
-            if result == self.ok:
-                select = "arcjobid='"+str(id)+"'"
-                desc = {"pandastatus": "finished", "actpandastatus": "finished"}
-                self.dbpanda.updateJobsLazy(select, desc)
-                if not self.copyFinishedFiles(id, True):
-                    # id was gone already
-                    continue
-                # set arcjobs state toclean
-                desc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
-                self.dbarc.updateArcJobLazy(id, desc)
-                self.cleanDownloadedJob(id)
-            elif result == self.failed:
-                select = "arcjobid='"+str(id)+"'"
-                # output file failed, set to toresubmit to clean up output and resubmit
-                desc = {"pandastatus": "starting", "actpandastatus": "toresubmit"}
-                self.dbpanda.updateJobsLazy(select, desc)
-            else:
-                # Retry next time
-                pass
-
-        self.dbpanda.Commit()
-        self.dbarc.Commit()
-
+                self.log.error(f"Rolling back DB transaction on error: {exc}")
+            self.dbpanda.db.conn.rollback()
+            self.dbarc.db.conn.rollback()
+            raise
+        else:
+            self.dbpanda.Commit()
+            self.dbarc.Commit()
 
     def cleanFailedJobs(self):
         '''
         Check for jobs with actpandastatus toclean and pandastatus transferring.
         Delete the output files in pilot heartbeat json
         Move actpandastatus to failed.
+
+        Signal handling strategy:
+        - notes:
+          - If removeOutputFiles() is called on several files and then the
+            operation gets interrupted and the transaction cancelled, the files
+            will be deleted again. This is not a problem because the function
+            doesn't interpret inexistence as failure. It might also not matter
+            otherwise because the resources do not exist anymore which is the
+            point.
+
+        - all updates are executed in one transaction which gets rolled back on
+          signal
+        - previously, there were commited transactions for single jobs which
+          could result in inconsistencies between DB tables and filesystem
         '''
         # get all jobs with pandastatus transferring and actpandastatus toclean
         select = "(pandastatus='transferring' and actpandastatus='toclean') and siteName in %s limit 1000" % self.sitesselect
@@ -475,174 +515,203 @@ class aCTValidator(aCTATLASProcess):
 
         cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
 
-        # For truepilot jobs, don't try to clean outputs (too dangerous), just clean arc job
-        for job in jobstoupdate[:]:
-            # Cleaning a bad storage can block the validator, so skip cleaning in all cases
-            if True:
-            #if self.sites[job['siteName']]['truepilot']:
-                self.log.info("%s: Skip cleanup of output files" % job['pandaid'])
-                # set arcjobs state toclean
-                self.dbarc.updateArcJob(job["arcjobid"], cleandesc)
-                # set pandajob failed
-                select = "arcjobid='"+str(job["arcjobid"])+"'"
-                desc = {"actpandastatus": "failed", "pandastatus": "failed"}
-                self.dbpanda.updateJobs(select, desc)
-                jobstoupdate.remove(job)
-                self.cleanDownloadedJob(job["arcjobid"])
+        # exit handling try block
+        try:
 
-        # pull out output file info from pilot heartbeat json into dict, order by SE
-        surls = {}
-        for job in jobstoupdate:
-            jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
-            if not jobsurls:
-                # Problem extracting files, just continue to failed
-                self.log.error("%s: Cannot remove output of arc job %s" % (job['pandaid'], job["arcjobid"]))
-                # set arcjobs state toclean
-                self.dbarc.updateArcJob(job["arcjobid"], cleandesc)
-                # set pandajob failed
-                select = "arcjobid='"+str(job["arcjobid"])+"'"
-                desc = {"actpandastatus": "failed", "pandastatus": "failed"}
-                self.dbpanda.updateJobs(select, desc)
-                self.cleanDownloadedJob(job["arcjobid"])
-            else:
-                surls.update(jobsurls)
-
-        if not surls:
-            # nothing to clean
-            return
-
-        for se in surls:
-            removedsurls = self.removeOutputFiles(surls[se])
-            for id, result in list(removedsurls.items()):
-                # If failed, not much we can do except continue
-                if result == self.ok or result == self.failed:
+            # For truepilot jobs, don't try to clean outputs (too dangerous), just clean arc job
+            for job in jobstoupdate[:]:
+                # Cleaning a bad storage can block the validator, so skip cleaning in all cases
+                if True:
+                #if self.sites[job['siteName']]['truepilot']:
+                    self.log.info("%s: Skip cleanup of output files" % job['pandaid'])
                     # set arcjobs state toclean
-                    self.dbarc.updateArcJobLazy(id, cleandesc)
+                    self.dbarc.updateArcJobLazy(job["arcjobid"], cleandesc)
                     # set pandajob failed
-                    select = "arcjobid='"+str(id)+"'"
+                    select = "arcjobid='"+str(job["arcjobid"])+"'"
                     desc = {"actpandastatus": "failed", "pandastatus": "failed"}
                     self.dbpanda.updateJobsLazy(select, desc)
-                    self.cleanDownloadedJob(id)
+                    jobstoupdate.remove(job)
+                    self.cleanDownloadedJob(job["arcjobid"])
+
+            # pull out output file info from pilot heartbeat json into dict, order by SE
+            surls = {}
+            for job in jobstoupdate:
+                jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
+                if not jobsurls:
+                    # Problem extracting files, just continue to failed
+                    self.log.error("%s: Cannot remove output of arc job %s" % (job['pandaid'], job["arcjobid"]))
+                    # set arcjobs state toclean
+                    self.dbarc.updateArcJobLazy(job["arcjobid"], cleandesc)
+                    # set pandajob failed
+                    select = "arcjobid='"+str(job["arcjobid"])+"'"
+                    desc = {"actpandastatus": "failed", "pandastatus": "failed"}
+                    self.dbpanda.updateJobsLazy(select, desc)
+                    self.cleanDownloadedJob(job["arcjobid"])
                 else:
-                    # Retry next time
-                    pass
+                    surls.update(jobsurls)
 
-        self.dbpanda.Commit()
-        self.dbarc.Commit()
+            if not surls:
+                # nothing to clean
+                return
 
+            for se in surls:
+                removedsurls = self.removeOutputFiles(surls[se])
+                for id, result in list(removedsurls.items()):
+                    # If failed, not much we can do except continue
+                    if result == self.ok or result == self.failed:
+                        # set arcjobs state toclean
+                        self.dbarc.updateArcJobLazy(id, cleandesc)
+                        # set pandajob failed
+                        select = "arcjobid='"+str(id)+"'"
+                        desc = {"actpandastatus": "failed", "pandastatus": "failed"}
+                        self.dbpanda.updateJobsLazy(select, desc)
+                        self.cleanDownloadedJob(id)
+                    else:
+                        # Retry next time
+                        pass
+
+        except Exception as exc:
+            if isinstance(exc, ExitProcessException):
+                self.log.info("Rolling back DB transaction on process exit")
+            else:
+                self.log.error(f"Rolling back DB transaction on error: {exc}")
+            self.dbpanda.db.conn.rollback()
+            self.dbarc.db.conn.rollback()
+            raise
+        else:
+            self.dbpanda.Commit()
+            self.dbarc.Commit()
 
     def cleanResubmittingJobs(self):
         '''
         Check for jobs with actpandastatus toresubmit and pandastatus starting.
         Delete the output files in pilot heartbeat json
         Move actpandastatus to starting.
+
+        Signal handling strategy:
+        - all updates are executed in one transaction which gets rolled back on
+          signal
+        - previously, there were commited transactions for single jobs which
+          could result in inconsistencies between DB tables and filesystem
         '''
+        # exit handling try block
+        try:
+            # First check for resubmitting jobs with no arcjob id defined
+            select = "(actpandastatus='toresubmit' and arcjobid=NULL) and siteName in %s limit 1000" % self.sitesselect
+            columns = ["pandaid", "id"]
 
-        # First check for resubmitting jobs with no arcjob id defined
-        select = "(actpandastatus='toresubmit' and arcjobid=NULL) and siteName in %s limit 1000" % self.sitesselect
-        columns = ["pandaid", "id"]
+            jobstoupdate=self.dbpanda.getJobs(select, columns=columns)
 
-        jobstoupdate=self.dbpanda.getJobs(select, columns=columns)
+            for job in jobstoupdate:
+                self.log.info('%s: resubmitting' % job['pandaid'])
+                select = "id="+str(job['id'])
+                desc = {"actpandastatus": "starting", "arcjobid": None}
+                self.dbpanda.updateJobsLazy(select, desc)
 
-        for job in jobstoupdate:
-            self.log.info('%s: resubmitting' % job['pandaid'])
-            select = "id="+str(job['id'])
-            desc = {"actpandastatus": "starting", "arcjobid": None}
-            self.dbpanda.updateJobs(select, desc)
+            # Get all other jobs with pandastatus starting and actpandastatus toresubmit
+            # 2 possibilities for these jobs:
+            # - job failed and aCT decided to resubmit: clean output files
+            # - job was manually set toresubmit by aCT admin: set arc job tocancel,
+            #   attempt to get heartbeat info and clean but don't fail if not possible.
+            #   In this case don't wait for cancellation to finish as A-REX may be
+            #   broken. There is always the possibility of a race condition where
+            #   output files are produced and uploaded between checking for them and
+            #   cancelling the job.
+            select = "actpandastatus='toresubmit' and arcjobs.id=pandajobs.arcjobid limit 100"
+            columns = ["pandajobs.arcjobid", "pandajobs.pandaid", "arcjobs.JobID", "arcjobs.arcstate", "arcjobs.restartstate"]
+            jobstoupdate=self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs, pandajobs')
 
-        # Get all other jobs with pandastatus starting and actpandastatus toresubmit
-        # 2 possibilities for these jobs:
-        # - job failed and aCT decided to resubmit: clean output files
-        # - job was manually set toresubmit by aCT admin: set arc job tocancel,
-        #   attempt to get heartbeat info and clean but don't fail if not possible.
-        #   In this case don't wait for cancellation to finish as A-REX may be
-        #   broken. There is always the possibility of a race condition where
-        #   output files are produced and uploaded between checking for them and
-        #   cancelling the job.
-        select = "actpandastatus='toresubmit' and arcjobs.id=pandajobs.arcjobid limit 100"
-        columns = ["pandajobs.arcjobid", "pandajobs.pandaid", "arcjobs.JobID", "arcjobs.arcstate", "arcjobs.restartstate"]
-        jobstoupdate=self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs, pandajobs')
+            if len(jobstoupdate)==0:
+                # nothing to do
+                return
 
-        if len(jobstoupdate)==0:
-            # nothing to do
-            return
+            #killedbymanual = [j for j in jobstoupdate if j['arcstate'] != 'donefailed' and j['arcstate'] != 'done' and j['arcstate'] != 'lost' and j['arcstate'] != 'cancelled']
+            killedbymanual = [j for j in jobstoupdate if j['arcstate'] not in ('donefailed', 'done', 'lost', 'cancelled')]
 
-        killedbymanual = [j for j in jobstoupdate if j['arcstate'] != 'donefailed' and j['arcstate'] != 'done' and j['arcstate'] != 'lost' and j['arcstate'] != 'cancelled']
+            # TODO: make data transfer separate from main validator thread
+            self.downloadSmallFiles(killedbymanual)
+            # Cancel the jobs manually set toresubmit (TODO: when the jobs eventually go
+            # to cancelled the arc id will not be in pandajobs any more so they will
+            # never be cleaned up)
+            #
+            # TODO: UPDATE: AREX over REST seems to allow cleaning jobs regardless
+            #               of their state. Should the arcjobs then be set to
+            #               toclean?
+            for job in killedbymanual:
+                self.log.info('%s: manually asked to resubmit, cancelling arc job %s' %
+                            (job['pandaid'], job['JobID']))
+                desc = {'arcstate': 'tocancel', 'tarcstate': self.dbarc.getTimeStamp()}
+                self.dbarc.updateArcJobLazy(job['arcjobid'], desc)
 
-        # TODO: make data transfer separate from main validator thread
-        self.downloadSmallFiles(killedbymanual)
-        # Cancel the jobs manually set toresubmit (TODO: when the jobs eventually go
-        # to cancelled the arc id will not be in pandajobs any more so they will
-        # never be cleaned up)
-        for job in killedbymanual:
-            self.log.info('%s: manually asked to resubmit, cancelling arc job %s' %
-                          (job['pandaid'], job['JobID']))
-            desc = {'arcstate': 'tocancel', 'tarcstate': self.dbarc.getTimeStamp()}
-            self.dbarc.updateArcJobLazy(job['arcjobid'], desc)
-        self.dbarc.Commit()
-
-        # pull out output file info from pilot heartbeat json into dict, order by SE
-        surls = {}
-        for job in jobstoupdate:
-            jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
-            if not jobsurls:
-                if job in killedbymanual or (job['restartstate'] != 'Finishing' and job['arcstate'] != 'done'):
-                    # If job failed before finishing there is probably no
-                    # output files and so nothing to clean. Just let it be
-                    # resubmitted and clean arc job
-                    self.cleanDownloadedJob(job['arcjobid'])
-                    select = "arcjobid="+str(job['arcjobid'])
-                    desc = {"actpandastatus": "starting", "arcjobid": None}
-                    self.dbpanda.updateJobs(select, desc)
+            # pull out output file info from pilot heartbeat json into dict, order by SE
+            surls = {}
+            for job in jobstoupdate:
+                jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
+                if not jobsurls:
+                    if job in killedbymanual or (job['restartstate'] != 'Finishing' and job['arcstate'] != 'done'):
+                        # If job failed before finishing there is probably no
+                        # output files and so nothing to clean. Just let it be
+                        # resubmitted and clean arc job
+                        self.cleanDownloadedJob(job['arcjobid'])
+                        select = "arcjobid="+str(job['arcjobid'])
+                        desc = {"actpandastatus": "starting", "arcjobid": None}
+                        self.dbpanda.updateJobsLazy(select, desc)
+                    else:
+                        # Can't clean outputs so mark as failed (see more detail below)
+                        self.log.error("%s: Cannot remove output of arc job %s" % (job['pandaid'], job["arcjobid"]))
+                        self.cleanDownloadedJob(job['arcjobid'])
+                        select = "arcjobid='"+str(job["arcjobid"])+"'"
+                        desc = {"actpandastatus": "toclean", "pandastatus": "transferring"}
+                        self.dbpanda.updateJobsLazy(select, desc)
                 else:
-                    # Can't clean outputs so mark as failed (see more detail below)
-                    self.log.error("%s: Cannot remove output of arc job %s" % (job['pandaid'], job["arcjobid"]))
-                    self.cleanDownloadedJob(job['arcjobid'])
-                    select = "arcjobid='"+str(job["arcjobid"])+"'"
-                    desc = {"actpandastatus": "toclean", "pandastatus": "transferring"}
-                    self.dbpanda.updateJobs(select, desc)
+                    surls.update(jobsurls)
+
+            if not surls:
+                # nothing to clean
+                return
+
+            for se in surls:
+                removedsurls = self.removeOutputFiles(surls[se])
+                for id, result in removedsurls.items():
+                    # if manually killed the cleaning is allowed to fail
+                    if id in [j['arcjobid'] for j in killedbymanual]:
+                        select = "arcjobid='"+str(id)+"'"
+                        # Setting arcjobid to NULL lets Panda2Arc pick up the job for resubmission
+                        desc = {"actpandastatus": "starting", "arcjobid": None}
+                        self.dbpanda.updateJobsLazy(select, desc)
+                        continue
+
+                    if result == self.ok:
+                        self.cleanDownloadedJob(id)
+                        select = "arcjobid='"+str(id)+"'"
+                        # Setting arcjobid to NULL lets Panda2Arc pick up the job for resubmission
+                        desc = {"actpandastatus": "starting", "arcjobid": None}
+                        self.dbpanda.updateJobsLazy(select, desc)
+                    elif result == self.failed:
+                        # If we couldn't clean outputs the next try of the job will
+                        # also fail. Better to return to panda for an increased
+                        # attempt no. Setting to toclean and pandastatus=transferring
+                        # means it will be processed by cleanFailedJobs() so don't
+                        # clean the arc job here
+                        select = "arcjobid='"+str(id)+"'"
+                        desc = {"actpandastatus": "toclean", "pandastatus": "transferring"}
+                        self.dbpanda.updateJobsLazy(select, desc)
+                    else:
+                        # Retry next time
+                        pass
+
+        except Exception as exc:
+            if isinstance(exc, ExitProcessException):
+                self.log.info("Rolling back DB transaction on process exit")
             else:
-                surls.update(jobsurls)
+                self.log.error(f"Rolling back DB transaction on error: {exc}")
+            self.dbpanda.db.conn.rollback()
+            self.dbarc.db.conn.rollback()
+            raise
+        else:
+            self.dbpanda.Commit()
+            self.dbarc.Commit()
 
-        if not surls:
-            # nothing to clean
-            return
-
-        for se in surls:
-            removedsurls = self.removeOutputFiles(surls[se])
-            for id, result in removedsurls.items():
-                # if manually killed the cleaning is allowed to fail
-                if id in [j['arcjobid'] for j in killedbymanual]:
-                    select = "arcjobid='"+str(id)+"'"
-                    # Setting arcjobid to NULL lets Panda2Arc pick up the job for resubmission
-                    desc = {"actpandastatus": "starting", "arcjobid": None}
-                    self.dbpanda.updateJobsLazy(select, desc)
-                    continue
-
-                if result == self.ok:
-                    self.cleanDownloadedJob(id)
-                    select = "arcjobid='"+str(id)+"'"
-                    # Setting arcjobid to NULL lets Panda2Arc pick up the job for resubmission
-                    desc = {"actpandastatus": "starting", "arcjobid": None}
-                    self.dbpanda.updateJobsLazy(select, desc)
-                elif result == self.failed:
-                    # If we couldn't clean outputs the next try of the job will
-                    # also fail. Better to return to panda for an increased
-                    # attempt no. Setting to toclean and pandastatus=transferring
-                    # means it will be processed by cleanFailedJobs() so don't
-                    # clean the arc job here
-                    select = "arcjobid='"+str(id)+"'"
-                    desc = {"actpandastatus": "toclean", "pandastatus": "transferring"}
-                    self.dbpanda.updateJobsLazy(select, desc)
-                else:
-                    # Retry next time
-                    pass
-
-        self.dbpanda.Commit()
-        self.dbarc.Commit()
-
-
-    # TODO: need a mechanism for stopping the process
     def process(self):
         self.logger.arclog.setReopen(True)
         self.logger.arclog.setReopen(False)
