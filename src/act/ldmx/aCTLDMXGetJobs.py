@@ -217,135 +217,151 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
     def getNewJobs(self):
         '''
         Check new batches and create necessary job descriptions
+
+        Signal handling strategy:
+        - Delete parameter for NamedTemporaryFile is False which means that
+          the signal interruption leaks the file?
+        - Signals are deferred for the entire operation.
+        - TODO: review: find more transactional strategy if possible
         '''
+        # exit handling context manager
+        with self.sigdefer:
 
-        now = time.time()
-        try:
-            # Take the first proxy available
-            proxyid = self.dbarc.getProxiesInfo('TRUE', ['id'], expect_one=True)['id']
-        except Exception:
-            self.log.error('No proxies found in DB')
-            return
-
-        batches = self.dbldmx.getBatches("status='new'")
-
-        for batch in batches:
-
-            self.log.info(f"New batch {batch['batchname']}")
-            configfile = batch['description']
-            templatefile = batch['template']
-            user = self.dbldmx.getUser(batch['userid'])
-            if not user:
-                self.log.error(f"No such user with userid {batch['userid']}")
-                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
-                continue
-
+            now = time.time()
             try:
-                with open(configfile) as f:
-                    config = {l.split('=')[0]: l.split('=')[1].strip() for l in f if '=' in l}
-            except Exception as e:
-                self.log.error(f'Failed to parse job config file {configfile}: {e}')
-                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
-                continue
+                # Take the first proxy available
+                proxyid = self.dbarc.getProxiesInfo('TRUE', ['id'], expect_one=True)['id']
+            except Exception:
+                self.log.error('No proxies found in DB')
+                return
 
-            try:
-                with open(templatefile) as tf:
-                    template = tf.readlines()
-            except Exception as e:
-                self.log.error(f'Bad template file or template not defined in {configfile}: {e}')
-                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
-                continue
+            batches = self.dbldmx.getBatches("status='new'")
 
-            try:
-                # Get base path for output storage if necessary
-                output_base = self.getOutputBase(config)
+            for batch in batches:
 
-                # Generate copies of config and template
-                jobfiles = []
-                for jobconfig in self.generateJobs(config):
-                    newjobfile = os.path.join(self.tmpdir, os.path.basename(configfile))
-                    with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newjobfile}.', delete=False, encoding='utf-8') as njf:
-                        newjobfile = njf.name
-                        njf.write('\n'.join(f'{k}={v}' for k,v in jobconfig.items()) + '\n')
-                        if output_base:
-                            njf.write(f'FinalOutputBasePath={output_base}\n')
+                self.log.info(f"New batch {batch['batchname']}")
+                configfile = batch['description']
+                templatefile = batch['template']
+                user = self.dbldmx.getUser(batch['userid'])
+                if not user:
+                    self.log.error(f"No such user with userid {batch['userid']}")
+                    self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
+                    continue
 
-                        nouploadsites = [site.endpoint for _, site in self.arcconf.sites if site.noupload == 1]
-                        if nouploadsites:
-                            self.log.debug(nouploadsites)
-                            njf.write(f'NoUploadSites={",".join(nouploadsites)}\n')
+                try:
+                    with open(configfile) as f:
+                        config = {l.split('=')[0]: l.split('=')[1].strip() for l in f if '=' in l}
+                except Exception as e:
+                    self.log.error(f'Failed to parse job config file {configfile}: {e}')
+                    self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
+                    continue
 
-                        if 'Scope' not in jobconfig:
-                            njf.write(f'Scope=user.{user["ruciouser"]}\n')
+                try:
+                    with open(templatefile) as tf:
+                        template = tf.readlines()
+                except Exception as e:
+                    self.log.error(f'Bad template file or template not defined in {configfile}: {e}')
+                    self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
+                    continue
 
-                        if 'BatchID' not in jobconfig:
-                            njf.write(f'BatchID={batch["batchname"]}\n')
+                try:
+                    # Get base path for output storage if necessary
+                    output_base = self.getOutputBase(config)
 
-                    newtemplatefile = os.path.join(self.tmpdir, os.path.basename(templatefile))
-                    with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newtemplatefile}.', delete=False, encoding='utf-8') as ntf:
-                        newtemplatefile = ntf.name
-                        # might need a long list of input files, but without the scope. 
-                        if "InputFile" in jobconfig :
-                            inFileScope = jobconfig["InputFile"].split(":")[0] # use first input file to look up the scope
-                            inFileList = (jobconfig["InputFile"].replace(inFileScope+":", "")).split(",")
-                        for l in template:
-                            if l.startswith('sim.runNumber'):
-                                ntf.write(f'sim.runNumber = {jobconfig["runNumber"]}\n')
-                            elif l.startswith('p.run = RUNNUMBER'):
-                                ntf.write(f'p.run = {jobconfig["runNumber"]}\n')
-                            elif l.startswith('p.inputFiles'):
-                                ntf.write(f'p.inputFiles = {inFileList} \n') #jobconfig["InputFile"].split(":")[1]}" ]\n')
-                            elif l.startswith('p.maxEvents') and 'NumberOfEvents' in jobconfig :
-                                ntf.write(f'p.maxEvents = {jobconfig["NumberOfEvents"]}\n')                           
-                            elif l.startswith('lheLib=INPUTFILE'):
-                                ntf.write(f'lheLib="{jobconfig["InputFile"].split(":")[1]}"\n')
-                                #ntf.write(f'lheLib={inFileList}\n') # {jobconfig["InputFile"].split(":")[1]}"\n')
-                            elif l.startswith('pileupFileName'):
-                                ntf.write(f'pileupFileName = "{jobconfig["PileupFile"].split(":")[1]}" \n')
-                            elif l.startswith('sim.randomSeeds'):
-                                ntf.write(f'sim.randomSeeds = [ {jobconfig.get("RandomSeed1", 0)}, {jobconfig.get("RandomSeed2", 0)} ]\n')
-                            #ldmx-sw v1-style mac template stuff
-                            elif l.startswith('/random/setSeeds'):
-                                ntf.write(f'/random/setSeeds {jobconfig.get("RandomSeed1", 0)} {jobconfig.get("RandomSeed2", 0)}\n')
-                            elif l.startswith('/ldmx/persistency/root/runNumber'):
-                                ntf.write(f'/ldmx/persistency/root/runNumber {jobconfig["runNumber"]}\n')
-                            elif  l.startswith('detector =') or l.startswith('detector='):
-                                ntf.write(f'detector = "ldmx-det-v{jobconfig["DetectorVersion"]}"\n')
-                            elif  l.startswith('sim.setDetector(') :
-                                ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", False )\n')
-                            elif  l.startswith('sim.scoringPlanes') :  #overwrite use SP false-->true by reconfiguring
-                                ntf.write(f'sim.scoringPlanes = makeScoringPlanesPath("ldmx-det-v{jobconfig["DetectorVersion"]}")\n')
-                                ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", True )\n')
-                            elif  l.startswith('nElectrons =') or l.startswith('nElectrons='):
-                                ntf.write(f'nElectrons = {jobconfig["ElectronNumber"]}\n')              
-                            elif  l.startswith('beamEnergy =') or l.startswith('beamEnergy='):
-                                ntf.write(f'beamEnergy = {jobconfig["BeamEnergy"]}\n')              
-                            else:
-                                ntf.write(l)
-                    jobfiles.append((newjobfile, newtemplatefile))
+                    # Generate copies of config and template
+                    jobfiles = []
+                    for jobconfig in self.generateJobs(config):
+                        newjobfile = os.path.join(self.tmpdir, os.path.basename(configfile))
+                        with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newjobfile}.', delete=False, encoding='utf-8') as njf:
+                            newjobfile = njf.name
+                            njf.write('\n'.join(f'{k}={v}' for k,v in jobconfig.items()) + '\n')
+                            if output_base:
+                                njf.write(f'FinalOutputBasePath={output_base}\n')
 
-                for (newjobfile, newtemplatefile) in jobfiles:
-                    self.dbldmx.insertJob(newjobfile, newtemplatefile, proxyid, batch['userid'], batchid=batch['id'])
-                    self.log.info(f'Inserted job from {newjobfile} into DB')
+                            nouploadsites = [site.endpoint for _, site in self.arcconf.sites if site.noupload == 1]
+                            if nouploadsites:
+                                self.log.debug(nouploadsites)
+                                njf.write(f'NoUploadSites={",".join(nouploadsites)}\n')
 
-                self.dbldmx.updateBatch(batch['id'], {'status': 'inprogress'})
-            except Exception as e:
-                self.log.error(f'Failed to create jobs from {configfile}: {e}')
-                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
+                            if 'Scope' not in jobconfig:
+                                njf.write(f'Scope=user.{user["ruciouser"]}\n')
 
+                            if 'BatchID' not in jobconfig:
+                                njf.write(f'BatchID={batch["batchname"]}\n')
+
+                        newtemplatefile = os.path.join(self.tmpdir, os.path.basename(templatefile))
+                        with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newtemplatefile}.', delete=False, encoding='utf-8') as ntf:
+                            newtemplatefile = ntf.name
+                            # might need a long list of input files, but without the scope.
+                            if "InputFile" in jobconfig :
+                                inFileScope = jobconfig["InputFile"].split(":")[0] # use first input file to look up the scope
+                                inFileList = (jobconfig["InputFile"].replace(inFileScope+":", "")).split(",")
+                            for l in template:
+                                if l.startswith('sim.runNumber'):
+                                    ntf.write(f'sim.runNumber = {jobconfig["runNumber"]}\n')
+                                elif l.startswith('p.run = RUNNUMBER'):
+                                    ntf.write(f'p.run = {jobconfig["runNumber"]}\n')
+                                elif l.startswith('p.inputFiles'):
+                                    ntf.write(f'p.inputFiles = {inFileList} \n') #jobconfig["InputFile"].split(":")[1]}" ]\n')
+                                elif l.startswith('p.maxEvents') and 'NumberOfEvents' in jobconfig :
+                                    ntf.write(f'p.maxEvents = {jobconfig["NumberOfEvents"]}\n')
+                                elif l.startswith('lheLib=INPUTFILE'):
+                                    ntf.write(f'lheLib="{jobconfig["InputFile"].split(":")[1]}"\n')
+                                    #ntf.write(f'lheLib={inFileList}\n') # {jobconfig["InputFile"].split(":")[1]}"\n')
+                                elif l.startswith('pileupFileName'):
+                                    ntf.write(f'pileupFileName = "{jobconfig["PileupFile"].split(":")[1]}" \n')
+                                elif l.startswith('sim.randomSeeds'):
+                                    ntf.write(f'sim.randomSeeds = [ {jobconfig.get("RandomSeed1", 0)}, {jobconfig.get("RandomSeed2", 0)} ]\n')
+                                #ldmx-sw v1-style mac template stuff
+                                elif l.startswith('/random/setSeeds'):
+                                    ntf.write(f'/random/setSeeds {jobconfig.get("RandomSeed1", 0)} {jobconfig.get("RandomSeed2", 0)}\n')
+                                elif l.startswith('/ldmx/persistency/root/runNumber'):
+                                    ntf.write(f'/ldmx/persistency/root/runNumber {jobconfig["runNumber"]}\n')
+                                elif  l.startswith('detector =') or l.startswith('detector='):
+                                    ntf.write(f'detector = "ldmx-det-v{jobconfig["DetectorVersion"]}"\n')
+                                elif  l.startswith('sim.setDetector(') :
+                                    ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", False )\n')
+                                elif  l.startswith('sim.scoringPlanes') :  #overwrite use SP false-->true by reconfiguring
+                                    ntf.write(f'sim.scoringPlanes = makeScoringPlanesPath("ldmx-det-v{jobconfig["DetectorVersion"]}")\n')
+                                    ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", True )\n')
+                                elif  l.startswith('nElectrons =') or l.startswith('nElectrons='):
+                                    ntf.write(f'nElectrons = {jobconfig["ElectronNumber"]}\n')
+                                elif  l.startswith('beamEnergy =') or l.startswith('beamEnergy='):
+                                    ntf.write(f'beamEnergy = {jobconfig["BeamEnergy"]}\n')
+                                else:
+                                    ntf.write(l)
+                        jobfiles.append((newjobfile, newtemplatefile))
+
+                    for (newjobfile, newtemplatefile) in jobfiles:
+                        self.dbldmx.insertJob(newjobfile, newtemplatefile, proxyid, batch['userid'], batchid=batch['id'])
+                        self.log.info(f'Inserted job from {newjobfile} into DB')
+
+                    self.dbldmx.updateBatch(batch['id'], {'status': 'inprogress'})
+                except Exception as e:
+                    self.log.error(f'Failed to create jobs from {configfile}: {e}')
+                    self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
 
     def archiveBatches(self):
-        '''Move completed batches to the archive table'''
+        '''
+        Move completed batches to the archive table
 
-        # Find out batch statuses
-        batches = self.dbldmx.getGroupedJobs('batchid, ldmxstatus')
-        batchdict = defaultdict(lambda: defaultdict(str))
-        for batch in batches:
-            batchdict[batch['batchid']][batch['ldmxstatus']] = batch['count(*)']
+        Signal handling strategy:
+        - Insertion of archive and deletion of job need to happen
+          transactionally. Since there is no lazy version of deleteJob, this
+          is achieved by deferring signals for the entire operation.
+        '''
+        # exit handling context manager
+        with self.sigdefer:
 
-        for batchid, statuses in batchdict.items():
-            if [s for s in statuses if s not in ['finished', 'failed', 'cancelled']]:
-                continue
+            # Find out batch statuses
+            batches = self.dbldmx.getGroupedJobs('batchid, ldmxstatus')
+            batchdict = defaultdict(lambda: defaultdict(str))
+            for batch in batches:
+                batchdict[batch['batchid']][batch['ldmxstatus']] = batch['count(*)']
+
+            for batchid, statuses in batchdict.items():
+                if [s for s in statuses if s not in ['finished', 'failed', 'cancelled']]:
+                    continue
 
             # All jobs are finished, so archive
             select = f"batchid='{batchid}'" if batchid else 'batchid is NULL'

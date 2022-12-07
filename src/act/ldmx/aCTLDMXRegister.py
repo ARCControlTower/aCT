@@ -29,29 +29,35 @@ class aCTLDMXRegister(aCTLDMXProcess):
         '''
         Look for done jobs, set to registering, and output metadata in Rucio.
         Check registering jobs that previously failed.
+
+        Signal handling strategy:
+        - This operation involves several filesystem operations so the signals
+          are deferred for the entire operation.
         '''
+        # exit handling context manager
+        with self.sigdefer:
 
-        select = f"ldmxstatus='finishing' and arcstate='done' and arcjobs.id=ldmxjobs.arcjobid limit 100"
-        columns = ['arcjobs.id', 'JobID', 'appjobid', 'cluster', 'UsedTotalWallTime', 'fairshare',
-                   'arcjobs.EndTime', 'stdout', 'ldmxjobs.created', 'description', 'template']
-        arcjobs = self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs,ldmxjobs')
-        for aj in arcjobs:
-            self.log.info(f'Found finished job {aj["id"]}')
-            select = f"id={int(aj['appjobid'])}"
-            desc = {'ldmxstatus': 'registering',
-                    'computingelement': aj['cluster'],
-                    'sitename': self.endpoints[aj['cluster']],
-                    'starttime': (aj['EndTime'] or datetime.now(timezone.utc)) - timedelta(0, aj['UsedTotalWallTime']),
-                    'endtime': aj['EndTime'] or datetime.now(timezone.utc)}
-            self.dbldmx.updateJobs(select, desc)
+            select = "ldmxstatus='finishing' and arcstate='done' and arcjobs.id=ldmxjobs.arcjobid limit 100"
+            columns = ['arcjobs.id', 'JobID', 'appjobid', 'cluster', 'UsedTotalWallTime', 'fairshare',
+                       'arcjobs.EndTime', 'stdout', 'ldmxjobs.created', 'description', 'template']
+            arcjobs = self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs,ldmxjobs')
+            for aj in arcjobs:
+                self.log.info(f'Found finished job {aj["id"]}')
+                select = f"id={int(aj['appjobid'])}"
+                desc = {'ldmxstatus': 'registering',
+                        'computingelement': aj['cluster'],
+                        'sitename': self.endpoints[aj['cluster']],
+                        'starttime': (aj['EndTime'] or datetime.now(timezone.utc)) - timedelta(0, aj['UsedTotalWallTime']),
+                        'endtime': aj['EndTime'] or datetime.now(timezone.utc)}
+                self.dbldmx.updateJobs(select, desc)
 
-        self.register(arcjobs)
+            self.register(arcjobs)
 
-        select = f"ldmxstatus='registering' and \
-                   {self.dbldmx.timeStampLessThan('ldmxjobs.modified', 300, utc=False)} and \
-                   arcjobs.id=ldmxjobs.arcjobid limit 100"
-        arcjobs = self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs,ldmxjobs')
-        self.register(arcjobs)
+            select = f"ldmxstatus='registering' and " \
+                     f"{self.dbldmx.timeStampLessThan('ldmxjobs.modified', 300, utc=False)} and " \
+                     "arcjobs.id=ldmxjobs.arcjobid limit 100"
+            arcjobs = self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs,ldmxjobs')
+            self.register(arcjobs)
 
 
     def register(self, arcjobs):

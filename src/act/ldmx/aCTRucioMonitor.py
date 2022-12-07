@@ -50,6 +50,9 @@ class aCTRucioMonitor(aCTLDMXProcess):
         else:
             self.log.info('Prometheus monitoring not enabled')
 
+    def wait(self):
+        time.sleep(120)
+
     def process(self):
         '''Actual metric gathering from Rucio is done at a low frequency here'''
         self.setSites()
@@ -70,4 +73,3 @@ class aCTRucioMonitor(aCTLDMXProcess):
                 metrics[rse['rse']]['total'] = 0
 
         self.collector.metrics = metrics
-        time.sleep(120)
