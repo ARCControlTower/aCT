@@ -99,9 +99,10 @@ class aCTAutopilot(aCTATLASProcess):
         Heartbeat status updates.
 
         Signal handling strategy:
-        - TODO: review: once the heartbeat is received is it important to
+        - signals are deferred for Panda update and results processing
+        - TODO: review: once the Panda is updated is it important to
                 update aCT state without interruption or can it be done
-                again on next heartbeat update?
+                again on next Panda update?
         """
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
         jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
@@ -185,9 +186,10 @@ class aCTAutopilot(aCTATLASProcess):
         Heartbeat status updates in bulk.
 
         Signal handling strategy:
-        - TODO: review: once the heartbeat is received is it important to
+        - signals are deferred for Panda update and results processing
+        - TODO: review: once the Panda is updated is it important to
                 update aCT state without interruption or can it be done
-                again on next heartbeat update?
+                again on next Panda update?
         """
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
         jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
@@ -285,11 +287,10 @@ class aCTAutopilot(aCTATLASProcess):
         and cancelled jobs
 
         Signal handling strategy:
-        - inputfiles should not leak so the signals are deferred for the
-          duration of updating DB and removing files
-        - TODO: review: once the heartbeat is received is it important to
+        - signals are deferred for Panda update and results processing
+        - TODO: review: once the Panda is updated is it important to
                 update aCT state without interruption or can it be done
-                again on next heartbeat update?
+                again on next Panda update?
         """
         jobs=self.dbpanda.getJobs("actpandastatus='finished' or actpandastatus='failed' or actpandastatus='cancelled' limit 1000")
 
