@@ -2,7 +2,6 @@ import os
 import shutil
 
 from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
-from act.common.aCTProcess import ExitProcessException
 
 try:
     import selinux
@@ -33,8 +32,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         - all operations are done in a single transaction that is rolled back
           on signal
         '''
-        # exit handling try block
-        try:
+        with self.transaction([self.dbldmx]):
 
             select = "ldmxstatus='waiting' and arcstate in ('submitted', 'running', 'finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
             columns = ['arcstate', 'cluster', 'state', 'ldmxjobs.id']
@@ -67,17 +65,6 @@ class aCTLDMXStatus(aCTLDMXProcess):
                         'computingelement': job['cluster'] or 'None',
                         'sitename': self.endpoints.get(job['cluster'], 'None')}
                 self.dbldmx.updateJobLazy(job['id'], desc)
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbldmx.db.conn.rollback()
-            raise
-        else:
-            self.dbldmx.Commit()
-
 
     def checkToCancelJobs(self):
         '''
@@ -149,8 +136,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
             columns = ['id']
             arcjob = self.dbarc.getArcJobInfo(job['arcjobid'], columns) if job['arcjobid'] else None
 
-            # exit handling try block
-            try:
+            with self.transaction([self.dbarc, self.dbldmx]):
 
                 if arcjob:
                     self.log.info(f"Cancelling arc job {arcjob['id']}")
@@ -163,19 +149,6 @@ class aCTLDMXStatus(aCTLDMXProcess):
                 ldmxdesc = {'ldmxstatus': 'new', 'arcjobid': None,
                             'sitename': None, 'computingelement': None}
                 self.dbldmx.updateJobLazy(job['id'], ldmxdesc)
-
-            except Exception as exc:
-                if isinstance(exc, ExitProcessException):
-                    self.log.info("Rolling back DB transaction on process exit")
-                else:
-                    self.log.error(f"Rolling back DB transaction on error: {exc}")
-                self.dbarc.db.conn.rollback()
-                self.dbldmx.db.conn.rollback()
-                raise
-            else:
-                self.dbarc.Commit()
-                self.dbldmx.Commit()
-
 
     def checkFailedJobs(self):
         '''

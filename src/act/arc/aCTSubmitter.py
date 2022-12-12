@@ -296,8 +296,7 @@ class aCTSubmitter(aCTARCProcess):
         - All operations are done in one transaction which is rolled back
           on signal.
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.db]):
 
             dbjobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "created"])
             for dbjob in dbjobs:
@@ -307,16 +306,6 @@ class aCTSubmitter(aCTARCProcess):
                 if job.tcreated + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
                     self.log.debug(f"Cancelling job {job.appid} {job.arcid}")
                     self.db.updateArcJobLazy(job.arcid, {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.db.db.conn.rollback()
-            raise
-        else:
-            self.db.Commit()
 
     # TODO: refactor to some library aCT job operation
     def processToCancel(self):

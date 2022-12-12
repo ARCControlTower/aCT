@@ -4,7 +4,6 @@ import time
 from threading import Thread
 
 import htcondor
-from act.common.aCTProcess import ExitProcessException
 from act.condor.aCTCondorProcess import aCTCondorProcess
 
 
@@ -239,8 +238,7 @@ class aCTSubmitter(aCTCondorProcess):
         - All operations are done in a single transaction which is rolled back
           on signal.
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.db]):
 
             jobs = self.db.getCondorJobsInfo(f"condorstate='submitting' and cluster='{self.cluster}'", ["id"])
 
@@ -250,16 +248,6 @@ class aCTSubmitter(aCTCondorProcess):
                     job['id'],
                     {"condorstate": "toresubmit", "tcondorstate": self.db.getTimeStamp()}
                 )
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.db.db.conn.rollback()
-            raise
-        else:
-            self.db.Commit()
 
     def processToCancel(self):
         """

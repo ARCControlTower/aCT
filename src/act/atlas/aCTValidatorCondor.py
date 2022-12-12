@@ -2,7 +2,6 @@ import os
 import shutil
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
-from act.common.aCTProcess import ExitProcessException
 
 
 class aCTValidatorCondor(aCTATLASProcess):
@@ -30,6 +29,7 @@ class aCTValidatorCondor(aCTATLASProcess):
         - if cleanFinishedJob() happens before the transaction is commited, it
           is not a problem
         """
+        with self.transaction([self.dbpanda, self.dbcondor]):
         # exit handling try block
         try:
 
@@ -53,18 +53,6 @@ class aCTValidatorCondor(aCTATLASProcess):
                 self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
                 self.cleanFinishedJob(job['pandaid'])
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            self.dbcondor.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-            self.dbcondor.Commit()
-
     def cleanFailedJobs(self):
         """
         Check for jobs with actpandastatus toclean and pandastatus transferring.
@@ -76,8 +64,7 @@ class aCTValidatorCondor(aCTATLASProcess):
         - if cleanFinishedJob() happens before the transaction is commited, it
           is not a problem
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbpanda, self.dbcondor]):
 
             # get all jobs with pandastatus transferring and actpandastatus toclean
             select = "(pandastatus='transferring' and actpandastatus='toclean') and siteName in %s limit 100000" % self.sitesselect
@@ -99,18 +86,6 @@ class aCTValidatorCondor(aCTATLASProcess):
                 self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
                 self.cleanFinishedJob(job['pandaid'])
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            self.dbcondor.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-            self.dbcondor.Commit()
-
     def cleanResubmittingJobs(self):
         """
         Check for jobs with actpandastatus toresubmit and pandastatus starting.
@@ -122,8 +97,7 @@ class aCTValidatorCondor(aCTATLASProcess):
         - all updates are executed in one transaction which gets rolled back on
           signal
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbpanda, self.dbcondor]):
 
             # First check for resubmitting jobs with no arcjob id defined
             select = "(actpandastatus='toresubmit' and condorjobid=NULL) and siteName in %s limit 100000" % self.sitesselect
@@ -158,18 +132,6 @@ class aCTValidatorCondor(aCTATLASProcess):
                 select = "pandaid="+str(job['pandaid'])
                 desc = {"actpandastatus": "starting", "condorjobid": None}
                 self.dbpanda.updateJobsLazy(select, desc)
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            self.dbcondor.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-            self.dbcondor.Commit()
 
     def process(self):
         self.setSites()

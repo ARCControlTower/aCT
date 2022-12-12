@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
-from act.common.aCTProcess import ExitProcessException
 
 
 class aCTATLASStatus(aCTATLASProcess):
@@ -58,8 +57,7 @@ class aCTATLASStatus(aCTATLASProcess):
             jobs = self.dbpanda.getJobs("(actpandastatus='starting' or actpandastatus='sent') and sitename in %s" % offlinesitesselect,
                                         ['pandaid', 'arcjobid', 'siteName', 'id'])
 
-            # exit handling try block
-            try:
+            with self.transaction([self.dbpanda, self.dbarc]):
 
                 for job in jobs:
                     self.log.info("Cancelling starting job for %d for offline site %s" % (job['pandaid'], job['siteName']))
@@ -68,18 +66,6 @@ class aCTATLASStatus(aCTATLASProcess):
                                                         'error': 'Starting job was killed because queue went offline'})
                     if job['arcjobid']:
                         self.dbarc.updateArcJobLazy(job['arcjobid'], {'arcstate': 'tocancel'})
-
-            except Exception as exc:
-                if isinstance(exc, ExitProcessException):
-                    self.log.info("Rolling back DB transaction on process exit")
-                else:
-                    self.log.error(f"Rolling back DB transaction on error: {exc}")
-                self.dbpanda.db.conn.rollback()
-                self.dbarc.db.conn.rollback()
-                raise
-            else:
-                self.dbpanda.Commit()
-                self.dbarc.Commit()
 
         # Get jobs killed by panda
         jobs = self.dbpanda.getJobs("actpandastatus='tobekilled' and siteName in %s limit 100" % self.sitesselect,
@@ -91,8 +77,7 @@ class aCTATLASStatus(aCTATLASProcess):
             self.log.info("Cancelling arc job for %d", job['pandaid'])
             select = 'id=%s' % job['id']
 
-            # exit handling try block
-            try:
+            with self.transaction([self.dbpanda, self.dbarc]):
 
                 # Check if arcjobid is set before cancelling the job
                 if not job['arcjobid']:
@@ -128,18 +113,6 @@ class aCTATLASStatus(aCTATLASProcess):
                 # Finally cancel the arc job
                 self.dbarc.updateArcJobLazy(job['arcjobid'], {'arcstate': 'tocancel'})
 
-            except Exception as exc:
-                if isinstance(exc, ExitProcessException):
-                    self.log.info("Rolling back DB transaction on process exit")
-                else:
-                    self.log.error(f"Rolling back DB transaction on error: {exc}")
-                self.dbpanda.db.conn.rollback()
-                self.dbarc.db.conn.rollback()
-                raise
-            else:
-                self.dbpanda.Commit()
-                self.dbarc.Commit()
-
     def getStartTime(self, endtime, walltime):
         """
         Get starttime from endtime-walltime where endtime is datetime.datetime and walltime is in seconds
@@ -159,8 +132,7 @@ class aCTATLASStatus(aCTATLASProcess):
         - all updates are performed in one transaction which is rolled back
           on signal
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbpanda]):
 
             select = "((arcjobs.arcstate in ('submitted', 'holding') and pandajobs.actpandastatus='sent') or"
             select += " (arcjobs.arcstate in ('tosubmit', 'submitting', 'submitted', 'holding') and pandajobs.actpandastatus='running'))"
@@ -181,16 +153,6 @@ class aCTATLASStatus(aCTATLASProcess):
                 if aj['cluster']:
                     desc["computingElement"] = urlparse(aj['cluster']).hostname
                 self.dbpanda.updateJobsLazy(select, desc)
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
 
     def updateRunningJobs(self,state):
         """
@@ -334,11 +296,10 @@ class aCTATLASStatus(aCTATLASProcess):
         - all updates are performed in one transaction which is rolled back
           on signal
         """
-        failedjobs = []
-        #resubmitting=False
+        with self.transaction([self.dbpanda]):
 
-        # exit handling try block
-        try:
+            failedjobs = []
+            #resubmitting=False
 
             for aj in arcjobs:
                 if self.sites[aj['siteName']]['truepilot']:
@@ -361,16 +322,6 @@ class aCTATLASStatus(aCTATLASProcess):
                     #resubmitting=True
                 else:
                     failedjobs += [aj]
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
 
         return failedjobs
 
@@ -609,8 +560,7 @@ class aCTATLASStatus(aCTATLASProcess):
                     desc['endTime'] = datetime.datetime.utcnow()
                     self.dbpanda.updateJobs(select, desc)
 
-        # exit handling try block
-        try:
+        with self.transaction([self.dbarc, self.dbpanda]):
 
             # fetch failed jobs
             select = "arcstate='failed'"
@@ -659,18 +609,6 @@ class aCTATLASStatus(aCTATLASProcess):
                     desc["arcjobid"] = None
                 self.dbpanda.updateJobsLazy(select, desc)
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbarc.db.conn.rollback()
-            self.dbpanda.db.conn.rollback()
-            raise
-        else:
-            self.dbarc.Commit()
-            self.dbpanda.Commit()
-
     def cleanupLeftovers(self):
         """
         Clean jobs left behind in arcjobs table.
@@ -684,8 +622,7 @@ class aCTATLASStatus(aCTATLASProcess):
         - all updates are performed in one transaction which is rolled back
           on signal
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbarc]):
 
             # Even though the transaction probably gets rolled back
             # automatically, it is nice to handle it explicitly. Also, this
@@ -723,16 +660,6 @@ class aCTATLASStatus(aCTATLASProcess):
                     sessionid = job['JobID'][job['JobID'].rfind('/'):]
                     localdir = self.tmpdir + sessionid
                     shutil.rmtree(localdir, ignore_errors=True)
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbarc.db.conn.rollback()
-            raise
-        else:
-            self.dbarc.Commit()
 
     def process(self):
         """

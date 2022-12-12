@@ -84,7 +84,6 @@ from ssl import SSLError
 from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTJob import ACTJob
-from act.common.aCTProcess import ExitProcessException
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
@@ -182,8 +181,7 @@ class aCTStatus(aCTARCProcess):
 
             tstamp = self.db.getTimeStamp()
 
-            # exit handling try block
-            try:
+            with self.transaction([self.db]):
 
                 for job in jobs:
                     arcjob = job.arcjob
@@ -334,16 +332,6 @@ class aCTStatus(aCTARCProcess):
                     except:
                         self.log.error(f"Bad dict for job {job.appid} {job.arcid}: {jobdict}")
 
-            except Exception as exc:
-                if isinstance(exc, ExitProcessException):
-                    self.log.info("Rolling back DB transaction on process exit")
-                else:
-                    self.log.error(f"Rolling back DB transaction on error: {exc}")
-                self.db.db.conn.rollback()
-                raise
-            else:
-                self.db.Commit()
-
         self.log.info('Done')
 
     # Returns a dictionary reflecting job changes that should update the
@@ -392,8 +380,7 @@ class aCTStatus(aCTARCProcess):
         - Entire operation is done in a single transaction that is rolled
           back on signal.
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.db]):
 
             # TODO: HARDCODED
             jobs = self.db.getArcJobsInfo(
@@ -413,16 +400,6 @@ class aCTStatus(aCTARCProcess):
                     self.log.warning(f"Job {job['appjobid']} {job['id']} too long in {job['arcstate']}, marking as lost")
                     self.db.updateArcJob(job['id'], {'arcstate': 'lost', 'tarcstate': tstamp})
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.db.db.conn.rollback()
-            raise
-        else:
-            self.db.Commit()
-
     # TODO: refactor to some library aCT job operation
     def checkStuckJobs(self):
         """
@@ -439,8 +416,7 @@ class aCTStatus(aCTARCProcess):
           batch of jobs has to be handled in a single transaction. Such
           transaction handling is just for optimisation.
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.db]):
 
             tstamp = self.db.getTimeStamp()
 
@@ -471,16 +447,6 @@ class aCTStatus(aCTARCProcess):
                         else:
                             # otherwise mark cancelled
                             self.db.updateArcJobLazy(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "tstate": tstamp})
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.db.db.conn.rollback()
-            raise
-        else:
-            self.db.Commit()
 
     # TODO: refactor to some library aCT job operation
     # TODO: is the comprehensive update of jobs from info required? (return
@@ -554,8 +520,7 @@ class aCTStatus(aCTARCProcess):
                 if arcrest:
                     arcrest.close()
 
-            # exit handling try block
-            try:
+            with self.transaction([self.db]):
 
                 # update DB
                 for job in tocheck:
@@ -591,16 +556,6 @@ class aCTStatus(aCTARCProcess):
                     if mappedState in ("Finished", "Failed", "Killed", "Deleted"):
                         self.log.error(f"Job {job.appid} {job.arcid} is cancelled by ARC")
                         self.db.updateArcJobLazy(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp, "State": mappedState, "tstate": tstamp})
-
-            except Exception as exc:
-                if isinstance(exc, ExitProcessException):
-                    self.log.info("Rolling back DB transaction on process exit")
-                else:
-                    self.log.error(f"Rolling back DB transaction on error: {exc}")
-                self.db.db.conn.rollback()
-                raise
-            else:
-                self.db.Commit()
 
         self.log.info('Done')
 

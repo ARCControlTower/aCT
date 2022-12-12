@@ -11,7 +11,6 @@ from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
 from act.common import aCTUtils
 from act.common.aCTProxy import aCTProxy
-from act.common.aCTProcess import stopProcess, ExitProcessException
 
 
 class aCTValidator(aCTATLASProcess):
@@ -396,17 +395,16 @@ class aCTValidator(aCTATLASProcess):
                 interrupted and rerun and no consistency needs to be enforced
                 beyond the single transaction?
         """
-        # get all jobs with pandastatus running and actpandastatus tovalidate
-        select = "(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in %s limit 1000" % self.sitesselect
-        columns = ["arcjobid", "pandaid", "siteName", "metadata"]
-        jobstoupdate=self.dbpanda.getJobs(select, columns=columns)
+        with self.transaction([self.dbarc, self.dbpanda]):
 
-        if len(jobstoupdate)==0:
-            # nothing to do
-            return
+            # get all jobs with pandastatus running and actpandastatus tovalidate
+            select = "(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in %s limit 1000" % self.sitesselect
+            columns = ["arcjobid", "pandaid", "siteName", "metadata"]
+            jobstoupdate=self.dbpanda.getJobs(select, columns=columns)
 
-        # exit handling try block
-        try:
+            if len(jobstoupdate)==0:
+                # nothing to do
+                return
 
             # Skip validation for the true pilot jobs, just copy logs, set to done and clean arc job
             for job in jobstoupdate[:]:
@@ -472,18 +470,6 @@ class aCTValidator(aCTATLASProcess):
                     # Retry next time
                     pass
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            self.dbarc.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-            self.dbarc.Commit()
-
     def cleanFailedJobs(self):
         '''
         Check for jobs with actpandastatus toclean and pandastatus transferring.
@@ -504,19 +490,18 @@ class aCTValidator(aCTATLASProcess):
         - previously, there were commited transactions for single jobs which
           could result in inconsistencies between DB tables and filesystem
         '''
-        # get all jobs with pandastatus transferring and actpandastatus toclean
-        select = "(pandastatus='transferring' and actpandastatus='toclean') and siteName in %s limit 1000" % self.sitesselect
-        columns = ["arcjobid", "pandaid", "siteName"]
-        jobstoupdate=self.dbpanda.getJobs(select, columns=columns)
+        with self.transaction([self.dbarc, self.dbpanda]):
 
-        if len(jobstoupdate)==0:
-            # nothing to do
-            return
+            # get all jobs with pandastatus transferring and actpandastatus toclean
+            select = "(pandastatus='transferring' and actpandastatus='toclean') and siteName in %s limit 1000" % self.sitesselect
+            columns = ["arcjobid", "pandaid", "siteName"]
+            jobstoupdate=self.dbpanda.getJobs(select, columns=columns)
 
-        cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+            if len(jobstoupdate)==0:
+                # nothing to do
+                return
 
-        # exit handling try block
-        try:
+            cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
 
             # For truepilot jobs, don't try to clean outputs (too dangerous), just clean arc job
             for job in jobstoupdate[:]:
@@ -570,18 +555,6 @@ class aCTValidator(aCTATLASProcess):
                         # Retry next time
                         pass
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            self.dbarc.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-            self.dbarc.Commit()
-
     def cleanResubmittingJobs(self):
         '''
         Check for jobs with actpandastatus toresubmit and pandastatus starting.
@@ -594,8 +567,8 @@ class aCTValidator(aCTATLASProcess):
         - previously, there were commited transactions for single jobs which
           could result in inconsistencies between DB tables and filesystem
         '''
-        # exit handling try block
-        try:
+        with self.transaction([self.dbarc, self.dbpanda]):
+
             # First check for resubmitting jobs with no arcjob id defined
             select = "(actpandastatus='toresubmit' and arcjobid=NULL) and siteName in %s limit 1000" % self.sitesselect
             columns = ["pandaid", "id"]
@@ -699,18 +672,6 @@ class aCTValidator(aCTATLASProcess):
                     else:
                         # Retry next time
                         pass
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            self.dbarc.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-            self.dbarc.Commit()
 
     def process(self):
         self.logger.arclog.setReopen(True)

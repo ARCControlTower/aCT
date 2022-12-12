@@ -8,7 +8,6 @@ from ssl import SSLError
 from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.rest import ARCError, ARCHTTPError, ARCRest, MissingDiagnoseFile
 from act.common.aCTJob import ACTJob
-from act.common.aCTProcess import ExitProcessException
 
 
 class aCTFetcher(aCTARCProcess):
@@ -71,8 +70,7 @@ class aCTFetcher(aCTARCProcess):
                 if arcrest:
                     arcrest.close()
 
-            # update jobs in DB
-            try:
+            with self.transaction([self.db]):
 
                 for job in jobs:
                     isError = False
@@ -95,16 +93,6 @@ class aCTFetcher(aCTARCProcess):
                         self.log.debug(f"Successfully fetched job {job.appid} {job.arcid}")
                         jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
                         self.db.updateArcJobLazy(job.arcid, jobdict)
-
-            except Exception as exc:
-                if isinstance(exc, ExitProcessException):
-                    self.log.info("Rolling back DB transaction on process exit")
-                else:
-                    self.log.error(f"Rolling back DB transaction on error: {exc}")
-                self.db.db.conn.rollback()
-                raise
-            else:
-                self.db.Commit()
 
         self.log.debug("Done")
 

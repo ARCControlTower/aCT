@@ -6,7 +6,6 @@ import time
 
 import classad
 import htcondor
-from act.common.aCTProcess import ExitProcessException
 from act.condor.aCTCondorProcess import aCTCondorProcess
 
 CONDOR_STATE_MAP = {
@@ -41,8 +40,7 @@ class aCTStatus(aCTCondorProcess):
         - All operations are done in a single transaction that gets rolled back
           on signal.
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.db]):
 
             # minimum time between checks
             if time.time() < self.checktime + self.conf.jobs.checkmintime:
@@ -158,17 +156,7 @@ class aCTStatus(aCTCondorProcess):
                 self.log.debug(str(jobdesc))
                 self.db.updateCondorJobLazy(job['id'], jobdesc)
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.db.db.conn.rollback()
-            raise
-        else:
-            self.db.Commit()
-
-        self.log.info('Done')
+            self.log.info('Done')
 
     def checkLostJobs(self):
         """
@@ -178,8 +166,7 @@ class aCTStatus(aCTCondorProcess):
         - All operations are done in a single transaction that gets rolled back
           on signal.
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.db]):
 
             # 2 days limit. TODO: configurable?
             jobs = self.db.getCondorJobsInfo(
@@ -202,16 +189,6 @@ class aCTStatus(aCTCondorProcess):
                         {'condorstate': 'lost', 'tcondorstate': self.db.getTimeStamp()}
                     )
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.db.db.conn.rollback()
-            raise
-        else:
-            self.db.Commit()
-
     def checkStuckJobs(self):
         """
         check jobs with tstate too long ago and set them tocancel
@@ -226,8 +203,7 @@ class aCTStatus(aCTCondorProcess):
         - All operation are done in one transaction which is rolled back
           on signal.
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.db]):
 
             # Loop over possible states
             # Note: MySQL is case-insensitive. Need to watch out with other DBs
@@ -260,16 +236,6 @@ class aCTStatus(aCTCondorProcess):
                     else:
                         # Otherwise delete it
                         self.db.deleteCondorJob(job['id'])
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.db.db.conn.rollback()
-            raise
-        else:
-            self.db.Commit()
 
     def process(self):
         # check job status

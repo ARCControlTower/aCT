@@ -129,6 +129,10 @@ class aCTProcess:
         finally:
             self.finish()
 
+    def transaction(self, dbobjects):
+        """Return transaction object with process' logger."""
+        return aCTTransaction(self.log, dbobjects)
+
 
 def stopProcess():
     """Throw exception for normal process exit."""
@@ -138,3 +142,38 @@ def stopProcess():
 class ExitProcessException(Exception):
     """Exception that indicates normal process exit."""
     pass
+
+
+class aCTTransaction:
+    """
+    Encapsulates transaction handling for multiple databases.
+
+    Technically if another asynchronous exception is thrown it can destroy
+    transaction integrity but no documentation was found showing how to avoid
+    that.
+    """
+
+    def __init__(self, log, dbobjects):
+        """Initialize transaction."""
+        self.log = log
+        self.dbobjects = dbobjects
+        if len(self.dbobjects) <= 0:
+            raise Exception("No database objects for transaction")
+
+    def __enter__(self):
+        """Log the beginning of transaction."""
+        self.log.debug("Starting transaction")
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        """Commit or rollback transactions based on exception parameters."""
+        if exc_type is None:
+            for db in self.dbobjects:
+                db.Commit()
+            self.log.debug("Committing transaction")
+        else:
+            if exc_type is ExitProcessException:
+                self.log.debug("Rolling back transaction on exit")
+            else:
+                self.log.debug(f"Rolling back transaction on unhandled exception: {exc_value}")
+            for db in self.dbobjects:
+                db.db.conn.rollback()

@@ -3,7 +3,6 @@
 # Condor automatically collects the stdout for the job so this Fetcher simply
 # moves the job to the next state.
 
-from act.common.aCTProcess import ExitProcessException
 from act.condor.aCTCondorProcess import aCTCondorProcess
 
 
@@ -17,8 +16,7 @@ class aCTFetcher(aCTCondorProcess):
         - All operations are done in one transaction which is rolled back
           on signal.
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbcondor]):
 
             # Get list of jobs in the right state
             select = f"condorstate='{condorstate}' and cluster='{self.cluster}' limit 100"
@@ -36,16 +34,6 @@ class aCTFetcher(aCTCondorProcess):
                     job['id'],
                     {"condorstate": nextcondorstate, "tcondorstate": self.db.getTimeStamp()}
                 )
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.db.db.conn.rollback()
-            raise
-        else:
-            self.db.Commit()
 
     def process(self):
         # failed jobs

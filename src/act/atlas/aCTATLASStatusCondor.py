@@ -1,7 +1,6 @@
 import datetime
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
-from act.common.aCTProcess import ExitProcessException
 
 
 class aCTATLASStatusCondor(aCTATLASProcess):
@@ -34,8 +33,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             jobs = self.dbpanda.getJobs("(actpandastatus='starting' or actpandastatus='sent') and sitename in ('%s')" % sites,
                                         ['pandaid', 'condorjobid', 'siteName', 'id'])
 
-            # exit handling try block
-            try:
+            with self.transaction([self.dbpanda, self.dbcondor]):
 
                 for job in jobs:
                     continue
@@ -45,18 +43,6 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                                                         'error': 'Starting job was killed because queue went offline'})
                     if job['condorjobid']:
                         self.dbcondor.updateCondorJobLazy(job['condorjobid'], {'condorstate': 'tocancel'})
-
-            except Exception as exc:
-                if isinstance(exc, ExitProcessException):
-                    self.log.info("Rolling back DB transaction on process exit")
-                else:
-                    self.log.error(f"Rolling back DB transaction on error: {exc}")
-                self.dbpanda.db.conn.rollback()
-                self.dbcondor.db.conn.rollback()
-                raise
-            else:
-                self.dbpanda.Commit()
-                self.dbcondor.Commit()
 
         # Get jobs killed by panda
         jobs = self.dbpanda.getJobs("actpandastatus='tobekilled' and sitename in %s" % self.sitesselect,
@@ -68,8 +54,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             self.log.info("Cancelling Condor job for %d", job['pandaid'])
             select = 'id=%s' % job['id']
 
-            # exit handling try block
-            try:
+            with self.transaction([self.dbpanda, self.dbcondor]):
 
                 # Check if condorjobid is set before cancelling the job
                 if not job['condorjobid']:
@@ -95,18 +80,6 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                 # Finally cancel the condor job
                 self.dbcondor.updateCondorJobLazy(job['condorjobid'], {'condorstate': 'tocancel'})
 
-            except Exception as exc:
-                if isinstance(exc, ExitProcessException):
-                    self.log.info("Rolling back DB transaction on process exit")
-                else:
-                    self.log.error(f"Rolling back DB transaction on error: {exc}")
-                self.dbpanda.db.conn.rollback()
-                self.dbcondor.db.conn.rollback()
-                raise
-            else:
-                self.dbpanda.Commit()
-                self.dbcondor.Commit()
-
     def getStartTime(self, endtime, walltime):
         """
         Get starttime from endtime-walltime where endtime is datetime.datetime and walltime is in seconds
@@ -126,8 +99,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         - all updates are performed in one transaction which is rolled back
           on signal
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbpanda]):
 
             select = "condorjobs.id=pandajobs.condorjobid and (condorjobs.condorstate='submitted' or condorjobs.condorstate='holding')"
             select += " and pandajobs.actpandastatus='sent' and siteName in %s" % self.sitesselect
@@ -148,16 +120,6 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                 desc["computingElement"] = job['cluster'].split(':')[0]
                 self.dbpanda.updateJobsLazy(select, desc)
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-
     def updateRunningJobs(self):
         """
         Check for new running jobs.
@@ -172,8 +134,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         - all updates are performed in one transaction which is rolled back
           on signal
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbpanda]):
 
             # do an inner join to pick up all jobs that should be set to running
             select = "condorjobs.id=pandajobs.condorjobid and condorjobs.condorstate='running' and pandajobs.actpandastatus='starting'"
@@ -200,16 +161,6 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                     desc['sendhb'] = 0
                 self.dbpanda.updateJobsLazy(select, desc)
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-
     def updateFinishedJobs(self):
         """
         Check for new finished jobs.
@@ -223,8 +174,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         - all updates are performed in one transaction which is rolled back
           on signal
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbpanda]):
 
             # don't get jobs already having actpandastatus states treated by
             # validator to avoid race conditions
@@ -256,16 +206,6 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                     desc['sendhb'] = 0
                 self.dbpanda.updateJobsLazy(select, desc)
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-
     def updateFailedJobs(self):
         """
         Handle jobs in different unsuccessful states.
@@ -278,8 +218,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         - all updates are performed in one transaction which is rolled back
           on signal (one transaction for dbcondor and one for dbpanda)
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbpanda, self.dbcondor]):
 
             # Look for failed final states
             select = "(condorstate='donefailed' or condorstate='cancelled' or condorstate='lost')"
@@ -345,18 +284,6 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                 desc['actpandastatus'] = 'toclean'
                 self.dbpanda.updateJobsLazy(select, desc)
 
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbpanda.db.conn.rollback()
-            self.dbcondor.db.conn.rollback()
-            raise
-        else:
-            self.dbpanda.Commit()
-            self.dbcondor.Commit()
-
     def cleanupLeftovers(self):
         """
         Clean jobs left behind in condorjobs table.
@@ -370,8 +297,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         - all updates are performed in one transaction which is rolled back
           on signal
         """
-        # exit handling try block
-        try:
+        with self.transaction([self.dbcondor]):
 
             # Even though the transaction probably gets rolled back
             # automatically, it is nice to handle it explicitly. Also, this
@@ -405,16 +331,6 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                 self.dbcondor.updateCondorJobLazy(job['id'], cleandesc)
             if jobs:
                 self.dbcondor.Commit()
-
-        except Exception as exc:
-            if isinstance(exc, ExitProcessException):
-                self.log.info("Rolling back DB transaction on process exit")
-            else:
-                self.log.error(f"Rolling back DB transaction on error: {exc}")
-            self.dbcondor.db.conn.rollback()
-            raise
-        else:
-            self.dbcondor.Commit()
 
     def process(self):
         """
