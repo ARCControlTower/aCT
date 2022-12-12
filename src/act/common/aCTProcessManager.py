@@ -141,11 +141,7 @@ class aCTProcessManager:
         for procClass in typeList:
             procName = procClass.__name__
             # do not start if process disabled in config
-            # TODO: .get(...) should return empty DictObj for better ergonomics
-            # TODO: better YAML?
-            #       disableProcs:
-            #         arc: [aCTProxyHandler, aCTMonitor]
-            if self.appconf.get(module, {}).get('disable', {}).get('processes', {}).get(procType, {}).get(procName, False):
+            if procName in self.appconf.get('disableProcs', {}).get(module, []):
                 self.log.debug(f'Not running disabled process {procName}')
                 continue
             # create process if it doesn't exist
@@ -171,8 +167,7 @@ class aCTProcessManager:
         for procClass in singleList:
             procName = procClass.__name__
             # do not start if process disabled in config
-            # TODO: .get(...) should return empty DictObj for better ergonomics
-            if self.appconf.get(module, {}).get('disable', {}).get('processes', {}).get('single', {}).get(procName, False):
+            if procName in self.appconf.get('disableProcs', {}).get(module, []):
                 self.log.debug(f'Not running disabled process {procName}')
                 continue
             # create process if it doesn't exist
