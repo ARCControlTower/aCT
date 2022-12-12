@@ -134,7 +134,7 @@ class aCTProcess:
         return aCTTransaction(self.log, dbobjects)
 
 
-def stopProcess():
+def stopProcess(signum, frame):
     """Throw exception for normal process exit."""
     raise ExitProcessException()
 
