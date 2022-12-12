@@ -1,4 +1,5 @@
 import datetime
+import itertools
 import importlib
 import multiprocessing
 import time
@@ -233,8 +234,8 @@ class aCTProcessManager:
     def updateClusterProcs(self, module):
         """Update state of (not) required processes for a given module."""
         if module == 'arc':
-            activeClusters = self.dbarc.getActiveClusters()
-            requestedClusters = self.dbarc.getClusterLists()
+            activeClusters = [entry['cluster'] for entry in self.dbarc.getActiveClusters()]
+            requestedClusters = itertools.chain(*[entry['clusterlist'].split(',') for entry in self.dbarc.getClusterLists()])
         elif module == 'condor':
             activeClusters = self.dbcondor.getActiveClusters()
             requestedClusters = self.dbcondor.getClusterLists()
