@@ -279,11 +279,11 @@ class aCTProcessManager:
 
             submitProcs = moduleProcs.get('submitter', {})
             for cluster, submitters in submitProcs.items():
-                self.stopProcs(submitters)
+                self.stopProcs(submitters.values())
 
             clusterProcs = moduleProcs.get('cluster', {})
             for cluster, managers in clusterProcs.items():
-                self.stopProcs(managers)
+                self.stopProcs(managers.values())
 
         while True:
             self.killProcs(timeout)
