@@ -244,7 +244,7 @@ class aCTProcessManager:
             if cluster not in requestedClusters:
                 self.log.debug(f'Cluster {cluster} not requested anymore, stopping {", ".join(submitters.keys())}')
                 self.stopProcs(submitters.values())
-                submitProcs.clear()
+                submitProcs[cluster].clear()
 
         # terminate cluster processes for inactive clusters
         clusterProcs = moduleProcs.get('cluster', {})
@@ -252,7 +252,7 @@ class aCTProcessManager:
             if cluster not in activeClusters:
                 self.log.debug(f'Cluster {cluster} not active anymore, stopping {", ".join(managers.keys())}')
                 self.stopProcs(managers.values())
-                clusterProcs.clear()
+                clusterProcs[cluster].clear()
 
         # start submitter processes for requested clusters
         for cluster in requestedClusters:
