@@ -2,51 +2,42 @@ import os
 import subprocess
 import sys
 import tempfile
-import traceback
+import time
+import signal
 
-from act.common import aCTUtils
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
-from act.common.aCTLogger import aCTLogger
 from act.common.aCTProcessManager import aCTProcessManager
-from act.common.aCTSignal import aCTSignal
+from act.common.aCTProcess import aCTProcess, stopProcess
 
 
-class aCTMain:
+class aCTMain(aCTProcess):
     '''Main class to run aCT.'''
 
-    def __init__(self):
-        # Check we have the right ARC version
-        self.checkARC()
-
-        # xml config file
+    def loadConf(self):
         self.conf = aCTConfigARC()
         self.appconf = aCTConfigAPP()
 
-        # Create required directories
+    def setup(self):
+        super().setup()
+
+        # check we have the right ARC version
+        self.checkARC()
+
+        self.loadConf()
+
+        signal.signal(signal.SIGINT, stopProcess)
+
+        # create required directories
         tmpdir = self.conf.tmp.dir
         os.makedirs(os.path.join(tmpdir, 'inputfiles'), mode=0o755, exist_ok=True)
         os.makedirs(os.path.join(tmpdir, 'failedlogs'), mode=0o755, exist_ok=True)
         os.makedirs(self.conf.voms.proxystoredir, mode=0o700, exist_ok=True)
         os.makedirs(self.conf.logger.logdir, mode=0o755, exist_ok=True)
 
-        # logger
-        self.logger = aCTLogger('aCTMain')
-        self.log = self.logger()
-
-        # set up signal handlers
-        self.signal = aCTSignal(self.log)
-
         # change to aCT working dir
         os.chdir(self.conf.actlocation.dir)
 
-        # process manager
-        try:
-            self.procmanager = aCTProcessManager(self.log, self.conf, self.appconf)
-        except Exception as e:
-            self.log.critical('*** Unexpected exception! ***')
-            self.log.critical(traceback.format_exc())
-            self.log.critical('*** Process exiting ***')
-            raise e
+        self.procmanager = aCTProcessManager(self.log)
 
     def checkARC(self):
         '''Check ARC can be used and is correct version.'''
@@ -85,43 +76,22 @@ class aCTMain:
             except (FileNotFoundError, subprocess.CalledProcessError) as e:
                 self.log.warning(f'Failed to run logrotate: {e}')
 
-    def run(self):
-        '''Run main loop.'''
-        self.log.info('Running')
-        while 1:
-            try:
-                # Rotate logs
-                self.logrotate()
-                # (re)start new processes as necessary
-                self.procmanager.checkARCClusters()
-                self.procmanager.checkCondorClusters()
-                # sleep
-                aCTUtils.sleep(10)
+    def wait(self):
+        time.sleep(10)
 
-                if self.signal.isInterrupted():
-                    self.log.info('*** Exiting on exit interrupt ***')
-                    break
+    def process(self):
+        self.log.debug("Rotating logs ...")
+        self.logrotate()
 
-            except:
-                self.log.critical('*** Unexpected exception! ***')
-                self.log.critical(traceback.format_exc())
-                # Reconnect database, in case there was a DB interruption
-                try:
-                    self.procmanager.reconnectDB()
-                except:
-                    self.log.critical(traceback.format_exc())
-                aCTUtils.sleep(10)
+        self.log.debug("Updating running processes ...")
+        self.procmanager.update()
 
     def finish(self):
         '''Do cleanup on normal exit by signal.'''
-        self.log.info('Cleanup')
+        self.log.info('Stopping all processes ...')
+        self.procmanager.stopAllProcesses()
 
 
 def main():
     am = aCTMain()
     am.run()
-    am.finish()
-
-
-if __name__ == '__main__':
-    main()
