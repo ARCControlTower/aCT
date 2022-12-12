@@ -1,5 +1,6 @@
 import signal
 import traceback
+from urllib.parse import urlparse
 
 from act.common.aCTLogger import aCTLogger
 from act.common.aCTSignal import aCTSignalDeferrer
@@ -49,7 +50,11 @@ class aCTProcess:
     def __init__(self, cluster=None):
         """Set up attributes needed for setup() in spawned OS process."""
         self.name = self.__class__.__name__
-        self.cluster = cluster
+        if cluster:
+            url = urlparse(cluster)
+            self.cluster = url.hostname
+        else:
+            self.cluster = ''
 
     def __call__(self, *args, **kwargs):
         """Call the method implementing the process code."""
