@@ -152,7 +152,8 @@ class aCTProcessManager:
             # close not alive process and create new one
             elif not clusterProcs[procName].is_alive():
                 self.log.debug(f'Process {procName} for cluster {cluster} not alive, restarting')
-                clusterProcs[procName].close()
+                # only available from Python 3.7
+                #clusterProcs[procName].close()
                 clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
                 clusterProcs[procName].start()
             else:
@@ -178,7 +179,8 @@ class aCTProcessManager:
             # close not alive process and create new one
             elif not singleProcs[procName].is_alive():
                 self.log.debug(f'Process {procName} not alive, restarting')
-                singleProcs[procName].close()
+                # only available from Python 3.7
+                #singleProcs[procName].close()
                 singleProcs[procName] = multiprocessing.Process(target=procClass())
                 singleProcs[procName].start()
             else:
@@ -205,11 +207,13 @@ class aCTProcessManager:
             proc, termtime = self.terminating[i]
             # close if terminated
             if not proc.is_alive():
-                proc.close()
+                # only available from Python 3.7
+                #proc.close()
                 self.terminating.pop(i)
             # kill if not terminated after timeout
-            elif (now - termtime).second > timeout:
-                proc.kill()
+            elif (now - termtime).seconds > timeout:
+                # only available from Python 3.7
+                #proc.kill()
                 self.killing.append((proc, datetime))
                 self.terminating.pop(i)
 
