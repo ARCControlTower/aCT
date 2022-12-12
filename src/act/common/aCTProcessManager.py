@@ -201,7 +201,7 @@ class aCTProcessManager:
     def killProcs(self, timeout=5):
         """Kill all processes that haven't terminated in a given timeout."""
         now = datetime.datetime.utcnow()
-        for i in range(len(self.terminating - 1), -1, -1):
+        for i in range(len(self.terminating) - 1, -1, -1):
             proc, termtime = self.terminating[i]
             # close if terminated
             if not proc.is_alive():
@@ -216,7 +216,7 @@ class aCTProcessManager:
     def closeProcs(self, timeout=5):
         """Close all processes that haven't been killed in a given timeout."""
         now = datetime.datetime.utcnow()
-        for i in range(len(self.killing - 1), -1, -1):
+        for i in range(len(self.killing) - 1, -1, -1):
             proc, killtime = self.killing[i]
             # close process if terminated or timeout
             if not proc.is_alive() or (now - killtime).seconds > timeout:
