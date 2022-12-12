@@ -31,6 +31,8 @@ class aCTSignal:
         return False
 
 
+# TODO: signal.valid_signals() was added in 3.8
+# TODO: signal.strsignal() was added in 3.8
 class aCTSignalDeferrer:
 
     def __init__(self, log, *args):
@@ -41,8 +43,6 @@ class aCTSignalDeferrer:
 
         self.signals = []
         for sig in args:
-            # signal.valid_signals() was added in 3.8
-            # signal.strsignal() was added in 3.8
             # relying on us using the right signal for now
             #if sig not in signal.valid_signals():
             #    raise ValueError(f"Given value {sig} is not a valid signal")
@@ -59,7 +59,8 @@ class aCTSignalDeferrer:
         for sig in self.signals:
             self.oldHandlers[sig] = signal.getsignal(sig)
             signal.signal(sig, self.deferredHandler)
-            self.log.debug(f"Deferring signal {sig} {signal.strsignal(sig)}")
+            #self.log.debug(f"Deferring signal {sig} {signal.strsignal(sig)}")
+            self.log.debug(f"Deferring signal {sig}")
 
     # if signal is received multiple times, only the last frame will be saved
     def deferredHandler(self, signum, frame):
@@ -75,7 +76,8 @@ class aCTSignalDeferrer:
             if sigargs is not None and oldHandler is not None:
                 oldHandler(*sigargs)
             signal.signal(sig, oldHandler)
-            self.log.debug(f"Restoring signal {sig} {signal.strsignal(sig)}")
+            #self.log.debug(f"Restoring signal {sig} {signal.strsignal(sig)}")
+            self.log.debug(f"Restoring signal {sig}")
 
     def __enter__(self):
         self.defer()
