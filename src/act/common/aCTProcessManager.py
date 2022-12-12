@@ -219,11 +219,12 @@ class aCTProcessManager:
         for i in range(len(self.killing - 1), -1, -1):
             proc, killtime = self.killing[i]
             # close process if terminated or timeout
-            if not proc.is_alive() or (now - killtime).second > timeout:
-                try:
-                    proc.close()
-                except ValueError:
-                    pass
+            if not proc.is_alive() or (now - killtime).seconds > timeout:
+                # only available from Python 3.7
+                #try:
+                #    proc.close()
+                #except ValueError:
+                #    pass
                 self.killing.pop(i)
 
     def updateClusterProcs(self, module):
