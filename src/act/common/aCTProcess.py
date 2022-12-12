@@ -79,7 +79,12 @@ class aCTProcess:
         self.log = self.logger()
         self.criticallog = self.criticallogger()
 
-        signal.signal(signal.SIGINT, stopProcess)
+        # SIGINT is ignored for the usecase of running aCT from console to
+        # ignore the SIGINT being propagated to children by shell
+        #
+        # aCTMain should override this in setup()
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
         signal.signal(signal.SIGTERM, stopProcess)
         self.sigdefer = aCTSignalDeferrer(self.log, signal.SIGINT, signal.SIGTERM)
 
