@@ -213,7 +213,7 @@ class aCTSubmitter(aCTARCProcess):
                         alreadySubmitted = True
 
                 # upload jobs' local input files
-                arcrest.uploadJobFiles(arcjobs)
+                arcrest.uploadJobFiles([job for job in arcjobs if job.state == "ACCEPTING"])
 
                 # log submission results and set job state
                 for job in actjobs:
