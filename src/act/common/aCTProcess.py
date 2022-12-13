@@ -50,11 +50,7 @@ class aCTProcess:
     def __init__(self, cluster=None):
         """Set up attributes needed for setup() in spawned OS process."""
         self.name = self.__class__.__name__
-        if cluster:
-            url = urlparse(cluster)
-            self.cluster = url.hostname
-        else:
-            self.cluster = ''
+        self.cluster = cluster
 
     def __call__(self, *args, **kwargs):
         """Call the method implementing the process code."""
@@ -73,7 +69,8 @@ class aCTProcess:
         """
         logname = f'{self.name}'
         if self.cluster:
-            logname += f'-{self.cluster}'
+            url = urlparse(self.cluster)
+            logname += f'-{url.hostname}'
         self.logger = aCTLogger(logname, cluster=self.cluster)
         self.criticallogger = aCTLogger('aCTCritical', cluster=self.cluster, arclog=False)
         self.log = self.logger()
