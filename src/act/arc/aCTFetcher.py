@@ -12,6 +12,12 @@ from act.common.aCTJob import ACTJob
 
 class aCTFetcher(aCTARCProcess):
 
+    def setup(self):
+        super().setup()
+
+        self.loadConf()
+        self.tmpdir = self.conf.tmp.dir
+
     # TODO: refactor to some library aCT job operation
     def fetchJobs(self, arcstate, nextarcstate):
         """
