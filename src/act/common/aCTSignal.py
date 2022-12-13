@@ -73,7 +73,8 @@ class aCTSignalDeferrer:
         for sig in self.signals:
             oldHandler = self.oldHandlers.pop(sig, None)
             sigargs = self.received.pop(sig, None)
-            if sigargs is not None and oldHandler is not None:
+            # SIG_DFL, SIG_IGN are not callable
+            if sigargs is not None and oldHandler is not None and callable(oldHandler):
                 oldHandler(*sigargs)
             signal.signal(sig, oldHandler)
             #self.log.debug(f"Restoring signal {sig} {signal.strsignal(sig)}")
