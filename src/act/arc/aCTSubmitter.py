@@ -274,6 +274,7 @@ class aCTSubmitter(aCTARCProcess):
                         pass
                 raise
             else:
+                self.log.debug(f"Committing successful submit transaction for proxyid {proxyid}")
                 self.db.Commit()
 
         self.log.info("Done")
