@@ -154,18 +154,21 @@ class ARCRest:
 
             # add queue and delegation, modify description as necessary for
             # ARC client
-            job.desc = jobdescs[-1]
-            job.desc.Resources.QueueName = queue
-            job.desc.DataStaging.DelegationID = delegationID
-            processJobDescription(job.desc)
+            desc = jobdescs[-1]
+            desc.Resources.QueueName = queue
+            desc.DataStaging.DelegationID = delegationID
+            processJobDescription(desc)
+
+            # get input files from description
+            self.getInputFiles(job, desc)
 
             # read name from description
-            job.name = job.desc.Identification.JobName
+            job.name = desc.Identification.JobName
             self.logger.debug(f"Job name from description: {job.name}")
 
             # unparse modified description, remove xml version node because it
             # is not accepted by ARC CE, add to bulk description
-            unparseResult = job.desc.UnParse("emies:adl")
+            unparseResult = desc.UnParse("emies:adl")
             if not unparseResult[0]:
                 job.errors.append(DescriptionUnparseError(f"Could not unparse modified description of job {job.name}"))
                 self.logger.debug(f"Could not unparse modified description of job {job.name}")
@@ -213,6 +216,14 @@ class ARCRest:
         if uploadData:
             self.uploadJobFiles(toupload)
 
+    def getInputFiles(self, job, desc):
+        job.inputFiles = {}
+        for infile in desc.DataStaging.InputFiles:
+            source = None
+            if len(infile.Sources) > 0:
+                source = infile.Sources[0].fullstr()
+            job.inputFiles[infile.Name] = source
+
     def getInputUploads(self, job):
         """
         Return a list of upload dicts.
@@ -221,32 +232,29 @@ class ARCRest:
             - InputFileError
         """
         uploads = []
-        for infile in job.desc.DataStaging.InputFiles:
-            source = None
-            if len(infile.Sources) > 0:
-                source = infile.Sources[0].fullstr()
+        for name, source in job.inputFiles.items():
             try:
-                path = isLocalInputFile(infile.Name, source)
+                path = isLocalInputFile(name, source)
             except InputFileError as exc:
                 job.errors.append(exc)
-                self.logger.debug(f"Error parsing input {infile.Name} at {source} for job {job.id}: {exc}")
+                self.logger.debug(f"Error parsing input {name} at {source} for job {job.id}: {exc}")
                 continue
             if not path:
-                self.logger.debug(f"Skipping non local input {infile.Name} at {source} for job {job.id}")
+                self.logger.debug(f"Skipping non local input {name} at {source} for job {job.id}")
                 continue
 
-            if path and not os.path.isfile(path):
-                msg = f"Local input {infile.Name} at {path} for job {job.id} is not a file"
+            if not os.path.isfile(path):
+                msg = f"Local input {name} at {path} for job {job.id} is not a file"
                 job.errors.append(InputFileError(msg))
                 self.logger.debug(msg)
                 continue
 
             uploads.append({
                 "jobid": job.id,
-                "url": f"{self.basePath}/jobs/{job.id}/session/{infile.Name}",
+                "url": f"{self.basePath}/jobs/{job.id}/session/{name}",
                 "path": path
             })
-            self.logger.debug(f"Will upload local input {infile.Name} at {path} for job {job.id}")
+            self.logger.debug(f"Will upload local input {name} at {path} for job {job.id}")
 
         return uploads
 
@@ -543,12 +551,12 @@ class ARCJob:
         self.descstr = descstr
         self.name = None
         self.delegid = None
-        self.desc = None
         self.state = None
         self.tstate = None
         self.cancelEvent = None
         self.errors = []
         self.downloadFiles = []
+        self.inputFiles = {}
 
         self.ExecutionNode = None
         self.UsedTotalWallTime = None
