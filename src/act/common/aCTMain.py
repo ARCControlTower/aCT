@@ -7,7 +7,8 @@ import signal
 
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from act.common.aCTProcessManager import aCTProcessManager
-from act.common.aCTProcess import aCTProcess, stopProcess
+from act.common.aCTProcess import aCTProcess, exitHandler
+from act.common.aCTSignal import aCTSignalDeferrer
 
 
 class aCTMain(aCTProcess):
@@ -18,14 +19,18 @@ class aCTMain(aCTProcess):
         self.appconf = aCTConfigAPP()
 
     def setup(self):
-        super().setup()
-
         # check we have the right ARC version
         self.checkARC()
 
-        self.loadConf()
+        super().setup()
 
-        signal.signal(signal.SIGINT, stopProcess)
+        # override handlers for SIGINT and SIGTERM to support running the main
+        # process from terminal
+        signal.signal(signal.SIGINT, mainExitHandler)
+        signal.signal(signal.SIGTERM, mainExitHandler)
+        self.sigdefer = aCTSignalDeferrer(self.log, signal.SIGINT, signal.SIGTERM)
+
+        self.loadConf()
 
         # create required directories
         tmpdir = self.conf.tmp.dir
@@ -33,9 +38,6 @@ class aCTMain(aCTProcess):
         os.makedirs(os.path.join(tmpdir, 'failedlogs'), mode=0o755, exist_ok=True)
         os.makedirs(self.conf.voms.proxystoredir, mode=0o700, exist_ok=True)
         os.makedirs(self.conf.logger.logdir, mode=0o755, exist_ok=True)
-
-        # change to aCT working dir
-        os.chdir(self.conf.actlocation.dir)
 
         self.procmanager = aCTProcessManager(self.log)
 
@@ -90,6 +92,11 @@ class aCTMain(aCTProcess):
         '''Do cleanup on normal exit by signal.'''
         self.log.info('Stopping all processes ...')
         self.procmanager.stopAllProcesses()
+
+
+def mainExitHandler(signum, frame):
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    exitHandler(signum, frame)
 
 
 def main():
