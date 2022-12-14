@@ -223,13 +223,18 @@ class aCTProcessManager:
         for i in range(len(self.killing) - 1, -1, -1):
             proc, killtime = self.killing[i]
             # close process if terminated or timeout
-            if not proc.is_alive() or (now - killtime).seconds > timeout:
-                # only available from Python 3.7
-                #try:
-                #    proc.close()
-                #except ValueError:
-                #    pass
+            if not proc.is_alive():
                 self.killing.pop(i)
+            elif (now - killtime).seconds > timeout:
+                ## only available from Python 3.7
+                ##try:
+                ##    proc.close()
+                ##except ValueError:
+                ##    pass
+                #self.killing.pop(i)
+                # Rather leave process in killing and join it in the end.
+                # Could potentially lead to accumulation of alive processes.
+                pass
 
     def updateClusterProcs(self, module):
         """Update state of (not) required processes for a given module."""
@@ -290,12 +295,16 @@ class aCTProcessManager:
             for cluster, managers in clusterProcs.items():
                 self.stopProcs(managers.values())
 
-        while True:
-            self.killProcs(timeout)
-            self.closeProcs(timeout)
-            if not self.killing and not self.terminating:
-                break
-            time.sleep(timeout)
+        for proc, _ in self.terminating:
+            proc.join()
+        for proc, _ in self.killing:
+            proc.join()
+        #while True:
+        #    self.killProcs(timeout)
+        #    self.closeProcs(timeout)
+        #    if not self.killing and not self.terminating:
+        #        break
+        #    time.sleep(timeout)
 
     def reconnectDB(self):
         """Reconnect database connections."""
