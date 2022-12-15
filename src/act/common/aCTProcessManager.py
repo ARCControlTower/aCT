@@ -2,7 +2,6 @@ import datetime
 import itertools
 import importlib
 import multiprocessing
-import time
 
 from act.arc.aCTDBArc import aCTDBArc
 from act.common.aCTConfig import aCTConfigAPP
@@ -38,8 +37,8 @@ class aCTProcessManager:
     The values in the dictionary structure are classes from aCT process
     hierarchy that are used to instantiate the callable objects for
     multiprocessing.Process instances that run the OS processes. Created
-    multiprocessing.Process instances are kept in the attributes
-    processes, terminating and killing.
+    multiprocessing.Process instances are kept in the manager's
+    attributes: processes, terminating and killing.
 
     The processes dictionary structure has all instances that are required to
     be running and is designed in a way that every individual instance can
@@ -84,6 +83,14 @@ class aCTProcessManager:
     }
 
     terminating and killing are lists of instances that are being terminated.
+
+    Process running conditions:
+    - single processes are always required to run
+    - submitter processes are required to run for every cluster that is
+      specified in any one of the jobs in aCT
+    - cluster processes are required to run for every cluster that jobs
+      were submitted to and are required until the jobs are not on the
+      cluster anymore
     """
 
     def __init__(self, log):
@@ -123,15 +130,14 @@ class aCTProcessManager:
         for module in self.appconf.modules:
             self.updateSingleProcs(module)
 
-    # TODO: check ergonomics and correctnes of config interface (e. g. does
-    # get() return None or empty DictObj since empty DictObj is False (is it?))
     def startClusterProcs(self, module, procType, cluster):
         """
-        Start all eligible processes of a given type for a given cluster.
+        Start all enabled processes of a given type for a given cluster.
 
         Though submitter processes are handled separately from cluster
         processes, the way of handling them is still the same. That is why
-        the type is given as a parameter.
+        the type is given as a parameter and this function is used to manage
+        both types.
         """
         moduleProcs = self.processes.setdefault(module, {})
         typeProcs = moduleProcs.setdefault(procType, {})
@@ -201,7 +207,12 @@ class aCTProcessManager:
             self.terminating.append((proc, now))
 
     def killProcs(self, timeout=5):
-        """Kill all processes that haven't terminated in a given timeout."""
+        """
+        Kill all processes that haven't terminated in a given timeout.
+
+        kill() is only available in Python >= 3.7 so for now the process
+        objects are just passed on to killing list.
+        """
         now = datetime.datetime.utcnow()
         for i in range(len(self.terminating) - 1, -1, -1):
             proc, termtime = self.terminating[i]
@@ -218,7 +229,13 @@ class aCTProcessManager:
                 self.terminating.pop(i)
 
     def closeProcs(self, timeout=5):
-        """Close all processes that haven't been killed in a given timeout."""
+        """
+        Close all processes that haven't been killed in a given timeout.
+
+        close() is only available in Python >= 3.7 so for now the process is
+        kept around and join()ed in the end. If the process still persists, it
+        becomes responsibility of the service manager/control terminal.
+        """
         now = datetime.datetime.utcnow()
         for i in range(len(self.killing) - 1, -1, -1):
             proc, killtime = self.killing[i]
@@ -237,7 +254,14 @@ class aCTProcessManager:
                 pass
 
     def updateClusterProcs(self, module):
-        """Update state of (not) required processes for a given module."""
+        """
+        Update state of cluster processes for a given module.
+
+        Requested clusters is a list of unique clusters from clusterlists
+        of all jobs. Active clusters is a list of unique clusters from
+        cluster attribute of all jobs.
+        """
+        # get required and active clusters
         if module == 'arc':
             activeClusters = [entry['cluster'] for entry in self.dbarc.getActiveClusters()]
             requestedClusters = itertools.chain(*[entry['clusterlist'].split(',') for entry in self.dbarc.getClusterLists()])
@@ -248,7 +272,7 @@ class aCTProcessManager:
             return
         moduleProcs = self.processes.get(module, {})
 
-        # terminate submitters for clusters that are not in any clusterlist
+        # terminate submitter processes for non requested clusters
         submitProcs = moduleProcs.get('submitter', {})
         for cluster, submitters in submitProcs.items():
             if submitters and cluster not in requestedClusters:
@@ -276,11 +300,13 @@ class aCTProcessManager:
         """Update state of single processes for a given module."""
         self.startSingleProcs(module)
 
-    def stopAllProcesses(self, timeout=2):
+    def stopAllProcesses(self):
         """
-        Stop all running processes with a given timeout.
+        Stop all running processes.
 
-        The timeout is first used for termination and then for killing.
+        The terminated processes are then joined which could lock up the
+        process. In that case, the service manager or controlling terminal
+        should handle the SIGKILL signal for the processes.
         """
         for module in self.appconf.modules:
             moduleProcs = self.processes.get(module, {})
@@ -299,12 +325,6 @@ class aCTProcessManager:
             proc.join()
         for proc, _ in self.killing:
             proc.join()
-        #while True:
-        #    self.killProcs(timeout)
-        #    self.closeProcs(timeout)
-        #    if not self.killing and not self.terminating:
-        #        break
-        #    time.sleep(timeout)
 
     def reconnectDB(self):
         """Reconnect database connections."""
