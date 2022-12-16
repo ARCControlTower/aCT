@@ -42,8 +42,8 @@ class aCTProcessManager:
 
     The processes dictionary structure has all instances that are required to
     be running and is designed in a way that every individual instance can
-    easily be accessed and manipulated. An example dictionary structure could
-    be:
+    easily be accessed based on its module, type and cluster (for cluster
+    processes). An example dictionary structure could be:
 
     self.processes = {
         "arc": {
@@ -147,8 +147,8 @@ class aCTProcessManager:
         for procClass in typeList:
             procName = procClass.__name__
             # do not start if process disabled in config
-            if procName in self.appconf.get('disableProcs', {}).get(module, []):
-                self.log.debug(f'Not running disabled process {procName}')
+            if procName in self.appconf.get('disabledProcs', {}).get(module, {}).get(procType, {}).get(cluster, []):
+                self.log.debug(f'Not running disabled process {procName} for cluster {cluster}')
                 continue
             # create process if it doesn't exist
             elif procName not in clusterProcs:
@@ -174,7 +174,7 @@ class aCTProcessManager:
         for procClass in singleList:
             procName = procClass.__name__
             # do not start if process disabled in config
-            if procName in self.appconf.get('disableProcs', {}).get(module, []):
+            if procName in self.appconf.get('disabledProcs', {}).get(module, {}).get('single', []):
                 self.log.debug(f'Not running disabled process {procName}')
                 continue
             # create process if it doesn't exist
