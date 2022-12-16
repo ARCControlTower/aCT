@@ -10,6 +10,7 @@ class aCTSignalDeferrer:
         self.oldHandlers = {}
         self.received = {}
         self.deferred = False
+        self.level = 0  # variable to handle nesting
 
         self.signals = []
         for sig in args:
@@ -23,9 +24,9 @@ class aCTSignalDeferrer:
             self.log.debug(f"Will handle signal {sig}")
 
     def defer(self):
-        if self.deferred:
+        self.level += 1
+        if self.level != 1:
             return
-        self.deferred = True
         for sig in self.signals:
             self.oldHandlers[sig] = signal.getsignal(sig)
             signal.signal(sig, self.deferredHandler)
@@ -37,9 +38,9 @@ class aCTSignalDeferrer:
         self.received[signum] = (signum, frame)
 
     def restore(self):
-        if not self.deferred:
+        self.level -= 1
+        if self.level != 0:
             return
-        self.deferred = False
         for sig in self.signals:
             oldHandler = self.oldHandlers.pop(sig, None)
             sigargs = self.received.pop(sig, None)
