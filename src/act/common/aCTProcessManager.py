@@ -164,7 +164,7 @@ class aCTProcessManager:
                 #clusterProcs[procName].close()
                 clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
                 clusterProcs[procName].start()
-            else:
+            if clusterProcs[procName].is_alive():
                 self.log.debug(f'Process {procName} running for cluster {cluster}')
 
     def startSingleProcs(self, module):
@@ -191,7 +191,7 @@ class aCTProcessManager:
                 #singleProcs[procName].close()
                 singleProcs[procName] = multiprocessing.Process(target=procClass())
                 singleProcs[procName].start()
-            else:
+            if singleProcs[procName].is_alive():
                 self.log.debug(f'Process {procName} running')
 
     def stopProcs(self, procs):
