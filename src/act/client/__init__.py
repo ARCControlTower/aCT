@@ -1,5 +1,5 @@
-from act.client.client2arc import Client2Arc
+from act.client.aCTClient2Arc import aCTClient2Arc
 
 processes = {
-    'single': [Client2Arc]
+    'single': [aCTClient2Arc]
 }

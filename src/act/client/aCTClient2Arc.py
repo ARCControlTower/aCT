@@ -14,7 +14,7 @@ from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
 
 
-class Client2Arc(aCTProcess):
+class aCTClient2Arc(aCTProcess):
     """
     Object that runs until interrupted and periodically submits new jobs.
 
