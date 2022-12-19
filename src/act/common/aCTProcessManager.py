@@ -46,7 +46,7 @@ class aCTProcessManager:
     processes). An example dictionary structure could be:
 
     self.processes = {
-        "arc": {
+        "act.arc": {
             "submitter": {
                 "arc01.net": {
                     "aCTSubmitter":     multiprocessing.Process,
@@ -67,7 +67,7 @@ class aCTProcessManager:
                 "aCTMonitor":           multiprocessing.Process,
             },
         },
-        "atlas": {
+        "act.atlas": {
             "single": {
                 "aCTCRICFetcher":       multiprocessing.Process,
                 "aCTATLASStatus":       multiprocessing.Process,
@@ -100,11 +100,11 @@ class aCTProcessManager:
         self.log = log
 
         # DB connection
-        if 'arc' in self.appconf.modules:
+        if 'act.arc' in self.appconf.modules:
             self.dbarc = aCTDBArc(self.log)
         else:
             self.dbarc = None
-        if 'condor' in self.appconf.modules:
+        if 'act.condor' in self.appconf.modules:
             self.dbcondor = aCTDBCondor(self.log)
         else:
             self.dbcondor = None
@@ -121,11 +121,11 @@ class aCTProcessManager:
         self.killProcs(timeout=termTimeout)
         self.closeProcs(timeout=killTimeout)
 
-        if 'arc' in self.appconf.modules:
-            self.updateClusterProcs('arc')
+        if 'act.arc' in self.appconf.modules:
+            self.updateClusterProcs('act.arc')
 
-        if 'condor' in self.appconf.modules:
-            self.updateClusterProcs('condor')
+        if 'act.condor' in self.appconf.modules:
+            self.updateClusterProcs('act.condor')
 
         for module in self.appconf.modules:
             self.updateSingleProcs(module)
@@ -142,7 +142,7 @@ class aCTProcessManager:
         moduleProcs = self.processes.setdefault(module, {})
         typeProcs = moduleProcs.setdefault(procType, {})
         clusterProcs = typeProcs.setdefault(cluster, {})
-        mod = importlib.import_module(f'.{module}', 'act')
+        mod = importlib.import_module(module)
         typeList = mod.processes.get(procType, {})
         for procClass in typeList:
             procName = procClass.__name__
@@ -169,7 +169,7 @@ class aCTProcessManager:
         """Start all eligible single processes for a given module."""
         moduleProcs = self.processes.setdefault(module, {})
         singleProcs = moduleProcs.setdefault('single', {})
-        mod = importlib.import_module(f'.{module}', 'act')
+        mod = importlib.import_module(module)
         singleList = mod.processes.get('single', {})
         for procClass in singleList:
             procName = procClass.__name__
@@ -262,10 +262,10 @@ class aCTProcessManager:
         cluster attribute of all jobs.
         """
         # get required and active clusters
-        if module == 'arc':
+        if module == 'act.arc':
             activeClusters = [entry['cluster'] for entry in self.dbarc.getActiveClusters()]
             requestedClusters = itertools.chain(*[entry['clusterlist'].split(',') for entry in self.dbarc.getClusterLists()])
-        elif module == 'condor':
+        elif module == 'act.condor':
             activeClusters = self.dbcondor.getActiveClusters()
             requestedClusters = self.dbcondor.getClusterLists()
         else:
