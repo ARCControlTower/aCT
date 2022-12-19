@@ -17,17 +17,17 @@ class aCTPrometheusCollector:
     def app_collect(self):
 
         appconf = aCTConfigAPP()
-        apps = appconf.modules.app
-        for app in apps:
+        modules = appconf.modules
+        for module in modules:
             try:
-                yield from importlib.import_module(f'{app}.aCTMonitor').collect(self.log)
-                self.log.info(f'Added metrics from {app}.aCTMonitor')
+                yield from importlib.import_module(f'{module}.aCTMonitor').collect(self.log)
+                self.log.info(f'Added metrics from {module}.aCTMonitor')
             except ModuleNotFoundError:
-                self.log.info(f'No collect in module {app}')
+                self.log.info(f'No collect in module {module}')
             except AttributeError:
-                self.log.info(f'aCTMonitor.collect() not found in {app}')
+                self.log.info(f'aCTMonitor.collect() not found in {module}')
             except Exception as e:
-                self.log.error(f'Exception running {app}.aCTMonitor.collect: {e}')
+                self.log.error(f'Exception running {module}.aCTMonitor.collect: {e}')
         raise StopIteration
 
     def collect(self):

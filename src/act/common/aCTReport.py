@@ -8,7 +8,7 @@ import sys
 import time
 import logging
 from act.common import aCTLogger
-from act.common.aCTConfig import aCTConfigAPP
+from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from act.arc import aCTDBArc
 
 
@@ -37,67 +37,114 @@ class aCTReport:
     def AppReport(self):
 
         appconf = aCTConfigAPP()
-        apps = appconf.modules.app
-        for app in apps:
+        modules = appconf.modules
+        for module in modules:
             try:
-                ap = importlib.import_module(f'{app}.aCTReport').report
+                ap = importlib.import_module(f'{module}.aCTReport').report
                 self.log(ap(self.actconfs))
-            except ModuleNotFoundError as e:
-                self.actlog.info(f'No report in module {app}')
+            except ModuleNotFoundError:
+                self.actlog.info(f'No report in module {module}')
             except AttributeError:
-                self.actlog.info(f'aCTReport.report() not found in {app}')
+                self.actlog.info(f'aCTReport.report() not found in {module}')
             except Exception as e:
-                self.actlog.error(f'Exception running {app}.aCTReport.report: {e}')
+                self.actlog.error(f'Exception running {module}.aCTReport.report: {e}')
 
+    #def ProcessReport(self):
+    #    if self.actconfs != ['']:
+    #        return # don't print processes for combined report
+    #    actprocscmd = 'ps ax -ww -o pid,etime,args'
+    #    try:
+    #        out = subprocess.run(actprocscmd.split(), check=True, encoding='utf-8', stdout=subprocess.PIPE).stdout
+    #    except subprocess.CalledProcessError as e:
+    #        self.log('Error: could not run ps command: %s' % e.stderr)
+    #        return
 
+    #    # Group processes by cluster
+    #    cluster_procs = {}
+    #    longprocesses = []
+    #    for line in out.split('\n'):
+    #        reg = re.match(r'\s*(\d*)\s*(.*) .*python.* .*(aCT\w*)\.py\s?(\S*)', line)
+    #        if reg:
+    #            pid, runningtime, process, cluster = reg.groups()
+    #            # ignore Main and this process
+    #            if process in ['aCTReport', 'aCTMain', 'aCTHeartbeatWatchdog']:
+    #                continue
+    #            if cluster == '':
+    #                cluster = '(no cluster defined)'
+    #            elif not re.match(r'\d\d:\d\d$', runningtime):
+    #                # Check for overrunning processes
+    #                longprocesses.append((process, pid, cluster, runningtime))
+    #            if cluster in cluster_procs:
+    #                cluster_procs[cluster].append(process)
+    #            else:
+    #                cluster_procs[cluster] = [process]
+
+    #    for proc in longprocesses:
+    #        self.log('WARNING: %s (pid %s) for %s running for more than one hour (%s), this process will be killed' % proc)
+    #        # Kill process and log a critical message to send email
+    #        # Too many emails, disable
+    #        #self.criticallog.critical('Killing process %s (pid %s) for %s running for more than one hour (%s)' % proc)
+    #        try:
+    #            os.kill(int(proc[1]), signal.SIGKILL)
+    #        except OSError:
+    #            pass
+    #    self.log()
+    #    self.log('Active processes per cluster:')
+    #    for cluster in sorted(cluster_procs):
+    #        procs = cluster_procs[cluster]
+    #        procs.sort()
+    #        self.log(f'{cluster:>38.38}: {" ".join(procs)}')
+    #    self.log()
     def ProcessReport(self):
         if self.actconfs != ['']:
             return # don't print processes for combined report
-        actprocscmd = 'ps ax -ww -o pid,etime,args'
+
+        # check if aCT is running
+        actprocscmd = 'ps ax'
         try:
             out = subprocess.run(actprocscmd.split(), check=True, encoding='utf-8', stdout=subprocess.PIPE).stdout
         except subprocess.CalledProcessError as e:
-            self.log('Error: could not run ps command: %s' % e.stderr)
+            self.log(f'Error: could not run ps command: {e.stderr}')
+            return
+        # one way to improve robustness of check is to count the number of
+        # actmain processes and compare it to the number of processes found
+        # in logs
+        actmains = 0
+        for line in out.splitlines():
+            if 'actmain' in line:
+                actmains += 1
+        if not actmains:
             return
 
-        # Group processes by cluster
+        # parse the most recent process update logs from the main process
+        conf = aCTConfigARC()
+        logpath = os.path.join(conf.logger.logdir, 'aCTMain.log')
         cluster_procs = {}
-        longprocesses = []
-        for line in out.split('\n'):
-            reg = re.match(r'\s*(\d*)\s*(.*) .*python.* .*(aCT\w*)\.py\s?(\S*)', line)
-            if reg:
-                pid, runningtime, process, cluster = reg.groups()
-                # ignore Main and this process
-                if process in ['aCTReport', 'aCTMain', 'aCTHeartbeatWatchdog']:
-                    continue
-                if cluster == '':
-                    cluster = '(no cluster defined)'
-                elif not re.match(r'\d\d:\d\d$', runningtime):
-                    # Check for overrunning processes
-                    longprocesses.append((process, pid, cluster, runningtime))
-                if cluster in cluster_procs:
-                    cluster_procs[cluster].append(process)
-                else:
-                    cluster_procs[cluster] = [process]
+        numProcs = 0
+        with open(logpath) as f:
+            for line in f:
+                if 'Updating running processes ...' in line:
+                    # found newer process update logs
+                    cluster_procs.clear()
+                elif 'Process' in line and 'running' in line:
+                    # found log line indicating the running process
+                    parts = line.split()
+                    procName = parts[6]
+                    if procName == 'running':  # log line for disabled procs
+                        continue
+                    if 'running for cluster' in line:
+                        procCluster = parts[10]
+                    else:
+                        procCluster = '(no cluster defined)'
+                    procList = cluster_procs.setdefault(procCluster, [])
+                    procList.append(procName)
+                    numProcs += 1
 
-        for proc in longprocesses:
-            self.log('WARNING: %s (pid %s) for %s running for more than one hour (%s), this process will be killed' % proc)
-            # Kill process and log a critical message to send email
-            # Too many emails, disable
-            #self.criticallog.critical('Killing process %s (pid %s) for %s running for more than one hour (%s)' % proc)
-            try:
-                os.kill(int(proc[1]), signal.SIGKILL)
-            except OSError:
-                pass
-        self.log()
         self.log('Active processes per cluster:')
         for cluster in sorted(cluster_procs):
             procs = cluster_procs[cluster]
             procs.sort()
             self.log(f'{cluster:>38.38}: {" ".join(procs)}')
-        self.log()
-
-
 
     def ArcJobReport(self):
         rep={}
