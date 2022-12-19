@@ -300,6 +300,13 @@ class aCTProcessManager:
 
     def updateSingleProcs(self, module):
         """Update state of single processes for a given module."""
+        # stop disabled process
+        singleProcs = self.processes.get(module, {}).get('single', {})
+        for procName in list(singleProcs):
+            if procName in self.appconf.get('disabledProcs', {}).get(module, {}).get('single', []):
+                self.log.debug(f'Single process {procName} disabled, stopping')
+                self.stopProcs([singleProcs[procName]])
+                del singleProcs[procName]
         self.startSingleProcs(module)
 
     def stopAllProcesses(self):
