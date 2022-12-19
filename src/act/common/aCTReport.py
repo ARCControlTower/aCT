@@ -100,45 +100,34 @@ class aCTReport:
             return # don't print processes for combined report
 
         # check if aCT is running
-        actprocscmd = 'ps ax'
+        actprocscmd = 'ps ax -o pid,ppid,args'
         try:
             out = subprocess.run(actprocscmd.split(), check=True, encoding='utf-8', stdout=subprocess.PIPE).stdout
         except subprocess.CalledProcessError as e:
             self.log(f'Error: could not run ps command: {e.stderr}')
             return
-        # one way to improve robustness of check is to count the number of
-        # actmain processes and compare it to the number of processes found
-        # in logs
-        actmains = 0
+
+        # find aCTMain to see if aCT is running and get its PID and get lines
+        # of act processes
+        mainpid = None
+        actlines = []
         for line in out.splitlines():
-            if 'actmain' in line:
-                actmains += 1
-        if not actmains:
+            parts = line.split()
+            if parts[2] == 'aCTMain':
+                mainpid = int(parts[0])
+            elif parts[2].startswith('aCT'):
+                actlines.append(parts)
+        if mainpid is None:
             return
 
-        # parse the most recent process update logs from the main process
-        conf = aCTConfigARC()
-        logpath = os.path.join(conf.logger.logdir, 'aCTMain.log')
         cluster_procs = {}
-        numProcs = 0
-        with open(logpath) as f:
-            for line in f:
-                if 'Updating running processes ...' in line:
-                    # found newer process update logs
-                    cluster_procs.clear()
-                elif 'Process' in line and 'running' in line:
-                    # found log line indicating the running process
-                    parts = line.split()
-                    procName = parts[6]
-                    if procName == 'running':  # log line for disabled procs
-                        continue
-                    if 'running for cluster' in line:
-                        procCluster = parts[10]
-                    else:
-                        procCluster = '(no cluster defined)'
-                    procList = cluster_procs.setdefault(procCluster, [])
-                    procList.append(procName)
-                    numProcs += 1
+        for parts in actlines:
+            if int(parts[1]) != mainpid:  # skip as not aCT process
+                continue
+            if len(parts) > 3:  # cluster process
+                cluster_procs.setdefault(parts[3], []).append(parts[2])
+            else:
+                cluster_procs.setdefault('(no cluster defined)', []).append(parts[2])
 
         self.log('Active processes per cluster:')
         for cluster in sorted(cluster_procs):

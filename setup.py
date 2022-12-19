@@ -26,6 +26,7 @@ setup(
         'pyjwt',
         'cryptography',
         'pyyaml',
+        'setproctitle',
     ],
     entry_points={
         'console_scripts': [

@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 from act.common.aCTLogger import aCTLogger
 from act.common.aCTSignal import aCTSignalDeferrer
 
+from setproctitle import setproctitle
+
 
 class aCTProcess:
     """
@@ -69,10 +71,13 @@ class aCTProcess:
         loadConf() is not called in the base implementation, it might require
         some setup steps.
         """
-        logname = f'{self.name}'
         if self.cluster:
+            setproctitle(f'{self.name} {self.cluster}')
             url = urlparse(self.cluster)
-            logname += f'-{url.hostname}'
+            logname = f'{self.name}-{url.hostname}'
+        else:
+            setproctitle(self.name)
+            logname = self.name
         self.logger = aCTLogger(logname, cluster=self.cluster)
         self.criticallogger = aCTLogger('aCTCritical', cluster=self.cluster, arclog=False)
         self.log = self.logger()
