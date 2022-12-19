@@ -118,6 +118,8 @@ class aCTProcessManager:
 
     def update(self, termTimeout=5, killTimeout=5):
         """Update the state of managed processes."""
+        self.appconf = aCTConfigAPP()
+
         self.killProcs(timeout=termTimeout)
         self.closeProcs(timeout=killTimeout)
 
