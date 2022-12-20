@@ -1,15 +1,15 @@
 import argparse
 import importlib
+import logging
 import os
 import re
-import signal
 import subprocess
 import sys
 import time
-import logging
-from act.common import aCTLogger
-from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
+
 from act.arc import aCTDBArc
+from act.common import aCTLogger
+from act.common.aCTConfig import aCTConfigAPP
 
 
 class aCTReport:

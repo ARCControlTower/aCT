@@ -4,7 +4,6 @@ from urllib.parse import urlparse
 
 from act.common.aCTLogger import aCTLogger
 from act.common.aCTSignal import aCTSignalDeferrer
-
 from setproctitle import setproctitle
 
 

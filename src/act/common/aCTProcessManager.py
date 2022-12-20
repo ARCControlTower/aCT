@@ -1,6 +1,6 @@
 import datetime
-import itertools
 import importlib
+import itertools
 import multiprocessing
 
 from act.arc.aCTDBArc import aCTDBArc

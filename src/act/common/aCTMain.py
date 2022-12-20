@@ -1,13 +1,13 @@
 import os
+import signal
 import subprocess
 import sys
 import tempfile
 import time
-import signal
 
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
-from act.common.aCTProcessManager import aCTProcessManager
 from act.common.aCTProcess import aCTProcess, exitHandler
+from act.common.aCTProcessManager import aCTProcessManager
 from act.common.aCTSignal import aCTSignalDeferrer
 
 
