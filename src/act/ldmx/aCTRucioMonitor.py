@@ -6,6 +6,7 @@ import time
 from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
 from prometheus_client import start_http_server
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
+from rucio.client import Client
 
 
 class aCTRucioCollector:
@@ -41,6 +42,8 @@ class aCTRucioMonitor(aCTLDMXProcess):
 
     def setup(self):
         super().setup()
+
+        self.rucio = Client()
         self.rucio_prometheus_port = self.arcconf.monitor.rucioprometheusport or 0
 
         if self.rucio_prometheus_port:
