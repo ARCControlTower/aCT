@@ -1,0 +1,15 @@
+[Unit]
+Description = aCT job management framework
+Requires = mariadb.service
+After = mariadb.service
+
+[Service]
+ExecStart = /opt/act/venv/bin/actmain
+Restart = on-failure
+User = act
+
+# prefer mixed kill mode to prevent double signal to child processes
+KillMode = mixed
+
+[Install]
+WantedBy = multi-user.target
