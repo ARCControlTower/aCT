@@ -30,10 +30,14 @@ class aCTSignalDeferrer:
     default SIGINT handler in Python throws KeyboardInterrupt exception).
     This mechanism can have advantages over the first one. It can interrupt a
     block of code at any point. Provided that the exit strategies can be
-    handled elegant enough with the exception mechanism, this approach can be
-    simpler, more flexible and less verbose than the first one. The downside
-    can be the handling of the parts of code that should not be interrupted by
-    an exception.
+    handled elegantly enough with the exception mechanism, this approach can be
+    simpler, more flexible and less verbose than the first one. The complexity
+    of the handling of many exit strategies in a complex operation is still
+    problematic (in fact it has to be done somewhere and it cannot be avoided
+    completely), but it can be less verbose and more idiomatic with exceptions.
+    The downside can be the handling of the parts of code that should not be
+    interrupted by an exception. In this case, the mechanism for deferring
+    signals is required.
 
     aCT uses the second approach. Transactional DB operations can combine
     elegantly with exceptions (see aCTTransacton class from aCTProcess.py).
@@ -44,14 +48,28 @@ class aCTSignalDeferrer:
     the exception raised by the signal that can be received at any time (as has
     to be an assumption for OS signals).
 
-    That is the purpose of an instance of this class. An instance is a context
-    manager that can be used in a with statement. When the context is entered,
-    it will save the current handlers for managed signals and install its own
-    handler that stores the received signal. At the context exit, the previous
-    handlers are restored and called for saved signals.
+    That is the purpose of an instance of this class. An instance is also a
+    context manager that can be used in a with statement. When the context is
+    entered, it will save the current handlers for managed signals and install
+    its own handler that stores the received signal. At the context exit, the
+    previous handlers are restored and called for saved signals.
+
+    Sample usage:
+
+        sigdefer = aCTSignalDeferrer(self.log, signal.SIGTERM)
+
+        with sigdefer:
+            jobs = self.dbarc.getJobsInfo(...)
+
+            for job in jobs:
+                self.updateArcJobs(job)
+                self.updatePandaJobs(job)
+
+            self.updatePanda(jobs)
     """
 
     def __init__(self, log, *args):
+        """Set up instance."""
         self.log = log
         self.oldHandlers = {}  # storage for deferred handlers
         self.received = {}  # storage for received signals
@@ -59,9 +77,9 @@ class aCTSignalDeferrer:
 
         self.signals = []
         for sig in args:
-            # assuming that the developer is using the right signals
-            # TODO: signal.valid_signals() was added in 3.8
             # TODO: signal.strsignal() was added in 3.8
+            # TODO: signal.valid_signals() was added in 3.8
+            # assuming that the developer is using the right signals
             #if sig not in signal.valid_signals():
             #    raise ValueError(f"Given value {sig} is not a valid signal")
             #else:
@@ -71,6 +89,7 @@ class aCTSignalDeferrer:
             self.log.debug(f"Will handle signal {sig}")
 
     def defer(self):
+        """Store current signal handlers and install handler for deferring."""
         self.level += 1
         if self.level != 1:
             return
@@ -83,9 +102,11 @@ class aCTSignalDeferrer:
 
     # if signal is received multiple times, only the last frame will be saved
     def deferredHandler(self, signum, frame):
+        """Store the received signal."""
         self.received[signum] = (signum, frame)
 
     def restore(self):
+        """Restore previous handlers and call them if signal was received."""
         self.level -= 1
         if self.level != 0:
             return
@@ -101,7 +122,9 @@ class aCTSignalDeferrer:
             self.log.debug(f"Restoring signal {sig}")
 
     def __enter__(self):
+        """Defer on context entry."""
         self.defer()
 
     def __exit__(self, exc_type, exc_value, exc_tb):
+        """Restore on context exit."""
         self.restore()

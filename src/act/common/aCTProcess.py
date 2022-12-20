@@ -40,8 +40,8 @@ class aCTProcess:
     Another option for parametrizing setup() could also be to pass args and
     kwargs in the following chain:
 
-    multiprocessing.Process(args, kwargs) -> __call__(*args, **kwargs) ->
-    run(*args, *kwargs) -> setup(*args, **kwargs)
+    multiprocessing.Process(args=(...), kwargs={...}) ->
+    __call__(*args, **kwargs) -> run(*args, *kwargs) -> setup(*args, **kwargs)
 
     The aCTProcess can exit in two ways:
     - unhandled exception
@@ -70,6 +70,9 @@ class aCTProcess:
         setup steps requiring the conf. The latter is also the reason why
         loadConf() is not called in the base implementation, it might require
         some setup steps.
+
+        setproctitle() is used to change the name of the process (from actmain)
+        so that the process can be identified properly by the aCTReport.py.
         """
         if self.cluster:
             setproctitle(f'{self.name} {self.cluster}')

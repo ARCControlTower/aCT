@@ -1,10 +1,3 @@
-"""
-Process that transfers jobs from clientjobs to arcjobs table.
-
-This program creates an object that acts as a long running process.
-It is managed by another process, defined in
-:mod:`act.common.aCTProcessManager`.
-"""
 import time
 
 import arc
@@ -15,21 +8,7 @@ from act.common.aCTProcess import aCTProcess
 
 
 class aCTClient2Arc(aCTProcess):
-    """
-    Object that runs until interrupted and periodically submits new jobs.
-
-    This object is very similar to other process objects, namely
-    :class:~`act.common.aCTProcess.aCTProcess` and children, as well
-    as :class:~`act.common.aCTATLASProcess.aCTATLASProcess` and children.
-
-    Attributes:
-        name: Name of a process, extracted from source code file.
-        arcconf: An object that reads configuration of ARC engine.
-        logger: An object that provides logging facility.
-        log: An object used for emiting log messages.
-        clidb: An object that provides interface to client engine's table.
-        arcdb: An object that provides interface to ARC engine's table.
-    """
+    """Object that runs until interrupted and periodically submits new jobs."""
 
     # overriding to prevent cluster argument
     def __init__(self):
@@ -47,14 +26,7 @@ class aCTClient2Arc(aCTProcess):
         self.arcdb = aCTDBArc(self.log)
 
     def process(self):
-        """
-        Check if new jobs should be submitted.
-
-        New jobs should be submitted if there are not enough submitted or
-        running jobs. Currently, proxyid is used for fairshare mechanism.
-        Hardcoded constants are used for simplicity for now when determining
-        whether and how many new jobs should be submitted.
-        """
+        """Insert new jobs to ARC table for every proxy."""
         proxies = self.clidb.getProxies()
         for proxyid in proxies:
             self.insertNewJobs(proxyid, 1000)

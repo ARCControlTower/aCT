@@ -49,52 +49,6 @@ class aCTReport:
             except Exception as e:
                 self.actlog.error(f'Exception running {module}.aCTReport.report: {e}')
 
-    #def ProcessReport(self):
-    #    if self.actconfs != ['']:
-    #        return # don't print processes for combined report
-    #    actprocscmd = 'ps ax -ww -o pid,etime,args'
-    #    try:
-    #        out = subprocess.run(actprocscmd.split(), check=True, encoding='utf-8', stdout=subprocess.PIPE).stdout
-    #    except subprocess.CalledProcessError as e:
-    #        self.log('Error: could not run ps command: %s' % e.stderr)
-    #        return
-
-    #    # Group processes by cluster
-    #    cluster_procs = {}
-    #    longprocesses = []
-    #    for line in out.split('\n'):
-    #        reg = re.match(r'\s*(\d*)\s*(.*) .*python.* .*(aCT\w*)\.py\s?(\S*)', line)
-    #        if reg:
-    #            pid, runningtime, process, cluster = reg.groups()
-    #            # ignore Main and this process
-    #            if process in ['aCTReport', 'aCTMain', 'aCTHeartbeatWatchdog']:
-    #                continue
-    #            if cluster == '':
-    #                cluster = '(no cluster defined)'
-    #            elif not re.match(r'\d\d:\d\d$', runningtime):
-    #                # Check for overrunning processes
-    #                longprocesses.append((process, pid, cluster, runningtime))
-    #            if cluster in cluster_procs:
-    #                cluster_procs[cluster].append(process)
-    #            else:
-    #                cluster_procs[cluster] = [process]
-
-    #    for proc in longprocesses:
-    #        self.log('WARNING: %s (pid %s) for %s running for more than one hour (%s), this process will be killed' % proc)
-    #        # Kill process and log a critical message to send email
-    #        # Too many emails, disable
-    #        #self.criticallog.critical('Killing process %s (pid %s) for %s running for more than one hour (%s)' % proc)
-    #        try:
-    #            os.kill(int(proc[1]), signal.SIGKILL)
-    #        except OSError:
-    #            pass
-    #    self.log()
-    #    self.log('Active processes per cluster:')
-    #    for cluster in sorted(cluster_procs):
-    #        procs = cluster_procs[cluster]
-    #        procs.sort()
-    #        self.log(f'{cluster:>38.38}: {" ".join(procs)}')
-    #    self.log()
     def ProcessReport(self):
         if self.actconfs != ['']:
             return # don't print processes for combined report
@@ -122,7 +76,8 @@ class aCTReport:
 
         cluster_procs = {}
         for parts in actlines:
-            if int(parts[1]) != mainpid:  # skip as not aCT process
+            # skip as not aCT process (ppid != mainpid)
+            if int(parts[1]) != mainpid:
                 continue
             if len(parts) > 3:  # cluster process
                 cluster_procs.setdefault(parts[3], []).append(parts[2])

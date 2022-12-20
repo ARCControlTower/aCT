@@ -1,6 +1,15 @@
 modules:
-  app:
-    - act.atlas
+  - act.arc
+  - act.atlas
+
+disabledProcs:
+  act.arc:
+    submitter:
+      "https://pikolit.ijs.si/batch":
+        - aCTSubmitter
+    single:
+      - aCTProxyHandler
+      - aCTMonitor
 
 executable:
   wrapperurl: /cvmfs/atlas.cern.ch/repo/sw/PandaPilotWrapper/latest/runpilot2-wrapper.sh

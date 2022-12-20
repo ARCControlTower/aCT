@@ -42,7 +42,7 @@ class aCTProcessManager:
 
     The processes dictionary structure has all instances that are required to
     be running and is designed in a way that every individual instance can
-    easily be accessed based on its module, type and cluster (for cluster
+    easily be accessed based on its module, type (and cluster for cluster
     processes). An example dictionary structure could be:
 
     self.processes = {
@@ -168,7 +168,7 @@ class aCTProcessManager:
                 self.log.debug(f'Process {procName} running for cluster {cluster}')
 
     def startSingleProcs(self, module):
-        """Start all eligible single processes for a given module."""
+        """Start all enabled single processes for a given module."""
         moduleProcs = self.processes.setdefault(module, {})
         singleProcs = moduleProcs.setdefault('single', {})
         mod = importlib.import_module(module)
@@ -300,13 +300,15 @@ class aCTProcessManager:
 
     def updateSingleProcs(self, module):
         """Update state of single processes for a given module."""
-        # stop disabled process
+        # stop disabled processes
         singleProcs = self.processes.get(module, {}).get('single', {})
         for procName in list(singleProcs):
             if procName in self.appconf.get('disabledProcs', {}).get(module, {}).get('single', []):
                 self.log.debug(f'Single process {procName} disabled, stopping')
                 self.stopProcs([singleProcs[procName]])
                 del singleProcs[procName]
+
+        # start single processes
         self.startSingleProcs(module)
 
     def stopAllProcesses(self):
