@@ -160,7 +160,7 @@ class ARCRest:
             processJobDescription(desc)
 
             # get input files from description
-            self.getInputFiles(job, desc)
+            job.getArclibInputFiles(desc)
 
             # read name from description
             job.name = desc.Identification.JobName
@@ -215,14 +215,6 @@ class ARCRest:
                 toupload.append(job)
         if uploadData:
             self.uploadJobFiles(toupload)
-
-    def getInputFiles(self, job, desc):
-        job.inputFiles = {}
-        for infile in desc.DataStaging.InputFiles:
-            source = None
-            if len(infile.Sources) > 0:
-                source = infile.Sources[0].fullstr()
-            job.inputFiles[infile.Name] = source
 
     def getInputUploads(self, job):
         """
@@ -688,6 +680,14 @@ class ARCJob:
 
         if "RestartState" in infoDict:
             self.RestartState = infoDict["RestartState"]
+
+    def getArclibInputFiles(self, desc):
+        self.inputFiles = {}
+        for infile in desc.DataStaging.InputFiles:
+            source = None
+            if len(infile.Sources) > 0:
+                source = infile.Sources[0].fullstr()
+            self.inputFiles[infile.Name] = source
 
 
 class TransferQueue:
