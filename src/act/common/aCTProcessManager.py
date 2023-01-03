@@ -266,7 +266,7 @@ class aCTProcessManager:
         # get required and active clusters
         if module == 'act.arc':
             activeClusters = [entry['cluster'] for entry in self.dbarc.getActiveClusters()]
-            requestedClusters = itertools.chain(*[entry['clusterlist'].split(',') for entry in self.dbarc.getClusterLists()])
+            requestedClusters = list(itertools.chain(*[entry['clusterlist'].split(',') for entry in self.dbarc.getClusterLists()]))
         elif module == 'act.condor':
             activeClusters = self.dbcondor.getActiveClusters()
             requestedClusters = self.dbcondor.getClusterLists()
