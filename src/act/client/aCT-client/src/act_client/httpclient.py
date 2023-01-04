@@ -75,7 +75,7 @@ class HTTPClient:
 
         if jsonData:
             body = json.dumps(jsonData).encode()
-            headers['Content-type'] = 'application/json'
+            headers['Content-Type'] = 'application/json'
         else:
             body = data
 

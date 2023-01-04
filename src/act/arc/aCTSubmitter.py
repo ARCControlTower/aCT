@@ -199,7 +199,7 @@ class aCTSubmitter(aCTARCProcess):
                 with self.sigdefer:
                     # submit jobs to ARC
                     try:
-                        arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
+                        arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
                         arcrest.submitJobs(self.queue, arcjobs, uploadData=False)
                     except JSONDecodeError as exc:
                         self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -248,12 +248,11 @@ class aCTSubmitter(aCTARCProcess):
                         jobdict["DelegationID"] = job.arcjob.delegid
                     if job.arcjob.id:
                         jobdict["IDFromEndpoint"] = job.arcjob.id
+                        host = self.hostname
                         if self.port is not None:
-                            portStr = f":{self.port}"
-                        else:
-                            portStr = ""
-                        interface = f"https://{self.hostname}{portStr}/arex"
-                        jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job.arcjob.id}"
+                            host = f"{host}:{self.port}"
+                        path = arcrest.getAPIPath()
+                        jobdict["JobID"] = f"https://{host}{path}/jobs/{job.arcjob.id}"
                     if job.arcjob.state:
                         jobdict["State"] = ARC_STATE_MAPPING[job.arcjob.state]
 
@@ -361,7 +360,7 @@ class aCTSubmitter(aCTARCProcess):
 
                 arcrest = None
                 try:
-                    arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
+                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
                     arcrest.killJobs(toARCKill)
                 except JSONDecodeError as exc:
                     self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -451,7 +450,7 @@ class aCTSubmitter(aCTARCProcess):
                 # clean jobs from ARC
                 arcrest = None
                 try:
-                    arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
+                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
                     arcrest.cleanJobs(toARCClean)
                 except JSONDecodeError as exc:
                     self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -523,7 +522,7 @@ class aCTSubmitter(aCTARCProcess):
 
                 arcrest = None
                 try:
-                    arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
+                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
 
                     # get delegations for jobs
                     # AF BUG

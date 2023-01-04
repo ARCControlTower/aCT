@@ -17,40 +17,359 @@ from cryptography.hazmat.primitives import serialization
 import arc
 
 
+def getNullLogger():
+    logger = logging.getLogger('null')
+    if not logger.hasHandlers():
+        logger.addHandler(logging.NullHandler())
+    return logger
+
+
+# The class should implement the following functionality from the doc
+# https://www.nordugrid.org/arc/arc6/tech/rest/rest.html in separate
+# methods so that they can be overriden. The public API should stay the
+# same
+#
+# - get supported API versions
+# - get CE information
+#
+# - job list
+# - submit jobs
+# - job info
+# - job status
+# - kill job
+# - clean job
+# - restart job
+# - job delegations
+#
+# - get file
+# - put file
+# - (delete file)
+# - (head file)
+# - get dir
+# - (head dir)
+# - (delete dir)
+#
+# - (list user delegations)
+# - (head delegations)
+# - create delegation (POST action=new)
+# - manage delegation (POST action=get|renew|delete)
+# - upload public part of delegation (PUT)
+#
+# - get diagnose file (supported by file download)
+# - (head diagnose file)
 class ARCRest:
 
-    def __init__(self, url, basePath='/arex/rest/1.0', proxypath=None, logger=None):
-        self.logger = logger
-        if not self.logger:
-            self.logger = logging.getLogger('null')
-            if not self.logger.hasHandlers():
-                self.logger.addHandler(logging.NullHandler())
+    @staticmethod
+    def getClient(hostURL, apiBase="/arex", proxypath=None, logger=getNullLogger(), version=None):
+        httpClient = HTTPClient(hostURL, proxypath=proxypath, logger=logger)
+        apiVersions = ARCRest._getAPIVersions(httpClient, apiBase=apiBase)
+        if not apiVersions:
+            raise ARCError("No supported API versions")
 
-        self.basePath = basePath
-        self.httpClient = HTTPClient(url=url, proxypath=proxypath, logger=self.logger)
+        # /rest/1.0 compatibility
+        if not isinstance(apiVersions["version"], list):
+            apiVersions = [apiVersions["version"]]
+        else:
+            apiVersions = apiVersions["version"]
+
+        if version is not None:
+            if version not in apiVersions:
+                raise ARCError(f"API version {version} not among supported ones {apiVersions}")
+            apiVersion = version
+        else:
+            apiVersion = apiVersions[-1]
+
+        if apiVersion == "1.0":
+            return ARCRest_1_0(httpClient, apiBase=apiBase, logger=logger)
+        elif apiVersion == "1.1":
+            return ARCRest_1_1(httpClient, apiBase=apiBase, logger=logger)
+
+    def __init__(self, httpClient, apiBase="/arex", logger=getNullLogger()):
+        self.logger = logger
+        self.apiBase = apiBase
+        self.httpClient = httpClient
 
     def close(self):
         self.httpClient.close()
 
-    def POSTNewDelegation(self):
+    def getAPIVersions(self):
+        return self._getAPIVersions(self.httpClient, apiBase=self.apiBase)
+
+    def getCEInfo(self):
+        status, jsonData = self._requestJSON("GET", f"{self.apiPath}/info")
+        if status != 200:
+            raise ARCHTTPError(status, jsonData, f"Error getting ARC CE info - {status} {jsonData}")
+        else:
+            return jsonData
+
+    def getJobsList(self):
+        status, jsonData = self._requestJSON("GET", f"{self.apiPath}/jobs")
+        if status != 200:
+            raise ARCHTTPError(status, jsonData, f"ARC jobs list error - {status} {jsonData}")
+
+        # /rest/1.0 compatibility
+        if isinstance(jsonData["job"], dict):
+            return [jsonData["job"]]
+        else:
+            return jsonData["job"]
+
+    # TODO: blocksize is only added in python 3.7!!!!!!!
+    # TODO: hardcoded number of upload workers
+    def uploadJobFiles(self, jobs, workers=10, blocksize=HTTP_BUFFER_SIZE):
+        # create transfer queues
+        uploadQueue = queue.Queue()
+        resultQueue = queue.Queue()
+
+        # put uploads to queue, create cancel events for jobs
+        jobsdict = {}
+        for job in jobs:
+            uploads = self._getInputUploads(job)
+            if job.errors:
+                self.logger.debug(f"Skipping job {job.id} due to input file errors")
+                continue
+
+            jobsdict[job.id] = job
+            job.cancelEvent = threading.Event()
+
+            for upload in uploads:
+                uploadQueue.put(upload)
+        if uploadQueue.empty():
+            self.logger.debug("No local inputs to upload")
+            return
+        numWorkers = min(uploadQueue.qsize(), workers)
+
+        # create HTTP clients for workers
+        httpClients = []
+        for i in range(numWorkers):
+            httpClients.append(HTTPClient(
+                host=self.httpClient.host,
+                port=self.httpClient.port,
+                isHTTPS=True,
+                proxypath=self.httpClient.proxypath,
+                logger=self.logger
+            ))
+
+        self.logger.debug(f"Created {len(httpClients)} upload workers")
+
+        # run upload threads on uploads
+        with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as pool:
+            futures = []
+            for httpClient in httpClients:
+                futures.append(pool.submit(
+                    self.uploadTransferWorker,
+                    httpClient,
+                    jobsdict,
+                    uploadQueue,
+                    resultQueue,
+                    logger=self.logger
+                ))
+            concurrent.futures.wait(futures)
+
+        # close HTTP clients
+        for httpClient in httpClients:
+            httpClient.close()
+
+        # put error messages to job dicts
+        while not resultQueue.empty():
+            result = resultQueue.get()
+            resultQueue.task_done()
+            job = jobsdict[result["jobid"]]
+            job.errors.append(result["error"])
+
+    def getJobsInfo(self, jobs):
+        results = self._manageJobs(jobs, "info")
+        for job, result in zip(jobs, results):
+            code, reason = int(result["status-code"]), result["reason"]
+            if code != 200:
+                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
+            elif "info_document" not in result:
+                job.errors.append(NoValueInARCResult("No info document in successful info response"))
+            else:
+                job.updateFromInfo(result["info_document"])
+
+    def getJobsStatus(self, jobs):
+        results = self._manageJobs(jobs, "status")
+        for job, result in zip(jobs, results):
+            code, reason = int(result["status-code"]), result["reason"]
+            if code != 200:
+                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
+            elif "state" not in result:
+                job.errors.append(NoValueInARCResult("No state in successful status response"))
+            else:
+                job.state = result["state"]
+
+    def killJobs(self, jobs):
+        results = self._manageJobs(jobs, "kill")
+        return self._checkJobOperation(jobs, results)
+
+    def cleanJobs(self, jobs):
+        results = self._manageJobs(jobs, "clean")
+        return self._checkJobOperation(jobs, results)
+
+    def restartJobs(self, jobs):
+        results = self._manageJobs(jobs, "restart")
+        return self._checkJobOperation(jobs, results)
+
+    def getJobsDelegations(self, jobs, logger=None):
+        results = self._manageJobs(jobs, "delegations")
+        for job, result in zip(jobs, results):
+            code, reason = int(result["status-code"]), result["reason"]
+            if code != 200:
+                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
+            elif "delegation_id" not in result:
+                job.errors.append(NoValueInARCResult("No delegation ID in successful response"))
+            else:
+                job.delegid = result["delegation_id"]
+
+    def downloadFile(self, url, path):
+        self._downloadFile(self.httpClient, url, path)
+
+    def uploadFile(self, url, path):
+        self._uploadFile(self.httpClient, url, path)
+
+    def downloadListing(self, url):
+        self._downloadListing(self.httpClient, url)
+
+    def createDelegation(self, lifetime=None):
+        csr, delegationID = self._POSTNewDelegation()
+        self._PUTDelegation(delegationID, csr, lifetime=lifetime)
+        self.logger.debug(f"Successfully created delegation {delegationID}")
+        return delegationID
+
+    def renewDelegation(self, delegationID, lifetime=None):
+        csr = self._POSTRenewDelegation(delegationID)
+        self._PUTDelegation(delegationID, csr, lifetime=lifetime)
+        self.logger.debug(f"Successfully renewed delegation {delegationID}")
+
+    def deleteDelegation(self, delegationID):
         resp = self.httpClient.request(
-            "POST",
-            f"{self.basePath}/delegations?action=new",
-            headers={"Accept": "application/json"}
+            'POST',
+            f'{self.apiPath}/delegations/{delegationID}?action=delete'
         )
         respstr = resp.read().decode()
 
-        self.logger.debug(f"Create delegation response - {resp.status} {respstr}")
+        self.logger.debug(f"Delete delegation {delegationID} response - {resp.status} {respstr}")
 
-        if resp.status != 201:
-            raise ARCHTTPError(resp.status, respstr, f"Cannot create delegation - {resp.status} {respstr}")
+        if resp.status != 202:
+            raise ARCHTTPError(resp.status, respstr, f"Error deleting delegation {delegationID}: {resp.status} {respstr}")
 
-        return respstr, resp.getheader('Location').split('/')[-1]
+        self.logger.debug(f"Successfully deleted delegation {delegationID}")
 
-    def POSTRenewDelegation(self, delegationID):
+    # TODO: blocksize is only added in python 3.7!!!!!!!
+    # TODO: hardcoded workers
+    def downloadJobFiles(self, downloadDir, jobs, workers=10, blocksize=HTTP_BUFFER_SIZE):
+        transferQueue = TransferQueue(workers)
+        resultQueue = queue.Queue()
+
+        jobsdict = {}
+        for job in jobs:
+            jobsdict[job.id] = job
+            job.cancelEvent = threading.Event()
+
+            # Add diagnose files to transfer queue and remove them from
+            # downloadfiles string. Replace download files with a list of
+            # remaining download patterns.
+            self._processDiagnoseDownloads(job, transferQueue)
+
+            # add job session directory as a listing transfer
+            transferQueue.put({
+                "jobid": job.id,
+                "url": f"{self.apiPath}/jobs/{job.id}/session",
+                "path": "",
+                "type": "listing"
+            })
+
+        # open connections for thread workers
+        httpClients = []
+        for i in range(workers):
+            httpClients.append(HTTPClient(
+                host=self.httpClient.host,
+                port=self.httpClient.port,
+                isHTTPS=True,
+                proxypath=self.httpClient.proxypath,
+                logger=self.logger
+            ))
+
+        self.logger.debug(f"Created {len(httpClients)} download workers")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = []
+            for httpClient in httpClients:
+                futures.append(pool.submit(
+                    self.downloadTransferWorker,
+                    httpClient,
+                    transferQueue,
+                    resultQueue,
+                    downloadDir,
+                    jobsdict,
+                    self.apiPath,
+                    logger=self.logger
+                ))
+            concurrent.futures.wait(futures)
+
+        for httpClient in httpClients:
+            httpClient.close()
+
+        while not resultQueue.empty():
+            result = resultQueue.get()
+            jobsdict[result["jobid"]].errors.append(result["error"])
+            resultQueue.task_done()
+
+    def _processDiagnoseDownloads(self, job, transferQueue):
+        DIAG_FILES = [
+            "failed", "local", "errors", "description", "diag", "comment",
+            "status", "acl", "xml", "input", "output", "input_status",
+            "output_status", "statistics"
+        ]
+
+        if not job.downloadFiles:
+            self.logger.debug(f"No files to download for job {job.id}")
+            return []
+
+        # add all diagnose files to transfer queue and create
+        # a list of download patterns
+        newDownloads = []
+        diagFiles = set()  # to remove any possible duplications
+        for download in job.downloadFiles:
+            if download.startswith("diagnose="):
+                # remove diagnose= part
+                diagnose = download[len("diagnose="):]
+                if not diagnose:
+                    self.logger.debug(f"Skipping empty download entry: {download}")
+                    continue  # error?
+
+                # add all files if entire log folder is specified
+                if diagnose.endswith("/"):
+                    self.logger.debug(f"Will download all diagnose files to {diagnose}")
+                    for diagFile in DIAG_FILES:
+                        diagFiles.add(f"{diagnose}{diagFile}")
+
+                else:
+                    diagFile = diagnose.split("/")[-1]
+                    if diagFile not in DIAG_FILES:
+                        self.logger.debug(f"Skipping download {download} for because of unknown diagnose file {diagFile}")
+                        continue  # error?
+                    self.logger.debug(f"Will download diagnose file {diagFile} to {download}")
+                    diagFiles.add(diagnose)
+            else:
+                self.logger.debug(f"Will download {download}")
+                newDownloads.append(download)
+
+        for diagFile in diagFiles:
+            diagName = diagFile.split("/")[-1]
+            transferQueue.put({
+                "jobid": job.id,
+                "url": f"{self.apiPath}/jobs/{job.id}/diagnose/{diagName}",
+                "path": diagFile,
+                "type": "diagnose"
+            })
+
+        job.downloadFiles = newDownloads
+
+    def _POSTRenewDelegation(self, delegationID):
         resp = self.httpClient.request(
             "POST",
-            f"{self.basePath}/delegations/{delegationID}?action=renew"
+            f"{self.apiPath}/delegations/{delegationID}?action=renew",
         )
         respstr = resp.read().decode()
 
@@ -61,7 +380,7 @@ class ARCRest:
 
         return respstr
 
-    def PUTDelegation(self, delegationID, csrStr, lifetime=None):
+    def _PUTDelegation(self, delegationID, csrStr, lifetime=None):
         try:
             with open(self.httpClient.proxypath) as f:
                 proxyStr = f.read()
@@ -74,9 +393,9 @@ class ARCRest:
 
             resp = self.httpClient.request(
                 'PUT',
-                f'{self.basePath}/delegations/{delegationID}',
+                f'{self.apiPath}/delegations/{delegationID}',
                 data=pem,
-                headers={'Content-type': 'application/x-pem-file'}
+                headers={'Content-Type': 'application/x-pem-file'}
             )
             respstr = resp.read().decode()
 
@@ -99,44 +418,295 @@ class ARCRest:
                 pass
             raise ARCError(f"Error delegating proxy {self.httpClient.proxypath} for delegation {delegationID}: {exc}")
 
-    def createDelegation(self, lifetime=None):
-        csr, delegationID = self.POSTNewDelegation()
-        self.PUTDelegation(delegationID, csr, lifetime=lifetime)
-        self.logger.debug(f"Successfully created delegation {delegationID}")
-        return delegationID
+    def _manageJobs(self, jobs, action):
+        ACTIONS = ("info", "status", "kill", "clean", "restart", "delegations")
+        if not jobs:
+            return []
 
-    def renewDelegation(self, delegationID, lifetime=None):
-        csr = self.POSTRenewDelegation(delegationID)
-        self.PUTDelegation(delegationID, csr, lifetime=lifetime)
-        self.logger.debug(f"Successfully renewed delegation {delegationID}")
+        if action not in ACTIONS:
+            raise ARCError(f"Invalid job management operation: {action}")
 
-    def deleteDelegation(self, delegationID):
+        # JSON data for request
+        tomanage = [{"id": job.id} for job in jobs]
+        # /rest/1.0 compatibility
+        if len(tomanage) == 1:
+            jsonData = {"job": tomanage[0]}
+        else:
+            jsonData = {"job": tomanage}
+
+        # execute action and get JSON result
+        status, jsonData = self._requestJSON(
+            "POST",
+            f"{self.apiPath}/jobs?action={action}",
+            jsonData=jsonData,
+        )
+        if status != 201:
+            raise ARCHTTPError(status, jsonData, f"ARC jobs \"{action}\" action error: {status} {jsonData}")
+
+        # /rest/1.0 compatibility
+        if isinstance(jsonData["job"], dict):
+            return [jsonData["job"]]
+        else:
+            return jsonData["job"]
+
+    def _getInputUploads(self, job):
+        """
+        Return a list of upload dicts.
+
+        Raises:
+            - InputFileError
+        """
+        uploads = []
+        for name, source in job.inputFiles.items():
+            try:
+                path = isLocalInputFile(name, source)
+            except InputFileError as exc:
+                job.errors.append(exc)
+                self.logger.debug(f"Error parsing input {name} at {source} for job {job.id}: {exc}")
+                continue
+            if not path:
+                self.logger.debug(f"Skipping non local input {name} at {source} for job {job.id}")
+                continue
+
+            if not os.path.isfile(path):
+                msg = f"Local input {name} at {path} for job {job.id} is not a file"
+                job.errors.append(InputFileError(msg))
+                self.logger.debug(msg)
+                continue
+
+            uploads.append({
+                "jobid": job.id,
+                "url": f"{self.apiPath}/jobs/{job.id}/session/{name}",
+                "path": path
+            })
+            self.logger.debug(f"Will upload local input {name} at {path} for job {job.id}")
+
+        return uploads
+
+    def _requestJSON(self, *args, **kwargs):
+        return self._requestJSONStatic(self.httpClient, *args, **kwargs)
+
+    @staticmethod
+    def _requestJSONStatic(httpClient, *args, headers={}, **kwargs):
+        headers["Accept"] = "application/json"
+        resp = httpClient.request(*args, headers=headers, **kwargs)
+        text = resp.read().decode()
+        try:
+            return resp.status, json.loads(text)
+        except json.JSONDecodeError:
+            return resp.status, text
+
+    @staticmethod
+    def _getAPIVersions(httpClient, apiBase="/arex"):
+        status, jsonData = ARCRest._requestJSONStatic(httpClient, "GET", f"{apiBase}/rest")
+        if status != 200:
+            raise ARCHTTPError(status, jsonData, f"Error getting ARC API versions - {status} {jsonData}")
+        else:
+            return jsonData
+
+    @staticmethod
+    def _downloadFile(httpClient, url, path):
+        resp = httpClient.request("GET", url)
+
+        if resp.status != 200:
+            text = resp.read().decode()
+            raise ARCHTTPError(resp.status, text, f"Error downloading URL {url} to {path}: {resp.status} {text}")
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            data = resp.read(HTTP_BUFFER_SIZE)
+            while data:
+                f.write(data)
+                data = resp.read(HTTP_BUFFER_SIZE)
+
+    @staticmethod
+    def _uploadFile(httpClient, url, path):
+        with open(path, "rb") as f:
+            resp = httpClient.request("PUT", url, data=f)
+            text = resp.read().decode()
+            if resp.status != 200:
+                raise ARCHTTPError(resp.status, text, f"Upload {path} to {url} failed: {resp.status} {text}")
+
+    @staticmethod
+    def _downloadListing(httpClient, url):
+        status, jsonData = ARCRest._requestJSONStatic(httpClient, "GET", url)
+        if status != 200:
+            raise ARCHTTPError(status, jsonData, f"Error downloading listing {url}: {status} {jsonData}")
+        else:
+            return jsonData
+
+    def _POSTNewDelegation(self):
         resp = self.httpClient.request(
-            'POST',
-            f'{self.basePath}/delegations/{delegationID}?action=delete'
+            "POST",
+            f"{self.apiPath}/delegations?action=new",
         )
         respstr = resp.read().decode()
 
-        self.logger.debug(f"Delete delegation {delegationID} response - {resp.status} {respstr}")
+        self.logger.debug(f"Create delegation response - {resp.status} {respstr}")
 
-        if resp.status != 202:
-            raise ARCHTTPError(resp.status, respstr, f"Error deleting delegation {delegationID}: {resp.status} {respstr}")
+        if resp.status != 201:
+            raise ARCHTTPError(resp.status, respstr, f"Cannot create delegation - {resp.status} {respstr}")
 
-        self.logger.debug(f"Successfully deleted delegation {delegationID}")
+        return respstr, resp.getheader('Location').split('/')[-1]
 
-    # TODO: determine if this interface for optional data upload should be
-    # used.
+    @staticmethod
+    def _createTransfersFromListing(downloadFiles, endpoint, listing, path, jobid):
+        transfers = []
+        if "file" in listing:
+            # /rest/1.0 compatibility
+            if not isinstance(listing["file"], list):
+                listing["file"] = [listing["file"]]
+            for f in listing["file"]:
+                if path:
+                    newpath = f"{path}/{f}"
+                else:  # if session root, slash needs to be skipped
+                    newpath = f
+                if not filterOutFile(downloadFiles, newpath):
+                    transfers.append({
+                        "jobid": jobid,
+                        "type": "file",
+                        "path": newpath,
+                        "url": f"{endpoint}/jobs/{jobid}/session/{newpath}"
+                    })
+        if "dir" in listing:
+            # /rest/1.0 compatibility
+            if not isinstance(listing["dir"], list):
+                listing["dir"] = [listing["dir"]]
+            for d in listing["dir"]:
+                if path:
+                    newpath = f"{path}/{d}"
+                else:  # if session root, slash needs to be skipped
+                    newpath = d
+                if not filterOutListing(downloadFiles, newpath):
+                    transfers.append({
+                        "jobid": jobid,
+                        "type": "listing",
+                        "path": newpath,
+                        "url": f"{endpoint}/jobs/{jobid}/session/{newpath}"
+                    })
+        return transfers
+
+    @staticmethod
+    def _checkJobOperation(jobs, results):
+        for job, result in zip(jobs, results):
+            code, reason = int(result["status-code"]), result["reason"]
+            if code != 202:
+                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
+
+    # this is a classmethod because it has to use the class' implementation of
+    # uploadFile()
+    @classmethod
+    def uploadTransferWorker(cls, httpClient, jobsdict, uploadQueue, resultQueue, logger=getNullLogger()):
+        while True:
+            try:
+                upload = uploadQueue.get(block=False)
+            except queue.Empty:
+                break
+            uploadQueue.task_done()
+
+            job = jobsdict[upload["jobid"]]
+            if job.cancelEvent.is_set():
+                logger.debug(f"Skipping upload for cancelled job {upload['jobid']}")
+                continue
+
+            try:
+                cls._uploadFile(httpClient, upload["url"], upload["path"])
+            except Exception as exc:
+                job.cancelEvent.set()
+                resultQueue.put({
+                    "jobid": upload["jobid"],
+                    "error": exc,
+                })
+                if isinstance(exc, ARCHTTPError):
+                    logger.debug(str(exc))
+                else:
+                    logger.debug(f"Upload {upload['path']} to {upload['url']} for job {upload['jobid']} failed: {exc}")
+
+    # this is a classmethod because it has to use the class' implementaiton of
+    # downloadFile(), downloadListing() and _createTransfersFromListing()
+    @classmethod
+    def downloadTransferWorker(cls, httpClient, transferQueue, resultQueue, downloadDir, jobsdict, endpoint, logger=getNullLogger()):
+        while True:
+            try:
+                transfer = transferQueue.get()
+            except TransferQueueEmpty():
+                break
+
+            job = jobsdict[transfer["jobid"]]
+            if job.cancelEvent.is_set():
+                logger.debug(f"Skipping download for cancelled job {transfer['jobid']}")
+                continue
+
+            try:
+                if transfer["type"] in ("file", "diagnose"):
+                    # download file
+                    path = f"{downloadDir}/{transfer['jobid']}/{transfer['path']}"
+                    try:
+                        cls._downloadFile(httpClient, transfer["url"], path)
+                    except Exception as exc:
+                        error = exc
+                        if isinstance(exc, ARCHTTPError):
+                            if exc.status == 404:
+                                if transfer["type"] == "diagnose":
+                                    error = MissingDiagnoseFile(transfer["url"])
+                                else:
+                                    error = MissingOutputFile(transfer["url"])
+                        else:
+                            job.cancelEvent.set()
+
+                        resultQueue.put({
+                            "jobid": transfer["jobid"],
+                            "error": error
+                        })
+                        logger.debug(f"Download {transfer['url']} to {path} for job {transfer['jobid']} failed: {error}")
+                    else:
+                        logger.debug(f"Download {transfer['url']} to {path} for job {transfer['jobid']} successful")
+
+                elif transfer["type"] == "listing":
+                    # download listing
+                    try:
+                        listing = cls._downloadListing(httpClient, transfer["url"])
+                    except Exception as exc:
+                        if not isinstance(exc, ARCHTTPError):
+                            job.cancelEvent.set()
+                        resultQueue.put({
+                            "jobid": transfer["jobid"],
+                            "error": exc
+                        })
+                        logger.debug(f"Download listing {transfer['url']} for job {transfer['jobid']} failed: {exc}")
+                    else:
+                        # create new transfer jobs
+                        transfers = cls._createTransfersFromListing(
+                            job.downloadFiles, endpoint, listing, transfer["path"], transfer["jobid"]
+                        )
+                        for transfer in transfers:
+                            transferQueue.put(transfer)
+                        logger.debug(f"Download listing {transfer['url']} for job {transfer['jobid']} successful: {listing}")
+
+            # every possible exception needs to be handled, otherwise the
+            # threads will lock up
+            except:
+                import traceback
+                excstr = traceback.format_exc()
+                job.cancelEvent.set()
+                resultQueue.put({
+                    "jobid": transfer["jobid"],
+                    "error": excstr
+                })
+                logger.debug(f"Download URL {transfer['url']} and path {transfer['path']} for job {transfer['jobid']} failed: {excstr}")
+
+
+class ARCRest_1_0(ARCRest):
+
+    def __init__(self, httpClient, apiBase="/arex", logger=getNullLogger()):
+        super().__init__(httpClient, apiBase=apiBase, logger=logger)
+        self.apiPath = f"{apiBase}/rest/1.0"
+
+    def getAPIPath(self):
+        return self.apiPath
+
     def submitJobs(self, queue, jobs, uploadData=True):
-        """
-        Submit jobs specified in given list of job objects.
-
-        Raises:
-            - ARCError
-            - ARCHTTPError
-            - http.client.HTTPException
-            - ConnectionError
-            - json.JSONDecodeError
-        """
+        """Submit the list of jobs to the given queue."""
         # get delegation for proxy
         delegationID = self.createDelegation()
 
@@ -183,21 +753,16 @@ class ARCRest:
             bulkdesc = f"<ActivityDescriptions>{bulkdesc}</ActivityDescriptions>"
 
         # submit jobs to ARC
-        resp = self.httpClient.request(
+        status, jsonData = self._requestJSON(
             "POST",
-            f"{self.basePath}/jobs?action=new",
+            f"{self.apiPath}/jobs?action=new",
             data=bulkdesc,
-            headers={"Accept": "application/json", "Content-type": "application/xml"}
+            headers={"Content-Type": "application/xml"},
         )
-        respstr = resp.read().decode()
+        if status != 201:
+            raise ARCHTTPError(status, jsonData, f"Error submitting jobs - {status} {jsonData}")
 
-        self.logger.debug(f"Job submit response - {resp.status} {respstr}")
-
-        if resp.status != 201:
-            raise ARCHTTPError(resp.status, respstr, f"Cannot submit jobs: {resp.status} {respstr}")
-
-        # get a list of submission results
-        jsonData = json.loads(respstr)
+        # /rest/1.0 compatibility
         if isinstance(jsonData["job"], dict):
             results = [jsonData["job"]]
         else:
@@ -208,7 +773,7 @@ class ARCRest:
         for job, result in zip(tosubmit, results):
             code, reason = int(result["status-code"]), result["reason"]
             if code != 201:
-                job.errors.append(ARCHTTPError(code, reason, f"Submittion error: {code} {reason}"))
+                job.errors.append(ARCHTTPError(code, reason, f"Submission error: {code} {reason}"))
             else:
                 job.id = result["id"]
                 job.state = result["state"]
@@ -216,324 +781,15 @@ class ARCRest:
         if uploadData:
             self.uploadJobFiles(toupload)
 
-    def getInputUploads(self, job):
-        """
-        Return a list of upload dicts.
 
-        Raises:
-            - InputFileError
-        """
-        uploads = []
-        for name, source in job.inputFiles.items():
-            try:
-                path = isLocalInputFile(name, source)
-            except InputFileError as exc:
-                job.errors.append(exc)
-                self.logger.debug(f"Error parsing input {name} at {source} for job {job.id}: {exc}")
-                continue
-            if not path:
-                self.logger.debug(f"Skipping non local input {name} at {source} for job {job.id}")
-                continue
+class ARCRest_1_1(ARCRest):
 
-            if not os.path.isfile(path):
-                msg = f"Local input {name} at {path} for job {job.id} is not a file"
-                job.errors.append(InputFileError(msg))
-                self.logger.debug(msg)
-                continue
+    def __init__(self, httpClient, apiBase="/arex", logger=getNullLogger()):
+        super().__init__(httpClient, apiBase=apiBase, logger=logger)
+        self.apiPath = f"{apiBase}/rest/1.1"
 
-            uploads.append({
-                "jobid": job.id,
-                "url": f"{self.basePath}/jobs/{job.id}/session/{name}",
-                "path": path
-            })
-            self.logger.debug(f"Will upload local input {name} at {path} for job {job.id}")
-
-        return uploads
-
-    # TODO: blocksize is only added in python 3.7!!!!!!!
-    # TODO: hardcoded number of upload workers
-    def uploadJobFiles(self, jobs, workers=10, blocksize=HTTP_BUFFER_SIZE):
-        # create transfer queues
-        uploadQueue = queue.Queue()
-        resultQueue = queue.Queue()
-
-        # put uploads to queue, create cancel events for jobs
-        jobsdict = {}
-        for job in jobs:
-            uploads = self.getInputUploads(job)
-            if job.errors:
-                self.logger.debug(f"Skipping job {job.id} due to input file errors")
-                continue
-
-            jobsdict[job.id] = job
-            job.cancelEvent = threading.Event()
-
-            for upload in uploads:
-                uploadQueue.put(upload)
-        if uploadQueue.empty():
-            self.logger.debug("No local inputs to upload")
-            return
-        numWorkers = min(uploadQueue.qsize(), workers)
-
-        # create HTTP clients for workers
-        httpClients = []
-        for i in range(numWorkers):
-            httpClients.append(HTTPClient(
-                host=self.httpClient.host,
-                port=self.httpClient.port,
-                isHTTPS=True,
-                proxypath=self.httpClient.proxypath,
-                logger=self.logger
-            ))
-
-        self.logger.debug(f"Created {len(httpClients)} upload workers")
-
-        # run upload threads on uploads
-        with concurrent.futures.ThreadPoolExecutor(max_workers=numWorkers) as pool:
-            futures = []
-            for httpClient in httpClients:
-                futures.append(pool.submit(
-                    uploadTransferWorker,
-                    httpClient,
-                    jobsdict,
-                    uploadQueue,
-                    resultQueue,
-                    logger=self.logger
-                ))
-            concurrent.futures.wait(futures)
-
-        # close HTTP clients
-        for httpClient in httpClients:
-            httpClient.close()
-
-        # put error messages to job dicts
-        while not resultQueue.empty():
-            result = resultQueue.get()
-            resultQueue.task_done()
-            job = jobsdict[result["jobid"]]
-            job.errors.append(result["error"])
-
-    # TODO: blocksize is only added in python 3.7!!!!!!!
-    # TODO: hardcoded workers
-    def fetchJobs(self, downloadDir, jobs, workers=10, blocksize=HTTP_BUFFER_SIZE):
-        transferQueue = TransferQueue(workers)
-        resultQueue = queue.Queue()
-
-        jobsdict = {}
-        for job in jobs:
-            jobsdict[job.id] = job
-            job.cancelEvent = threading.Event()
-
-            # Add diagnose files to transfer queue and remove them from
-            # downloadfiles string. Replace download files with a list of
-            # remaining download patterns.
-            self.processDiagnoseDownloads(job, transferQueue)
-
-            # add job session directory as a listing transfer
-            transferQueue.put({
-                "jobid": job.id,
-                "url": f"{self.basePath}/jobs/{job.id}/session",
-                "path": "",
-                "type": "listing"
-            })
-
-        # open connections for thread workers
-        httpClients = []
-        for i in range(workers):
-            httpClients.append(HTTPClient(
-                host=self.httpClient.host,
-                port=self.httpClient.port,
-                isHTTPS=True,
-                proxypath=self.httpClient.proxypath,
-                logger=self.logger
-            ))
-
-        self.logger.debug(f"Created {len(httpClients)} download workers")
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = []
-            for httpClient in httpClients:
-                futures.append(pool.submit(
-                    downloadTransferWorker,
-                    httpClient,
-                    transferQueue,
-                    resultQueue,
-                    downloadDir,
-                    jobsdict,
-                    self.basePath,
-                    logger=self.logger
-                ))
-            concurrent.futures.wait(futures)
-
-        for httpClient in httpClients:
-            httpClient.close()
-
-        while not resultQueue.empty():
-            result = resultQueue.get()
-            jobsdict[result["jobid"]].errors.append(result["error"])
-            resultQueue.task_done()
-
-    def processDiagnoseDownloads(self, job, transferQueue):
-        DIAG_FILES = [
-            "failed", "local", "errors", "description", "diag", "comment",
-            "status", "acl", "xml", "input", "output", "input_status",
-            "output_status", "statistics"
-        ]
-
-        if not job.downloadFiles:
-            self.logger.debug(f"No files to download for job {job.id}")
-            return []
-
-        # add all diagnose files to transfer queue and create
-        # a list of download patterns
-        newDownloads = []
-        diagFiles = set()  # to remove any possible duplications
-        for download in job.downloadFiles:
-            if download.startswith("diagnose="):
-                # remove diagnose= part
-                diagnose = download[len("diagnose="):]
-                if not diagnose:
-                    self.logger.debug(f"Skipping empty download entry: {download}")
-                    continue  # error?
-
-                # add all files if entire log folder is specified
-                if diagnose.endswith("/"):
-                    self.logger.debug(f"Will download all diagnose files to {diagnose}")
-                    for diagFile in DIAG_FILES:
-                        diagFiles.add(f"{diagnose}{diagFile}")
-
-                else:
-                    diagFile = diagnose.split("/")[-1]
-                    if diagFile not in DIAG_FILES:
-                        self.logger.debug(f"Skipping download {download} for because of unknown diagnose file {diagFile}")
-                        continue  # error?
-                    self.logger.debug(f"Will download diagnose file {diagFile} to {download}")
-                    diagFiles.add(diagnose)
-            else:
-                self.logger.debug(f"Will download {download}")
-                newDownloads.append(download)
-
-        for diagFile in diagFiles:
-            diagName = diagFile.split("/")[-1]
-            transferQueue.put({
-                "jobid": job.id,
-                "url": f"{self.basePath}/jobs/{job.id}/diagnose/{diagName}",
-                "path": diagFile,
-                "type": "diagnose"
-            })
-
-        job.downloadFiles = newDownloads
-
-    def getJobsList(self):
-        resp = self.httpClient.request(
-            "GET",
-            f"{self.basePath}/jobs",
-            headers={"Accept": "application/json"}
-        )
-        respstr = resp.read().decode()
-
-        self.logger.debug(f"Jobs list response - {resp.status} {respstr}")
-
-        if resp.status != 200:
-            raise ARCHTTPError(resp.status, respstr, f"ARC jobs list error: {resp.status} {respstr}")
-        try:
-            jsonData = json.loads(respstr)
-        except json.JSONDecodeError:
-            return []
-
-        # convert data to list
-        if isinstance(jsonData["job"], dict):
-            return [jsonData["job"]]
-        else:
-            return jsonData["job"]
-
-    def getJobsInfo(self, jobs):
-        results = self.manageJobs(jobs, "info")
-        for job, result in zip(jobs, results):
-            code, reason = int(result["status-code"]), result["reason"]
-            if code != 200:
-                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
-            elif "info_document" not in result:
-                job.errors.append(NoValueInARCResult("No info document in successful info response"))
-            else:
-                job.updateFromInfo(result["info_document"])
-
-    def getJobsStatus(self, jobs):
-        results = self.manageJobs(jobs, "status")
-        for job, result in zip(jobs, results):
-            code, reason = int(result["status-code"]), result["reason"]
-            if code != 200:
-                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
-            elif "state" not in result:
-                job.errors.append(NoValueInARCResult("No state in successful status response"))
-            else:
-                job.state = result["state"]
-
-    def killJobs(self, jobs):
-        results = self.manageJobs(jobs, "kill")
-        return checkJobOperation(jobs, results)
-
-    def cleanJobs(self, jobs):
-        results = self.manageJobs(jobs, "clean")
-        return checkJobOperation(jobs, results)
-
-    def restartJobs(self, jobs):
-        results = self.manageJobs(jobs, "restart")
-        return checkJobOperation(jobs, results)
-
-    def getJobsDelegations(self, jobs, logger=None):
-        # AF BUG
-        try:
-            results = self.manageJobs(jobs, "delegations")
-        except:
-            logger.debug("DELEGATIONS FETCH EXCEPTION")
-            import traceback
-            logger.debug(traceback.format_exc())
-            results = []
-        for job, result in zip(jobs, results):
-            code, reason = int(result["status-code"]), result["reason"]
-            if code != 200:
-                job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
-            elif "delegation_id" not in result:
-                job.errors.append(NoValueInARCResult("No delegation ID in successful response"))
-            else:
-                job.delegid = result["delegation_id"]
-
-    def manageJobs(self, jobs, action):
-        ACTIONS = ("info", "status", "kill", "clean", "restart", "delegations")
-        if not jobs:
-            return []
-
-        if action not in ACTIONS:
-            raise ARCError(f"Invalid job management operation: {action}")
-
-        # JSON data for request
-        tomanage = [{"id": job.id} for job in jobs]
-        if len(tomanage) == 1:
-            jsonData = {"job": tomanage[0]}
-        else:
-            jsonData = {"job": tomanage}
-
-        # execute action and get JSON result
-        resp = self.httpClient.request(
-            "POST",
-            f"{self.basePath}/jobs?action={action}",
-            jsonData=jsonData,
-            headers={"Accept": "application/json", "Content-type": "application/json"}
-        )
-        respstr = resp.read().decode()
-
-        self.logger.debug(f"Jobs manage response - {resp.status} {respstr}")
-
-        if resp.status != 201:
-            raise ARCHTTPError(resp.status, respstr, f"ARC jobs \"{action}\" action error: {resp.status} {respstr}")
-        jsonData = json.loads(respstr)
-
-        # convert data to list
-        if isinstance(jsonData["job"], dict):
-            return [jsonData["job"]]
-        else:
-            return jsonData["job"]
+    def getAPIPath(self):
+        return self.apiPath
 
 
 class ARCJob:
@@ -589,12 +845,14 @@ class ARCJob:
                 self.state = state[len("arcrest:"):]
 
         if "Error" in infoDict:
+            # /rest/1.0 compatibility
             if isinstance(infoDict["Error"], list):
                 self.Error = infoDict["Error"]
             else:
                 self.Error = [infoDict["Error"]]
 
         if "ExecutionNode" in infoDict:
+            # /rest/1.0 compatibility
             if isinstance(infoDict["ExecutionNode"], list):
                 self.ExecutionNode = infoDict["ExecutionNode"]
             else:
@@ -742,176 +1000,6 @@ def isLocalInputFile(name, path):
     return url.path
 
 
-def uploadTransferWorker(httpClient, jobsdict, uploadQueue, resultQueue, logger=None):
-    if not logger:
-        logger = logging.getLogger('null')
-        if not logger.hasHandlers():
-            logger.addHandler(logging.NullHandler())
-
-    while True:
-        try:
-            upload = uploadQueue.get(block=False)
-        except queue.Empty:
-            break
-        uploadQueue.task_done()
-
-        job = jobsdict[upload["jobid"]]
-        if job.cancelEvent.is_set():
-            logger.debug(f"Skipping upload for cancelled job {upload['jobid']}")
-            continue
-
-        try:
-            infile = open(upload["path"], "rb")
-        except Exception as exc:
-            job.cancelEvent.set()
-            resultQueue.put({
-                "jobid": upload["jobid"],
-                "error": exc
-            })
-            logger.debug(f"Error opening input file {upload['path']} for job {upload['jobid']}: {exc}")
-            continue
-
-        with infile:
-            try:
-                resp = httpClient.request("PUT", upload["url"], data=infile)
-                text = resp.read().decode()
-                logger.debug(f"Upload of input {upload['path']} to {upload['url']} for job {upload['jobid']} - {resp.status} {text}")
-                if resp.status != 200:
-                    job.cancelEvent.set()
-                    msg = f"Upload {upload['path']} to {upload['url']} for job {upload['jobid']} failed: {resp.status} {text}"
-                    resultQueue.put({
-                        "jobid": upload["jobid"],
-                        "error": ARCHTTPError(resp.status, text, msg)
-                    })
-            except Exception as exc:
-                job.cancelEvent.set()
-                resultQueue.put({
-                    "jobid": upload["jobid"],
-                    "error": exc
-                })
-                logger.debug(f"Upload {upload['path']} to {upload['url']} for job {upload['jobid']} failed: {exc}")
-
-
-def downloadTransferWorker(httpClient, transferQueue, resultQueue, downloadDir, jobsdict, endpoint, logger=None):
-    if not logger:
-        logger = logging.getLogger('null')
-        if not logger.hasHandlers():
-            logger.addHandler(logging.NullHandler())
-
-    while True:
-        try:
-            transfer = transferQueue.get()
-        except TransferQueueEmpty():
-            break
-
-        job = jobsdict[transfer["jobid"]]
-        if job.cancelEvent.is_set():
-            logger.debug(f"Skipping download for cancelled job {transfer['jobid']}")
-            continue
-
-        try:
-            if transfer["type"] in ("file", "diagnose"):
-                # download file
-                path = f"{downloadDir}/{transfer['jobid']}/{transfer['path']}"
-                try:
-                    downloadFile(httpClient, transfer["url"], path)
-                except ARCHTTPError as exc:
-                    error = exc
-                    if exc.status == 404:
-                        if transfer["type"] == "diagnose":
-                            error = MissingDiagnoseFile(transfer["url"])
-                        else:
-                            error = MissingOutputFile(transfer["url"])
-                    resultQueue.put({
-                        "jobid": transfer["jobid"],
-                        "error": error
-                    })
-                    logger.debug(f"Download {transfer['url']} to {path} for job {transfer['jobid']} failed: {error}")
-                except Exception as exc:
-                    job.cancelEvent.set()
-                    resultQueue.put({
-                        "jobid": transfer["jobid"],
-                        "error": exc
-                    })
-                    logger.debug(f"Download {transfer['url']} to {path} for job {transfer['jobid']} failed: {exc}")
-                else:
-                    logger.debug(f"Download {transfer['url']} to {path} for job {transfer['jobid']} successful")
-
-            elif transfer["type"] == "listing":
-                # download listing
-                try:
-                    listing = downloadListing(httpClient, transfer["url"])
-                except ARCHTTPError as exc:
-                    resultQueue.put({
-                        "jobid": transfer["jobid"],
-                        "error": exc
-                    })
-                    logger.debug(f"Download listing {transfer['url']} for job {transfer['jobid']} failed: {exc}")
-                except Exception as exc:
-                    job.cancelEvent.set()
-                    resultQueue.put({
-                        "jobid": transfer["jobid"],
-                        "error": exc
-                    })
-                    logger.debug(f"Download listing {transfer['url']} for job {transfer['jobid']} failed: {exc}")
-                else:
-                    # create new transfer jobs
-                    transfers = createTransfersFromListing(
-                        job.downloadFiles, endpoint, listing, transfer["path"], transfer["jobid"]
-                    )
-                    for transfer in transfers:
-                        transferQueue.put(transfer)
-                    logger.debug(f"Download listing {transfer['url']} for job {transfer['jobid']} successful: {listing}")
-        except:
-            import traceback
-            excstr = traceback.format_exc()
-            job.cancelEvent.set()
-            resultQueue.put({
-                "jobid": transfer["jobid"],
-                "error": excstr
-            })
-            logger.debug(f"Download URL {transfer['url']} and path {transfer['path']} for job {transfer['jobid']} failed: {excstr}")
-
-
-def downloadFile(httpClient, url, path):
-    resp = httpClient.request("GET", url)
-
-    if resp.status != 200:
-        text = resp.read().decode()
-        raise ARCHTTPError(resp.status, text, f"Error downloading URL {url} to {path}: {resp.status} {text}")
-
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as f:
-        data = resp.read(HTTP_BUFFER_SIZE)
-        while data:
-            f.write(data)
-            data = resp.read(HTTP_BUFFER_SIZE)
-
-
-def downloadListing(httpClient, url):
-    resp = httpClient.request("GET", url, headers={"Accept": "application/json"})
-    text = resp.read().decode()
-
-    if resp.status != 200:
-        raise ARCHTTPError(resp.status, text, f"Error downloading listing {url}: {resp.status} {text}")
-
-    try:
-        listing = json.loads(text)
-    except json.JSONDecodeError as e:
-        if text == '':  # due to invalid JSON returned by ARC REST
-            return {}
-        raise ARCError(f"Error decoding JSON listing {url}: {e}")
-
-    return listing
-
-
-def checkJobOperation(jobs, results):
-    for job, result in zip(jobs, results):
-        code, reason = int(result["status-code"]), result["reason"]
-        if code != 202:
-            job.errors.append(ARCHTTPError(code, reason, f"{code} {reason}"))
-
-
 def processJobDescription(jobdesc):
     exepath = jobdesc.Application.Executable.Path
     if exepath and exepath.startswith("/"):  # absolute paths are on compute nodes
@@ -967,6 +1055,35 @@ def processJobDescription(jobdesc):
         else:
             outfile.Name = logpath
         jobdesc.DataStaging.OutputFiles.append(outfile)
+
+
+def filterOutFile(downloadFiles, filePath):
+    if not downloadFiles:
+        return False
+    for pattern in downloadFiles:
+        # direct match
+        if pattern == filePath:
+            return False
+        # recursive folder match
+        elif pattern.endswith("/") and filePath.startswith(pattern):
+            return False
+        # entire session directory, not matched by above if
+        elif pattern == "/":
+            return False
+    return True
+
+
+def filterOutListing(downloadFiles, listingPath):
+    if not downloadFiles:
+        return False
+    for pattern in downloadFiles:
+        # part of pattern
+        if pattern.startswith(listingPath):
+            return False
+        # recursive folder match
+        elif pattern.endswith("/") and listingPath.startswith(pattern):
+            return False
+    return True
 
 
 class ARCError(Exception):
@@ -1029,68 +1146,3 @@ class MissingDiagnoseFile(MissingResultFile):
 
     def __str__(self):
         return f"Missing diagnose file {self.filename}"
-
-
-def filterOutFile(downloadFiles, filePath):
-    if not downloadFiles:
-        return False
-    for pattern in downloadFiles:
-        # direct match
-        if pattern == filePath:
-            return False
-        # recursive folder match
-        elif pattern.endswith("/") and filePath.startswith(pattern):
-            return False
-        # entire session directory, not matched by above if
-        elif pattern == "/":
-            return False
-    return True
-
-
-def filterOutListing(downloadFiles, listingPath):
-    if not downloadFiles:
-        return False
-    for pattern in downloadFiles:
-        # part of pattern
-        if pattern.startswith(listingPath):
-            return False
-        # recursive folder match
-        elif pattern.endswith("/") and listingPath.startswith(pattern):
-            return False
-    return True
-
-
-def createTransfersFromListing(downloadFiles, endpoint, listing, path, jobid):
-    transfers = []
-    # create new transfer jobs
-    if "file" in listing:
-        if not isinstance(listing["file"], list):
-            listing["file"] = [listing["file"]]
-        for f in listing["file"]:
-            if path:
-                newpath = f"{path}/{f}"
-            else:  # if session root, slash needs to be skipped
-                newpath = f
-            if not filterOutFile(downloadFiles, newpath):
-                transfers.append({
-                    "jobid": jobid,
-                    "type": "file",
-                    "path": newpath,
-                    "url": f"{endpoint}/jobs/{jobid}/session/{newpath}"
-                })
-    if "dir" in listing:
-        if not isinstance(listing["dir"], list):
-            listing["dir"] = [listing["dir"]]
-        for d in listing["dir"]:
-            if path:
-                newpath = f"{path}/{d}"
-            else:  # if session root, slash needs to be skipped
-                newpath = d
-            if not filterOutListing(downloadFiles, newpath):
-                transfers.append({
-                    "jobid": jobid,
-                    "type": "listing",
-                    "path": newpath,
-                    "url": f"{endpoint}/jobs/{jobid}/session/{newpath}"
-                })
-    return transfers

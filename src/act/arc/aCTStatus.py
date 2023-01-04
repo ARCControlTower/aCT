@@ -166,7 +166,7 @@ class aCTStatus(aCTARCProcess):
 
             arcrest = None
             try:
-                arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
                 joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(tocheck)
             except json.JSONDecodeError as exc:
@@ -507,7 +507,7 @@ class aCTStatus(aCTARCProcess):
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             arcrest = None
             try:
-                arcrest = ARCRest(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
                 joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(toGetInfo)
             except json.JSONDecodeError as exc:
