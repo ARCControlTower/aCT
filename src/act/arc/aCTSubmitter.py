@@ -10,7 +10,7 @@ from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.aCTStatus import ARC_STATE_MAPPING
 from act.arc.rest import (ARCError, ARCHTTPError, ARCRest,
                           DescriptionParseError, DescriptionUnparseError,
-                          InputFileError, NoValueInARCResult)
+                          InputFileError, MatchmakingError, NoValueInARCResult)
 from act.common.aCTJob import ACTJob
 from act.common.aCTProcess import ExitProcessException
 
@@ -205,6 +205,10 @@ class aCTSubmitter(aCTARCProcess):
                         self.log.error(f"Invalid JSON response from ARC: {exc}")
                         self.setJobsArcstate(jobs, "tosubmit", commit=True)
                         continue
+                    except MatchmakingError as exc:
+                        self.log.error(str(exc))
+                        self.setJobsArcstate(jobs, "cancelled", commit=True)
+                        continue
                     except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                         self.log.error(f"Error submitting jobs to ARC: {exc}")
                         self.setJobsArcstate(jobs, "tosubmit", commit=True)
@@ -222,7 +226,7 @@ class aCTSubmitter(aCTARCProcess):
                         self.log.debug(f"Submission successfull for job {job.appid} {job.arcid} {job.arcjob.name}: {job.arcjob.id}")
                     else:
                         for error in job.arcjob.errors:
-                            if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError):
+                            if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError, MatchmakingError):
                                 job.state = "cancelled"
                             else:
                                 job.state = "tosubmit"

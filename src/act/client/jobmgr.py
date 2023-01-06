@@ -153,7 +153,7 @@ class JobManager(object):
             if job['a_arcstate'] in ('done', 'donefailed'):
                 try:
                     jobdir = self.getACTJobDir(job['a_JobID'])
-                    shutil.rmtree(jobdir)
+                    shutil.rmtree(jobdir, ignore_errors=True)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
                     self.logger.error(f'Could not clean job results in {jobdir}')
@@ -287,7 +287,7 @@ class JobManager(object):
             else:
                 try:
                     jobdir = self.getACTJobDir(job['a_JobID'])
-                    shutil.rmtree(jobdir)
+                    shutil.rmtree(jobdir, ignore_errors=True)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
                     self.logger.exception(f'Could not clean job results in {jobdir}')

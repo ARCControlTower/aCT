@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import queue
+import sys
 import threading
 from http.client import HTTPException
 from urllib.parse import urlparse
@@ -705,8 +706,54 @@ class ARCRest_1_0(ARCRest):
     def getAPIPath(self):
         return self.apiPath
 
+    def _findQueue(self, queue, ceInfo):
+        compShares = ceInfo.get("Domains", {}).get("AdminDomain", {}).get("Services", {}).get("ComputingService", {}).get("ComputingShare", [])
+        if not compShares:
+            raise ARCError("No queues found on cluster")
+
+        # /rest/1.0 compatibility
+        if isinstance(compShares, dict):
+            compShares = [compShares]
+
+        for compShare in compShares:
+            if compShare.get("Name", None) == queue:
+                # Queues are defined as ComputingShares. There are some shares
+                # that are mapped to another share. Such a share is never a
+                # queue externally. So if the name of the such share is used as
+                # a queue, the result has to be empty.
+                if "MappingPolicy" in compShare:
+                    return None
+                else:
+                    return compShare
+        return None
+
+    def _findRuntimes(self, ceInfo):
+        appenvs = ceInfo \
+            .get("Domains", {}).get("AdminDomain", {}).get("Services", {}) \
+            .get("ComputingService", {}).get("ComputingManager", {}) \
+            .get("ApplicationEnvironments", {}).get("ApplicationEnvironment", [])
+
+        # /rest/1.0 compatibility
+        if isinstance(appenvs, dict):
+            appenvs = [appenvs]
+
+        runtimes = []
+        for env in appenvs:
+            if "AppName" in env:
+                envname = env["AppName"]
+                if "AppVersion" in env:
+                    envname += f"-{env['AppVersion']}"
+                runtimes.append(envname)
+        return runtimes
+
     def submitJobs(self, queue, jobs, uploadData=True):
         """Submit the list of jobs to the given queue."""
+        ceInfo = self.getCEInfo()
+        queueInfo = self._findQueue(queue, ceInfo)
+        if queueInfo is None:
+            raise MatchmakingError(f"Requested queue {queue} does not exist")
+        runtimes = self._findRuntimes(ceInfo)
+
         # get delegation for proxy
         delegationID = self.createDelegation()
 
@@ -721,10 +768,37 @@ class ARCRest_1_0(ARCRest):
                 job.errors.append(DescriptionParseError("Failed to parse description"))
                 self.logger.debug(f"Failed to parse description {job.descstr}")
                 continue
+            desc = jobdescs[-1]
+
+            # matchmaking
+            #
+            # TODO: only direct version comparison is done for runtime
+            # envrionment; some other parameters are not matched:
+            # - memory (xrsl): which value is it from info document?
+            #   MaxVirtualMemory?
+            # - disk: no relevant value found in info document
+            cpuTime = desc.Resources.TotalCPUTime.range.max
+            wallTime = desc.Resources.TotalWallTime.range.max
+            envs = [str(env) for env in desc.Resources.RunTimeEnvironment.getSoftwareList()]
+            maxCPUTime = int(queueInfo.get("MaxCPUTime", sys.maxsize))
+            maxWallTime = int(queueInfo.get("MaxWallTime", sys.maxsize))
+            error = None
+            if cpuTime > maxCPUTime:
+                error = MatchmakingError(f"Requested CPU time {cpuTime} higher than available {maxCPUTime}")
+            elif wallTime > maxWallTime:
+                error = MatchmakingError(f"Requested wall time {wallTime} higher than available {maxWallTime}")
+            else:
+                for env in envs:
+                    if env not in runtimes:
+                        error = MatchmakingError(f"Requested environment {env} not available")
+                        break
+            if error is not None:
+                job.errors.append(error)
+                self.logger.debug(str(error))
+                continue
 
             # add queue and delegation, modify description as necessary for
             # ARC client
-            desc = jobdescs[-1]
             desc.Resources.QueueName = queue
             desc.DataStaging.DelegationID = delegationID
             processJobDescription(desc)
@@ -747,6 +821,9 @@ class ARCRest_1_0(ARCRest):
             bulkdesc += unparseResult[1][descstart:]
 
             tosubmit.append(job)
+
+        if not tosubmit:
+            return
 
         # merge into bulk description
         if len(tosubmit) > 1:
@@ -1117,6 +1194,9 @@ class InputFileError(ARCError):
 
 
 class NoValueInARCResult(ARCError):
+    pass
+
+class MatchmakingError(ARCError):
     pass
 
 
