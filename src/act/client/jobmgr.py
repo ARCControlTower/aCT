@@ -119,7 +119,7 @@ class JobManager(object):
         """
         # wrong state filter, return immediately
         # Forgot why is '' used here ...
-        if state_filter not in ('', 'done', 'donefailed', 'cancelled', 'failed'):
+        if state_filter not in ('', 'done', 'donefailed', 'cancelled', 'failed', 'lost'):
             return []
 
         # create filters in query
@@ -130,7 +130,7 @@ class JobManager(object):
             where_params.append(state_filter)
         else:
             # otherwise, get all jobs that can be cleaned
-            where += " a.arcstate IN ( 'done', 'donefailed', 'cancelled', 'failed' ) AND "
+            where += " a.arcstate IN ( 'done', 'donefailed', 'cancelled', 'failed', 'lost' ) AND "
         where, where_params = self._addNameFilter(name_filter, where, where_params)
         where, where_params = self._addIDFilter(jobids, where, where_params)
         where = where.rstrip('AND ')
