@@ -2,6 +2,7 @@ import os
 import shutil
 import logging
 from datetime import datetime
+from urllib.parse import urlparse
 
 import arc
 import jwt
@@ -28,6 +29,7 @@ from werkzeug.exceptions import BadRequest
 #       rather than list of IDs
 # TODO: API should not return underscored column names for as many endpoints
 #       possible
+# TODO: can app context be used for global variables?
 
 
 STREAM_CHUNK_SIZE = 4096
@@ -38,6 +40,35 @@ logger.addHandler(logging.StreamHandler())
 db = getDB(logger, arcconf)
 pmgr = ProxyManager(db=db)
 jmgr = JobManager(db=db)
+
+
+# can only be called after appconf global var exists
+def parseClusters():
+    clusters = []
+    for cluster in appconf.user.clusters:
+        try:
+            parts = urlparse(cluster, scheme="https")
+        except Exception as exc:
+            raise Exception(f"Error parsing cluster URL {cluster}: {exc}")
+
+        scheme = parts.scheme
+        host = parts.hostname
+        port = parts.port
+        path = parts.path
+
+        if scheme != "https":
+            raise Exception(f"Cluster URL {cluster} not using HTTPS")
+        if host is None:
+            raise Exception(f"Cluster URL {cluster} has no host")
+        if port is None:
+            port = 443
+
+        clusters.append(f"https://{host}:{port}{path}")
+
+    return clusters
+
+
+clusters = parseClusters()
 
 
 app = Flask(__name__)
@@ -227,10 +258,10 @@ def create_jobs():
                 print(f'{errpref}No clusters given')
                 result['msg'] = 'No clusters given'
                 continue
-            checkClusters(job['clusterlist'])
+            clusterlist = checkClusters(job['clusterlist'])
 
             # insert job
-            jobid = jmgr.clidb.insertJob(token['proxyid'], ','.join(job['clusterlist']))
+            jobid = jmgr.clidb.insertJob(token['proxyid'], ','.join(clusterlist))
         except UnknownClusterError as e:
             print(f'{errpref}Unknown cluster {e.name}')
             result['msg'] = f'Unknown cluster {e.name}'
@@ -679,6 +710,25 @@ def getToken():
 
 
 def checkClusters(clusterlist):
+    clist = []
     for cluster in clusterlist:
-        if cluster not in appconf.user.clusters:
+        try:
+            parts = urlparse(cluster, scheme="https")
+        except Exception:
             raise UnknownClusterError(cluster)
+
+        if parts.scheme != "https":
+            raise UnknownClusterError(cluster)
+
+        host = parts.hostname
+        port = parts.port
+        if port is None:
+            port = 443
+
+        url = f"https://{host}:{port}{parts.path}"
+
+        if url not in clusters:
+            raise UnknownClusterError(cluster)
+
+        clist.append(url)
+    return clist
