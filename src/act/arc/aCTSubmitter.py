@@ -248,7 +248,11 @@ class aCTSubmitter(aCTARCProcess):
                         jobdict["DelegationID"] = job.arcjob.delegid
                     if job.arcjob.id:
                         jobdict["IDFromEndpoint"] = job.arcjob.id
-                        interface = f"https://{self.hostname}:{self.port}/arex"
+                        if self.port is not None:
+                            portStr = f":{self.port}"
+                        else:
+                            portStr = ""
+                        interface = f"https://{self.hostname}{portStr}/arex"
                         jobdict["JobID"] = f"{interface}/rest/1.0/jobs/{job.arcjob.id}"
                     if job.arcjob.state:
                         jobdict["State"] = ARC_STATE_MAPPING[job.arcjob.state]
