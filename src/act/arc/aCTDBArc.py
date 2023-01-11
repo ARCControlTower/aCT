@@ -5,8 +5,8 @@ from act.db.aCTDB import aCTDB
 
 class aCTDBArc(aCTDB):
 
-    def __init__(self, log):
-        aCTDB.__init__(self, log, 'arcjobs')
+    def __init__(self, log, db=None):
+        aCTDB.__init__(self, log, 'arcjobs', db=db)
 
         self.proxydir = self.conf.voms.proxystoredir
 

@@ -34,11 +34,11 @@ class ProxyManager(object):
         arcdb: An object that is interface to ARC engine's table.
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
         """Initialize object."""
         self.logger = logging.getLogger(__name__)
-        self.actproxy = aCTProxy(self.logger)
-        self.arcdb = aCTDBArc(self.logger)
+        self.actproxy = aCTProxy(self.logger, db=db)
+        self.arcdb = aCTDBArc(self.logger, db=db)
 
     def getProxyInfo(self, dn, attribute='', columns=[]):
         """

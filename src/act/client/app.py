@@ -1,5 +1,6 @@
 import os
 import shutil
+import logging
 from datetime import datetime
 
 import arc
@@ -10,8 +11,9 @@ from act.client.errors import (ConfigError, InvalidColumnError,
                                InvalidJobIDError, InvalidJobRangeError,
                                RESTError, UnknownClusterError)
 from act.client.jobmgr import JobManager, getIDsFromList
+from act.db.aCTDBMS import getDB
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
-from act.common.aCTConfig import aCTConfigAPP
+from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -30,6 +32,12 @@ from werkzeug.exceptions import BadRequest
 
 STREAM_CHUNK_SIZE = 4096
 appconf = aCTConfigAPP()
+arcconf = aCTConfigARC()
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
+db = getDB(logger, arcconf)
+pmgr = ProxyManager(db=db)
+jmgr = JobManager(db=db)
 
 
 app = Flask(__name__)
@@ -66,7 +74,6 @@ def stat():
 
     try:
         token = getToken()
-        jmgr = JobManager()
         proxyid = token['proxyid']
         jobids = getIDs()
         jobdicts = jmgr.getJobStats(proxyid, jobids, state_filter, name_filter, clicols, arccols)
@@ -109,7 +116,6 @@ def clean():
     state_filter = request.args.get('state', default='')
 
     try:
-        jmgr = JobManager()
         deleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
         for jobid in deleted:
             datadir = jmgr.getJobDataDir(jobid)
@@ -160,7 +166,6 @@ def patch():
         return {'msg': f'Invalid action "{action}"'}, 400
 
     try:
-        jmgr = JobManager()
         if action == 'fetch':
             jobs = jmgr.fetchJobs(proxyid, jobids, name_filter)
         elif action == 'cancel':
@@ -198,7 +203,6 @@ def create_jobs():
     try:
         token = getToken()
         jobs = request.get_json()
-        jmgr = JobManager()
     except RESTError as e:
         print(f'{errpref}{e}')
         return {'msg': str(e)}, e.httpCode
@@ -260,7 +264,6 @@ def confirm_jobs():
         token = getToken()
         proxyid = token['proxyid']
         submissions = request.get_json()
-        jmgr = JobManager()
     except BadRequest as e:
         print(f'{errpref}{e}')
         return {'msg': str(e)}, 400
@@ -393,8 +396,6 @@ def serveResults(jobid, path):
     proxyid = token['proxyid']
 
     try:
-        jmgr = JobManager()
-
         # The next two 404 conditions are an example how an error scheme is
         # required that is different and separate from HTTP status codes, since
         # it is impossible to deduce the error without comparing the string.
@@ -438,7 +439,6 @@ def getCSR():
     # get issuer cert string from request
     try:
         jsonData = request.get_json()
-        pmgr = ProxyManager()
     except BadRequest as e:
         print(f'error: POST /proxies: {e}')
         return {'msg': str(e)}, 400
@@ -512,7 +512,6 @@ def uploadSignedProxy():
     try:
         token = getToken()
         jsonData = request.get_json()
-        pmgr = ProxyManager()
     except RESTError as e:
         print(f'error: PUT /proxies: {e}')
         return {'msg': str(e)}, e.httpCode
@@ -564,7 +563,6 @@ def uploadSignedProxy():
 def deleteProxy():
     try:
         token = getToken()
-        pmgr = ProxyManager()
         pmgr.arcdb.deleteProxy(token['proxyid'])
     except RESTError as e:
         print(f'error: DELETE /proxies: {e}')
@@ -588,7 +586,6 @@ def uploadFile(jobid, path):
     proxyid = token['proxyid']
 
     try:
-        jmgr = JobManager()
         jobid = jmgr.checkJobExists(proxyid, jobid)
         if not jobid:
             print(f'error: PUT /jobs/{jobid}/data/{path}: job ID does not exist')
@@ -618,7 +615,6 @@ def uploadFile(jobid, path):
 def info():
     try:
         getToken()
-        jmgr = JobManager()
 
         json = {'clusters': appconf.user.clusters}
 
@@ -671,7 +667,6 @@ def getToken():
         # potential errors with tokstr, token decode, proxy manager ...
         tokstr = tokstr.split()[1]
         token = jwt.decode(tokstr, appconf.user.jwt_secret, algorithms=['HS256'])
-        pmgr = ProxyManager()
         result = pmgr.checkProxyExists(token['proxyid'])
         if result is None:
             raise RESTError('Server error', 500)

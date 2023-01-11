@@ -56,11 +56,11 @@ class JobManager(object):
         clidb: An object that is interface to client engine's table.
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
         """Initialize object's attributes."""
         self.logger = logging.getLogger(__name__)
-        self.arcdb = aCTDBArc(self.logger)
-        self.clidb = ClientDB(self.logger)
+        self.arcdb = aCTDBArc(self.logger, db=db)
+        self.clidb = ClientDB(self.logger, db=db)
 
         # TODO: if and when sites from arc config are used, move everything
         # that uses arc config to this class
