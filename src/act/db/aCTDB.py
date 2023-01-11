@@ -5,11 +5,13 @@ from act.common.aCTConfig import aCTConfigARC
 class aCTDB(object):
     '''Superclass representing a general table in the DB'''
 
-    def __init__(self, logger, tablename):
+    def __init__(self, logger, tablename, db=None):
         self.log = logger
         self.table = tablename
         self.conf = aCTConfigARC()
-        self.db = aCTDBMS.getDB(self.log, self.conf)
+        self.db = db
+        if self.db is None:
+            self.db = aCTDBMS.getDB(self.log, self.conf)
 
     def _column_list2str(self,columns):
         s=""

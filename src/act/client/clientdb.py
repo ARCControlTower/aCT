@@ -29,14 +29,14 @@ class ClientDB(aCTDB):
     has :meth:`Commit`  method (inherited from ancestors).
     """
 
-    def __init__(self, logger=logging.getLogger(__name__)):
+    def __init__(self, logger=logging.getLogger(__name__), db=None):
         """
         Initialize base object.
 
         Args:
             logger: An object for logging.
         """
-        aCTDB.__init__(self, logger, "clientjobs")
+        aCTDB.__init__(self, logger, "clientjobs", db=db)
 
     def createTables(self):
         """Create clientjobs table."""
