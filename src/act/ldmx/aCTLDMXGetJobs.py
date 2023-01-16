@@ -217,6 +217,12 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                             self.log.debug(nouploadsites)
                             njf.write(f'NoUploadSites={",".join(nouploadsites)}\n')
 
+                        if 'Scope' not in jobconfig:
+                            njf.write(f'Scope=user.{user["ruciouser"]}\n')
+
+                        if 'BatchID' not in jobconfig:
+                            njf.write(f'BatchID={batch["batchname"]}\n')
+
                     newtemplatefile = os.path.join(self.tmpdir, os.path.basename(templatefile))
                     with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newtemplatefile}.', delete=False, encoding='utf-8') as ntf:
                         newtemplatefile = ntf.name
@@ -245,16 +251,8 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                                 ntf.write(f'/random/setSeeds {jobconfig.get("RandomSeed1", 0)} {jobconfig.get("RandomSeed2", 0)}\n')
                             elif l.startswith('/ldmx/persistency/root/runNumber'):
                                 ntf.write(f'/ldmx/persistency/root/runNumber {jobconfig["runNumber"]}\n')
-                            # If user is not admin, remove scope and set after to user.ruciouser
-                            elif l.startswith('Scope=') and user['role'] != 'admin':
-                                pass
                             else:
                                 ntf.write(l)
-                        # Add user info
-                        ntf.write(f"username={user['username']}")
-                        ntf.write(f"ruciouser={user['ruciouser']}")
-                        if user['role'] != 'admin':
-                            ntf.write(f"Scope=user.{user['ruciouser']}")
                     jobfiles.append((newjobfile, newtemplatefile))
 
                 for (newjobfile, newtemplatefile) in jobfiles:

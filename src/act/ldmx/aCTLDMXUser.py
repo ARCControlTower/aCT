@@ -37,6 +37,14 @@ def submit(args):
                 logger.error(f"Error: {param} not defined in {args.conffile}")
                 return 1
 
+    dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
+    # If user is not admin, and they try to use a scope that isn't user.ruciouser, throw an error
+    if 'Scope' in config:
+        user = dbldmx.getUser(args.uid)
+        if user['role'] != 'admin' and config['Scope'] != f"user.{user['ruciouser']}":
+            logger.error(f"Error: user {user['username']} cannot use scope {config['Scope']}")
+            return 1
+
     actconf = aCTConfigAPP()
 
     template_file = os.path.abspath(os.path.join(args.templatedir, config['JobTemplate']))
@@ -53,11 +61,10 @@ def submit(args):
             return 1
 
     # Get batch name or set default
-    batchname = config.get('BatchID', f'Batch-{time.strftime("%Y-%m-%dT%H:%M:%S")}')
+    batchname = config.get('BatchID', f'Batch-{time.strftime("%Y-%m-%dT%H%M%S")}')
 
     # Everything looks ok, so submit the batch
     try:
-        dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
         dbldmx.insertBatch(config_file, template_file, batchname, args.uid)
     except Exception as e:
         logger.error(f"Failed to submit {args.conffile}: {str(e)}")
@@ -73,11 +80,16 @@ def cancel(args):
         return 1
 
     constraints = []
+    dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
     if args.batchid:
         if not sanitise(args.batchid):
             logger.error(f"Illegal batchID: {args.batchid}")
             return 1
-        constraints.append(f"batchid='{args.batchid}'")
+        batches = dbldmx.getBatches(f"batchname='{args.batchid}'", columns=['id'])
+        if not batches:
+            logger.error(f"No such batchID found")
+            return 1
+        constraints.append(f"batchid={batches[0]['id']}")
     if args.site:
         if not sanitise(args.batchid):
             logger.error(f"Illegal site name: {args.site}")
@@ -85,8 +97,8 @@ def cancel(args):
         constraints.append(f"sitename='{args.site}'")
 
     # Check if there are jobs to cancel and if they are all owned by the current user
-    dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
-    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}", columns=['userid'])
+    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
+                           columns=['ldmxjobs.userid'])
 
     if not jobs:
         logger.error('No matching jobs found')
@@ -96,14 +108,14 @@ def cancel(args):
         logger.error('Found jobs owned by another user which cannot be cancelled')
         return 1
 
-    answer = input(f'This will cancel {jobs} jobs, are you sure? (y/n) ')
+    answer = input(f'This will cancel {len(jobs)} jobs, are you sure? (y/n) ')
     if answer != 'y':
         logger.info('Aborting..')
         return 0
 
     dbldmx.updateJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
                       {'ldmxstatus': 'tocancel'})
-    logger.info(f'Cancelled {jobs} jobs')
+    logger.info(f'Cancelled {len(jobs)} jobs')
     return 0
 
 def resubmit(args):
@@ -113,11 +125,16 @@ def resubmit(args):
         return 1
 
     constraints = []
+    dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
     if args.batchid:
         if not sanitise(args.batchid):
             logger.error(f"Illegal batchID: {args.batchid}")
             return 1
-        constraints.append(f"batchid='{args.batchid}'")
+        batches = dbldmx.getBatches(f"batchname='{args.batchid}'", columns=['id'])
+        if not batches:
+            logger.error(f"No such batchID found")
+            return 1
+        constraints.append(f"batchid={batches[0]['id']}")
     if args.site:
         if not sanitise(args.site):
             logger.error(f"Illegal site name: {args.site}")
@@ -125,8 +142,8 @@ def resubmit(args):
         constraints.append(f"sitename='{args.site}'")
 
     # Check if there are jobs to resubmit and if they are all owned by the current user
-    dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
-    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}", columns=['userid'])
+    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
+                          columns=['ldmxjobs.userid'])
 
     if not jobs:
         logger.error('No matching jobs found')
@@ -136,14 +153,14 @@ def resubmit(args):
         logger.error('Found jobs owned by another user which cannot be resubmitted')
         return 1
 
-    answer = input(f'This will resubmit {jobs} jobs, are you sure? (y/n) ')
+    answer = input(f'This will resubmit {len(jobs)} jobs, are you sure? (y/n) ')
     if answer != 'y':
         logger.info('Aborting..')
         return 0
 
     dbldmx.updateJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
                       {'ldmxstatus': 'toresubmit'})
-    logger.info(f'Resubmitted {jobs} jobs')
+    logger.info(f'Resubmitted {len(jobs)} jobs')
     return 0
 
 def job_not_final_states():
@@ -156,7 +173,18 @@ def sanitise(query_string):
     """
     Return False if query_string contains bad characters
     """
-    return re.match('^[a-zA-Z0-9_\-\.]+$', query_string)
+    return re.match(r'^[a-zA-Z0-9_\-\.]+$', query_string)
+
+def is_user_admin():
+    """
+    Returns true if user calling command is an admin
+    """
+
+    dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
+
+    # Check if this user has admin rights
+    ldmxuser = dbldmx.getUser(os.getuid())
+    return (not ldmxuser) or (ldmxuser['role'] != 'admin')
 
 def is_user_allowed(uid, username):
     """
@@ -165,8 +193,7 @@ def is_user_allowed(uid, username):
     dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
 
     # Check if this user has admin rights
-    ldmxuser = dbldmx.getUser(os.getuid())
-    if not ldmxuser or ldmxuser['role'] != 'admin':
+    if not is_user_admin():
         print("You do not have privileges to run commands on behalf of other users")
         return False
 
