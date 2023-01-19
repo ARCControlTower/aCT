@@ -219,7 +219,7 @@ def get_parser():
     submit_parser.set_defaults(function=submit)
     submit_parser.add_argument('-c', '--config', dest='conffile', action='store', help='Job configuration file')
     submit_parser.add_argument('-k', '--keepLogs', dest='keepLogs', default=False, action='store_true', help='Assertion that we want to keep succesful job logs')
-    submit_parser.add_argument('-t', '--templatedir', dest='templatedir', default=str(Path.home()), action='store', help='Template directory (default $HOME/templates)')
+    submit_parser.add_argument('-t', '--templatedir', dest='templatedir', default=os.path.join(str(Path.home()), 'templates'), action='store', help='Template directory (default $HOME/templates)')
 
     cancel_parser = subparsers.add_parser('cancel', help='Cancel jobs')
     cancel_parser.set_defaults(function=cancel)
