@@ -1,4 +1,5 @@
 import os
+import sys
 import logging.handlers
 from .aCTConfig import aCTConfigARC
 
@@ -13,15 +14,18 @@ LEVELS = {'debug': logging.DEBUG,
 
 class aCTLogger:
 
-    def __init__(self,name,cluster='',arclog=True):
+    def __init__(self,name,cluster='',arclog=True,stderr=False):
         self.conf = aCTConfigARC()
         self.logger=logging.LoggerAdapter(logging.getLogger(name), {'cluster': cluster})
         self.logger.logger.setLevel(logging.DEBUG)
         level = LEVELS.get(self.conf.logger.level, logging.NOTSET)
-        logfile = os.path.join(self.conf.logger.logdir, name + '.log')
         self.logger.logger.setLevel(level)
-        # aCTMain calls logrotate to rotate logs
-        self.handler = logging.handlers.WatchedFileHandler(logfile)
+        logfile = os.path.join(self.conf.logger.logdir, name + '.log')
+        if stderr:
+            self.handler = logging.StreamHandler()
+        else:
+            # aCTMain calls logrotate to rotate logs
+            self.handler = logging.handlers.WatchedFileHandler(logfile)
 
         if cluster:
             self.formatter = logging.Formatter("[%(asctime)s] [%(filename)s:%(lineno)d] [%(levelname)s] [%(cluster)s] - %(message)s")
@@ -32,9 +36,12 @@ class aCTLogger:
         self.logger.logger.addHandler(self.handler)
 
         if arclog:
-            self.arclogfile = arc.LogFile(str(logfile))
-            self.arclogfile.setFormat(arc.LongFormat)
-            arc.Logger_getRootLogger().addDestination(self.arclogfile)
+            if stderr:
+                self.arclog = arc.LogStream(sys.stderr)
+            else:
+                self.arclog = arc.LogFile(str(logfile))
+            self.arclog.setFormat(arc.LongFormat)
+            arc.Logger_getRootLogger().addDestination(self.arclog)
             if self.conf.logger.arclevel:
                 arc.Logger_getRootLogger().setThreshold(arc.string_to_level(self.conf.logger.arclevel.upper()))
             else:

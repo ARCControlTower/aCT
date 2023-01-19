@@ -21,11 +21,9 @@ class aCTReport:
         self.outfile = args.web
         self.actconfs = args.conffiles or [''] # empty string for default behaviour
 
-        self.logger=aCTLogger.aCTLogger("aCTReport")
+        self.logger=aCTLogger.aCTLogger("aCTReport", stderr=True)
         self.actlog=self.logger()
         self.actlog.logger.setLevel(logging.INFO)
-        self.criticallogger = aCTLogger.aCTLogger('aCTCritical', arclog=False)
-        self.criticallog = self.criticallogger()
 
         if self.outfile:
             self.log('<META HTTP-EQUIV="refresh" CONTENT="60"><pre>')
