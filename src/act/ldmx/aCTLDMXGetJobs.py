@@ -251,6 +251,8 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                                 ntf.write(f'/random/setSeeds {jobconfig.get("RandomSeed1", 0)} {jobconfig.get("RandomSeed2", 0)}\n')
                             elif l.startswith('/ldmx/persistency/root/runNumber'):
                                 ntf.write(f'/ldmx/persistency/root/runNumber {jobconfig["runNumber"]}\n')
+                            elif  l.startswith('detector =') or l.startswith('detector='):
+                                ntf.write(f'detector = "ldmx-det-v{jobconfig["DetectorVersion"]}"\n')
                             elif  l.startswith('sim.setDetector(') :
                                 ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", False )\n')
                             elif  l.startswith('sim.scoringPlanes') :  #overwrite use SP false-->true by reconfiguring

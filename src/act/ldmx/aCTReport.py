@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from act.common.aCTLogger import aCTLogger
 from act.ldmx.aCTDBLDMX import aCTDBLDMX
@@ -5,8 +6,10 @@ from act.ldmx.aCTDBLDMX import aCTDBLDMX
 def report(actconfs):
 
     # Get current jobs
-    actlogger = aCTLogger('aCTReport')
+    actlogger = aCTLogger('aCTReport', stderr=True)
     logger = actlogger()
+    logger.logger.setLevel(logging.INFO)
+
     rep = defaultdict(lambda: defaultdict(int))
     rtot = defaultdict(int)
     log = ''
