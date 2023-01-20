@@ -15,9 +15,14 @@ def bootstrap_conf():
         sys.exit(1)
 
     try:
-        atlasconf = aCTConfigAPP()
+        appconf = aCTConfigAPP()
     except Exception as e:
         print('Error processing APP config file: %s' % str(e))
+        sys.exit(1)
+
+    # Check aCT is stopped, simply checking existence of pid file
+    if os.path.exists(arcconf.actlocation.pidfile):
+        print('aCT is already running, please stop it before bootstrapping!')
         sys.exit(1)
 
 def bootstrap_dirs():
