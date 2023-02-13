@@ -320,6 +320,8 @@ class aCTLDMXStatus(aCTLDMXProcess):
             except Exception as e:
                 self.log.error(f'Failed to copy file {os.path.join(localdir, jobstdout)}, {str(e)}')
 
+        # Remove tmp directory
+        shutil.rmtree(localdir, ignore_errors=True)
 
     def cleanInputFiles(self, job):
         '''
