@@ -134,8 +134,13 @@ class aCTDBLDMX(aCTDB):
             user INTEGER
         )
 """
-
-        if not self.drop_and_create(c, 'ldmxarchive', archive_table_create):
+        # Don't delete an existing archive
+        c.execute("show tables like 'ldmxarchive'")
+        row = c.fetchone()
+        self.Commit()
+        if row:
+            self.log.warning('ldmxarchive table already exists, will not delete it')
+        elif not self.drop_and_create(c, 'ldmxarchive', archive_table_create):
             return False
 
         batch_table_create = """
@@ -156,7 +161,7 @@ class aCTDBLDMX(aCTDB):
 
         user_table_create = """
         create table ldmxusers (
-            id INTEGER,
+            id INTEGER PRIMARY KEY,
             created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             username VARCHAR(255),
             role VARCHAR(255),
