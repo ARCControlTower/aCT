@@ -65,12 +65,12 @@ def report(actconfs):
     rep = defaultdict(lambda: defaultdict(int))
     rtot = defaultdict(int)
 
-    rows = db.getJobs('True', ['userid', 'ldmxstatus'])
+    rows = db.getGroupedJobs('username, ldmxstatus')
     for r in rows:
 
-        user, state = (db.getUser(r['userid'])['username'], r['ldmxstatus'])
-        rep[user][state] += 1
-        rtot[state] += 1
+        count, state, user = (r['count(*)'], r['ldmxstatus'], r['username'])
+        rep[user][state] += count
+        rtot[state] += count
 
     log += f"Active LDMX jobs by user: {sum(rtot.values())}\n"
     log += f"{'':{maxbatchlen+1}} {' '.join([f'{s:>9}' for s in states])}\n"
