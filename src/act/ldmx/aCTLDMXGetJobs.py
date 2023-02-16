@@ -306,6 +306,14 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                 self.dbldmx.insertJobArchiveLazy(job)
                 self.dbldmx.deleteJob(job['id']) # commit is called here
 
+            # Set final batch state
+            finalbatchstate = 'finished'
+            if 'failed' in statuses:
+                finalbatchstate = 'failed'
+            elif 'cancelled' in statuses:
+                finalbatchstate = 'cancelled'
+            self.dbldmx.updateBatch(batchid, {'status': finalbatchstate})
+
 
     def process(self):
 
