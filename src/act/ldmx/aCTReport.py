@@ -62,6 +62,28 @@ def report(actconfs):
     log += ''.join([f'{(rtot[s] or "-"):>10}' for s in states])
     log += '\n\n'
 
+    rep = defaultdict(lambda: defaultdict(int))
+    rtot = defaultdict(int)
+
+    rows = db.getJobs('True', ['userid', 'ldmxstatus'])
+    for r in rows:
+
+        user, state = (db.getUser(r['userid'])['username'], r['ldmxstatus'])
+        rep[user][state] += 1
+        rtot[state] += 1
+
+    log += f"Active LDMX jobs by user: {sum(rtot.values())}\n"
+    log += f"{'':{maxbatchlen+1}} {' '.join([f'{s:>9}' for s in states])}\n"
+
+    for k in sorted(rep.keys(), key=lambda x: x != None):
+        log += '{:>{width}.{width}}:'.format(k, width=maxbatchlen)
+        log += ''.join([f'{(rep[k][s] or "-"):>10}' for s in states])
+        log += '\n'
+
+    log += f'{"Totals":>{maxbatchlen}}:'
+    log += ''.join([f'{(rtot[s] or "-"):>10}' for s in states])
+    log += '\n\n'
+
     # Summary from archive
     states = ['finished', 'failed', 'cancelled']
     rep = defaultdict(lambda: defaultdict(int))
