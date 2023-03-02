@@ -448,7 +448,7 @@ def getCSR():
 
     if not jsonData:
         print('error: POST /proxies: No JSON data')
-        return {'msg', 'No JSON data'}, 400
+        return {'msg': 'No JSON data'}, 400
     else:
         issuer_pem = jsonData.get('cert', None)
         if not issuer_pem:
