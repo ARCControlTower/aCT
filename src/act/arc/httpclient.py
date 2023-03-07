@@ -59,11 +59,11 @@ class HTTPClient:
         if useHTTPS:
             if not self.port:
                 self.port = 443
-            self.conn = HTTPSConnection(self.host, port=self.port, context=context, timeout=60)
+            self.conn = HTTPSConnection(self.host, port=self.port, context=context, timeout=600)
         else:
             if not self.port:
                 self.port = 80
-            self.conn = HTTPConnection(self.host, port=self.port, timeout=60)
+            self.conn = HTTPConnection(self.host, port=self.port, timeout=600)
 
         self.isHTTPS = useHTTPS
         self.proxypath = proxypath
