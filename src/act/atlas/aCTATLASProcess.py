@@ -51,7 +51,7 @@ class aCTATLASProcess(aCTProcess):
         self.starttime = time.time()
 
     def setSites(self):
-        self.sites = self.cricparser.getSites(flavour=self.flavour)
+        self.sites = self.cricparser.getSites(flavour=self.ceflavour)
         # For DB queries
         self.sitesselect = "('%s')" % "','".join(self.sites.keys())
 
