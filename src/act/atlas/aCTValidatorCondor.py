@@ -11,7 +11,7 @@ class aCTValidatorCondor(aCTATLASProcess):
     """
 
     def __init__(self, name):
-        super().__init__(name, ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
+        super().__init__(ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
 
     def cleanFinishedJob(self, pandaid):
         """Remove temporary files needed for this job."""
