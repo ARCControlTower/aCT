@@ -62,7 +62,7 @@ class aCTFetcher(aCTARCProcess):
             # fetch job results from REST
             arcrest = None
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
 
                 # fetch jobs
                 # TODO: HARDCODED

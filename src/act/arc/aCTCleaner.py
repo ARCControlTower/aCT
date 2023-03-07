@@ -57,7 +57,7 @@ class aCTCleaner(aCTARCProcess):
                 # clean jobs in ARC
                 arcrest = None
                 try:
-                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
                     arcrest.cleanJobs(toARCClean)
                 except JSONDecodeError as exc:
                     self.log.error(f"Invalid JSON response from ARC: {exc}")

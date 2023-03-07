@@ -199,7 +199,7 @@ class aCTSubmitter(aCTARCProcess):
                 with self.sigdefer:
                     # submit jobs to ARC
                     try:
-                        arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                        arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
                         arcrest.submitJobs(self.queue, arcjobs, uploadData=False)
                     except JSONDecodeError as exc:
                         self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -364,7 +364,7 @@ class aCTSubmitter(aCTARCProcess):
 
                 arcrest = None
                 try:
-                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
                     arcrest.killJobs(toARCKill)
                 except JSONDecodeError as exc:
                     self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -454,7 +454,7 @@ class aCTSubmitter(aCTARCProcess):
                 # clean jobs from ARC
                 arcrest = None
                 try:
-                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
                     arcrest.cleanJobs(toARCClean)
                 except JSONDecodeError as exc:
                     self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -526,7 +526,7 @@ class aCTSubmitter(aCTARCProcess):
 
                 arcrest = None
                 try:
-                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                    arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
 
                     # get delegations for jobs
                     # AF BUG
