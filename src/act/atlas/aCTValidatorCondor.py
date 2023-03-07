@@ -10,7 +10,7 @@ class aCTValidatorCondor(aCTATLASProcess):
     condorjobs to clean, and cleans up any leftover temp files
     """
 
-    def __init__(self, name):
+    def __init__(self):
         super().__init__(ceflavour=['HTCONDOR-CE', 'CREAM-CE'])
 
     def cleanFinishedJob(self, pandaid):
