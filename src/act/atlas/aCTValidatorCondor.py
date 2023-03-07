@@ -30,28 +30,25 @@ class aCTValidatorCondor(aCTATLASProcess):
           is not a problem
         """
         with self.transaction([self.dbpanda, self.dbcondor]):
-            # exit handling try block
-            try:
+            # get all jobs with pandastatus running and actpandastatus tovalidate
+            select = "(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in %s limit 100000" % self.sitesselect
+            columns = ["condorjobid", "pandaid"]
+            jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
 
-                # get all jobs with pandastatus running and actpandastatus tovalidate
-                select = "(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in %s limit 100000" % self.sitesselect
-                columns = ["condorjobid", "pandaid"]
-                jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
+            if len(jobstoupdate) == 0:
+                # nothing to do
+                return
 
-                if len(jobstoupdate) == 0:
-                    # nothing to do
-                    return
-
-                # Skip validation for the true pilot jobs, just copy logs, set to done and clean condor job
-                for job in jobstoupdate:
-                    self.log.info('%s: Skip validation' % job['pandaid'])
-                    select = "condorjobid='"+str(job["condorjobid"])+"'"
-                    desc = {"pandastatus": None, "actpandastatus": "finished"}
-                    self.dbpanda.updateJobsLazy(select, desc)
-                    # set condorjobs state toclean
-                    desc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
-                    self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
-                    self.cleanFinishedJob(job['pandaid'])
+            # Skip validation for the true pilot jobs, just copy logs, set to done and clean condor job
+            for job in jobstoupdate:
+                self.log.info('%s: Skip validation' % job['pandaid'])
+                select = "condorjobid='"+str(job["condorjobid"])+"'"
+                desc = {"pandastatus": None, "actpandastatus": "finished"}
+                self.dbpanda.updateJobsLazy(select, desc)
+                # set condorjobs state toclean
+                desc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
+                self.dbcondor.updateCondorJobLazy(job['condorjobid'], desc)
+                self.cleanFinishedJob(job['pandaid'])
 
     def cleanFailedJobs(self):
         """
