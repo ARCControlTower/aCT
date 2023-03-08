@@ -1,8 +1,7 @@
-import cgi
 import json
 import os
 import time
-
+from urllib.parse import parse_qs
 class aCTPanda2ClassAd:
 
     def __init__(self, pandajob, pandajobid, sitename, siteinfo, proxypath, tmpdir, atlasconf, metadata, log):
@@ -12,7 +11,7 @@ class aCTPanda2ClassAd:
         self.log = log
         self.pandajob = pandajob
         self.pandajobid = pandajobid
-        self.jobdesc = cgi.parse_qs(pandajob)
+        self.jobdesc = parse_qs(pandajob)
         self.pandaid = self.jobdesc['PandaID'][0]
         self.prodsourcelabel = self.jobdesc.get('prodSourceLabel', ['None'])[0]
         self.resourcetype = self.jobdesc.get('resourceType', ['None'])[0]
@@ -45,20 +44,20 @@ class aCTPanda2ClassAd:
         try:
             self.schedulerid = json.loads(metadata)['schedulerid']
         except:
-            self.schedulerid = atlasconf.get(["panda", "schedulerid"])
+            self.schedulerid = atlasconf.panda.schedulerid
 
-        self.wrapper = atlasconf.get(["executable", "wrapperurl"])
+        self.wrapper = atlasconf.executable.wrapperurl
         # Condor out/err/log
         now = time.gmtime() # gmtime() is like localtime() but in UTC
         today = "%04d-%02d-%02d" % (now[0], now[1], now[2])
-        self.logdir = os.path.join(atlasconf.get(['joblog','dir']), today, sitename)
+        self.logdir = os.path.join(atlasconf.joblog.dir, today, sitename)
         try: os.makedirs(self.logdir)
         except: pass
 
-        self.logurl = '%s/%s/%s' % (atlasconf.get(['joblog', 'urlprefix']), today, sitename)
+        self.logurl = f'{atlasconf.joblog.urlprefix}/{today}/{sitename}'
 
         # APFmon
-        self.monitorurl = atlasconf.get(["monitor", "apfmon"])
+        self.monitorurl = atlasconf.monitor.apfmon
 
     def getNCores(self):
 

@@ -13,14 +13,14 @@ import psutil
 def main():
 
     conf = aCTConfigARC()
-    criticallog = '%s/aCTCritical.log' % conf.get(["logger", "logdir"])
+    criticallog = f'{conf.logger.logdir}/aCTCritical.log'
     criticalerrors = 0
     lastcritical = ''
     now = datetime.now()
 
     with open(criticallog) as f:
         for line in f:
-            t = re.match('\[(\d\d\d\d\-\d\d\-\d\d\s\d\d:\d\d:\d\d,\d\d\d)\].*\[CRITICAL\]', line)
+            t = re.match(r'\[(\d\d\d\d\-\d\d\-\d\d\s\d\d:\d\d:\d\d,\d\d\d)\].*\[CRITICAL\]', line)
             if t:
                 if abs(now-datetime.strptime(t.group(1), '%Y-%m-%d %H:%M:%S,%f')) < timedelta(hours=1):
                     criticalerrors += 1

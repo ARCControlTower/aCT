@@ -16,10 +16,9 @@ import logging
 import os
 import subprocess
 
-import act.client.jobmgr as jobmgr
-import act.client.clicommon as clicommon
-from act.client.errors import InvalidJobRangeError
-from act.client.errors import InvalidJobIDError
+from act.client.jobmgr import JobManager, getIDsFromList
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
+from act.client.errors import InvalidJobRangeError, InvalidJobIDError
 
 
 def main():
@@ -52,7 +51,7 @@ def main():
     #parser.add_argument('-t', '--timeout', type=int, nargs=1,
     #        help='timeout in seconds (default 20)', default=20)
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -64,14 +63,14 @@ def main():
         logging.basicConfig(format=logFormat, level=logging.DEBUG, filename=os.devnull)
 
     # get column names from database
-    manager = jobmgr.JobManager()
+    manager = JobManager()
 
     # create a list of jobs to work on
     if args.all:
         jobs = [] # empty means all jobs
     elif args.jobs:
         try:
-            jobs = jobmgr.getIDsFromList(args.jobs)
+            jobs = getIDsFromList(args.jobs)
         except InvalidJobRangeError as e:
             print("error: range '{}' is not a valid range".format(e.jobRange))
             sys.exit(2)
@@ -82,7 +81,7 @@ def main():
         print("error: no jobs specified (use -a or -j)")
         sys.exit(10)
 
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # get ARC job IDs of jobs that match filters
     try:

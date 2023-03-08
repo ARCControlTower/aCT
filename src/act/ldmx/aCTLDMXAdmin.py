@@ -34,7 +34,7 @@ def submit(args):
                 return 1
 
     actconf = aCTConfigAPP()
-    bufferdir = actconf.get(['jobs', 'bufferdir'])
+    bufferdir = actconf.jobs.bufferdir
     if not bufferdir:
         logger.error(f"Error: bufferdir not found in aCT configuration")
         return 1
@@ -44,8 +44,8 @@ def submit(args):
         logger.error(f"Error: template not found at {template_file}")
         return 1
 
-    # only if we explicitly ask to keep logs, we'll submit with the keepsuccessful option set to 1
-    if str(actconf.get(['joblog', 'keepsuccessful'])) == '1' and not args.keepLogs :
+    # only if we explicitly ask to keep logs, we'll submit with the keepsuccessful option set to True (YAML)
+    if actconf.joblog.keepsuccessful and not args.keepLogs:
         logger.info(f"Successful job logs will be kept! This could fill up the disk, for large batches. \n-->Continue submission now with this log setting? [y/N]")
         response=str(input())
         if response != "y" :

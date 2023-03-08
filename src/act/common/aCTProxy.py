@@ -1,5 +1,5 @@
 import logging
-from . import aCTConfig
+from .aCTConfig import aCTConfigARC
 import datetime, time
 import arc
 import subprocess
@@ -9,12 +9,12 @@ class aCTProxy:
 
     def __init__(self, logger, Interval=3600):
         self.interval = Interval
-        self.conf=aCTConfig.aCTConfigARC()
+        self.conf = aCTConfigARC()
         self.db=aCTDBArc(logger)
         self.log = logger
         cred_type=arc.initializeCredentialsType(arc.initializeCredentialsType.SkipCredentials)
         self.uc=arc.UserConfig(cred_type)
-        self.uc.CACertificatesDirectory(str(self.conf.get(["voms", "cacertdir"])))
+        self.uc.CACertificatesDirectory(self.conf.voms.cacertdir)
         self.voms_proxies = {}
 
     def _timediffSeconds(self, t1, t2):
@@ -38,7 +38,7 @@ class aCTProxy:
         Helper function to create proxy under newproxypath from proxy under oldproxypath
         with given voms and attribute (if given), using arcproxy.
         '''
-        cmd=[self.conf.get(["voms","bindir"])+"/arcproxy"]
+        cmd=[self.conf.voms.bindir+"/arcproxy"]
         cmd.extend(["--constraint=validityPeriod="+str(validTime)+"S"])
         cmd.extend(["--constraint=vomsACvalidityPeriod="+str(validTime)+"S"])
         if voms:
@@ -64,7 +64,7 @@ class aCTProxy:
         with a call to the renew() function.
         '''
         if not proxypath:
-            proxypath=self.conf.get(["voms", "proxypath"])
+            proxypath=self.conf.voms.proxypath
         _, dn, expirytime = self._readProxyFromFile(proxypath)
         # if not given, try to get proxyid using dn and attribute first
         if not proxyid:
@@ -123,7 +123,7 @@ class aCTProxy:
         "renews proxies in db. renews all proxies created with createVOMSRole."
         for (dn, attribute), args in list(self.voms_proxies.items()):
             tleft = self.timeleft(dn, attribute)
-            if tleft <= int(self.conf.get(["voms","minlifetime"])) :
+            if tleft <= self.conf.voms.minlifetime:
                 self.createVOMSAttribute(*args)
                 tleft = self.timeleft(dn, attribute)
                 if tleft <= 0:
@@ -168,7 +168,7 @@ def test_aCTProxy():
     p=aCTProxy(logging.getLogger(), 1)
     voms="atlas"
     attribute="/atlas/Role=pilot"
-    proxypath=p.conf.get(["voms", "proxypath"])
+    proxypath=p.conf.voms.proxypath
     validTime=43200
     proxyid = p.createVOMSAttribute(voms, "/atlas/Role=pilot", proxypath, validTime)
     proxyid = p.createVOMSAttribute(voms, "/atlas/Role=production", proxypath, validTime)

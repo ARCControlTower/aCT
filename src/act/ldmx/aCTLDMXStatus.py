@@ -36,8 +36,8 @@ class aCTLDMXStatus(aCTLDMXProcess):
         for job in submittedjobs:
             self.log.info(f"Job {job['id']}: waiting -> {statemap[job['arcstate']]} (ARC state {job['state']})")
             desc = {'ldmxstatus': statemap[job['arcstate']],
-                    'computingelement': job['cluster'],
-                    'sitename': self.endpoints[job['cluster']]}
+                    'computingelement': job['cluster'] or 'None',
+                    'sitename': self.endpoints.get(job['cluster'], 'None')}
             self.dbldmx.updateJobLazy(job['id'], desc)
 
         select = "ldmxstatus='queueing' and arcstate in ('running', 'finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
@@ -46,8 +46,8 @@ class aCTLDMXStatus(aCTLDMXProcess):
         for job in queueingjobs:
             self.log.info(f"Job {job['id']}: queueing -> {statemap[job['arcstate']]} (ARC state {job['state']})")
             desc = {'ldmxstatus': statemap[job['arcstate']],
-                    'computingelement': job['cluster'],
-                    'sitename': self.endpoints[job['cluster']]}
+                    'computingelement': job['cluster'] or 'None',
+                    'sitename': self.endpoints.get(job['cluster'], 'None')}
             self.dbldmx.updateJobLazy(job['id'], desc)
 
         # Get post-batch ARC statuses
@@ -57,8 +57,8 @@ class aCTLDMXStatus(aCTLDMXProcess):
         for job in finishingjobs:
             self.log.info(f"Job {job['id']}: running -> finishing (ARC state {job['state']})")
             desc = {'ldmxstatus': 'finishing',
-                    'computingelement': job['cluster'],
-                    'sitename': self.endpoints[job['cluster']]}
+                    'computingelement': job['cluster'] or 'None',
+                    'sitename': self.endpoints.get(job['cluster'], 'None')}
             self.dbldmx.updateJobLazy(job['id'], desc)
 
         if submittedjobs or queueingjobs:
@@ -209,6 +209,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
          - arcstate=tocancel or cancelling when cluster is empty
          - arcstate=done or cancelled or lost or donefailed when id not in ldmxjobs
          - arcstate=done and ldmxstate=cancelling (job finished before it got cancel request)
+         - ldmxstate=cancelling and no arc jobs (job was cancelled before being submitted)
         """
         select = "arcstate in ('tocancel', 'cancelling', 'toclean') and (cluster='' or cluster is NULL)"
         jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid'])
@@ -240,6 +241,12 @@ class aCTLDMXStatus(aCTLDMXProcess):
             self.log.info(f"{job['appjobid']}: Cleaning finished job which was already cancelled")
             self.dbarc.updateArcJob(job['id'], {'arcstate': 'cancelled'})
 
+        select = "ldmxstatus='cancelling' and arcjobid not in (select id from arcjobs)"
+        jobs = self.dbldmx.getJobs(select, ['id'])
+        for job in jobs:
+            self.log.info(f"{job['id']}: Cleaning cancelling job which was never submitted")
+            self.dbldmx.updateJobs(f"id={job['id']}", {'ldmxstatus': 'cancelled'})
+
     def checkForResubmission(self, arcjob):
         '''
         Check error message against retryable errors and submit a new job
@@ -251,7 +258,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
             return
 
         self.log.info(f"{arcjob['appjobid']}: error: {arcjob['Error']}")
-        resub = [err for err in self.arcconf.getList(['errors','toresubmit','arcerrors','item']) if err in arcjob['Error']]
+        resub = [err for err in self.arcconf.errors.toresubmit.arcerrors if err in arcjob['Error']]
         if not resub:
             self.log.info(f"{arcjob['appjobid']} failed with permanent error")
             self.cleanInputFiles(arcjob)
@@ -278,7 +285,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         gmlogerrors = os.path.join(localdir, "gmlog", "errors")
         jobstdout = arcjob['stdout']
 
-        outdir = os.path.join(self.conf.get(['joblog','dir']), date)
+        outdir = os.path.join(self.conf.joblog.dir, date)
         outdfailed = os.path.join(outdir, 'failed', arcjob['sitename'] or 'None')
         os.makedirs(outdir, 0o755, exist_ok=True)
         os.makedirs(outdfailed, 0o755, exist_ok=True)

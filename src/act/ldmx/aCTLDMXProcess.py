@@ -5,9 +5,9 @@ import traceback
 from rucio.client import Client
 
 from act.common import aCTLogger
-from act.common import aCTConfig
+from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from act.common import aCTUtils
-from act.common import aCTSignal
+from act.common.aCTSignal import aCTSignal
 from act.arc import aCTDBArc
 from act.ldmx import aCTDBLDMX
 
@@ -17,7 +17,6 @@ class aCTLDMXProcess:
     '''
 
     def __init__(self):
-
         # Get agent name from /path/to/aCTAgent.py
         self.name = os.path.basename(sys.argv[0])[:-3]
 
@@ -27,10 +26,13 @@ class aCTLDMXProcess:
         self.criticallogger = aCTLogger.aCTLogger('aCTCritical', arclog=False)
         self.criticallog = self.criticallogger()
 
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
+
         # config
-        self.conf = aCTConfig.aCTConfigAPP()
-        self.arcconf = aCTConfig.aCTConfigARC()
-        self.tmpdir = str(self.arcconf.get(['tmp', 'dir']))
+        self.conf = aCTConfigAPP()
+        self.arcconf = aCTConfigARC()
+        self.tmpdir = self.arcconf.tmp.dir
         # database
         self.dbarc = aCTDBArc.aCTDBArc(self.log)
         self.dbldmx = aCTDBLDMX.aCTDBLDMX(self.log)
@@ -46,17 +48,21 @@ class aCTLDMXProcess:
         Set map of sites, CEs and status
         '''
         self.sites = {}
-        self.endpoints = {} # Map of CE to site name
-        self.rses = {} # Map of RSE to CE endpoint
-        for sitename in self.arcconf.getList(["sites", "site", "name"]):
-            siteinfo = {}
-            siteinfo['endpoint'] = self.arcconf.getCond(["sites", "site"], f"name={sitename}", ["endpoint"])
-            siteinfo['rse'] = self.arcconf.getCond(["sites", "site"], f"name={sitename}", ["rse"])
-            self.sites[sitename] = siteinfo
-            self.endpoints[siteinfo['endpoint']] = sitename
-            # Exclude offline sites
-            if self.arcconf.getCond(["sites", "site"], f"name={sitename}", ["status"]) != 'offline':
-                self.rses[siteinfo['rse']] = siteinfo['endpoint']
+        self.endpoints = {}  # Map of CE to site name
+        self.rses = {}  # Map of RSE to CE endpoint
+        for sitename, site in self.arcconf.sites:
+            if not site.endpoint:
+                self.log.error(f"\"endpoint\" not in config for site {sitename}")
+            elif not site.rse:
+                self.log.error(f"\"rse\" not in config for site {sitename}")
+            else:
+                siteinfo = {}
+                siteinfo["endpoint"] = site.endpoint
+                siteinfo["rse"] = site.rse
+                self.sites[sitename] = siteinfo
+                self.endpoints[site.endpoint] = sitename
+                if "status" not in site or site.status != "offline":
+                    self.rses[site.rse] = site.endpoint
 
     def process(self):
         '''
@@ -72,20 +78,26 @@ class aCTLDMXProcess:
         try:
             while 1:
                 # parse config file
-                self.conf.parse()
-                self.arcconf.parse()
+                self.conf = aCTConfigAPP()
+                self.arcconf = aCTConfigARC()
                 self.setSites()
                 # do class-specific things
                 self.process()
                 # sleep
                 aCTUtils.sleep(2)
-        except aCTSignal.ExceptInterrupt as x:
-            self.log.info("Received interrupt %s, exiting", str(x))
+
+                if self.signal.isInterrupted():
+                    self.log.info("*** Exiting on exit interrupt ***")
+                    break
+
         except:
             self.log.critical("*** Unexpected exception! ***")
             self.log.critical(traceback.format_exc())
             self.log.critical("*** Process exiting ***")
             self.criticallog.critical(traceback.format_exc())
+
+        finally:
+            self.finish()
 
     def finish(self):
         '''

@@ -1,17 +1,17 @@
-import time
 import os
 import sys
+import time
 import traceback
 
-from act.common import aCTLogger
-from act.common import aCTConfig
+from act.arc.aCTDBArc import aCTDBArc
+from act.atlas.aCTAPFMon import aCTAPFMon
+from act.atlas.aCTCRICParser import aCTCRICParser
+from act.atlas.aCTDBPanda import aCTDBPanda
 from act.common import aCTUtils
-from act.common import aCTSignal
-from act.arc import aCTDBArc
-from act.condor import aCTDBCondor
-from act.atlas import aCTCRICParser
-from act.atlas import aCTAPFMon
-from act.atlas import aCTDBPanda
+from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
+from act.common.aCTLogger import aCTLogger
+from act.common.aCTSignal import aCTSignal
+from act.condor.aCTDBCondor import aCTDBCondor
 
 
 class aCTATLASProcess:
@@ -21,44 +21,44 @@ class aCTATLASProcess:
     '''
 
     def __init__(self, ceflavour=['ARC-CE']):
-
         # Get agent name from /path/to/aCTAgent.py
         self.name = os.path.basename(sys.argv[0])[:-3]
 
         # logger
-        self.logger=aCTLogger.aCTLogger(self.name)
-        self.log=self.logger()
-        self.criticallogger = aCTLogger.aCTLogger('aCTCritical', arclog=False)
+        self.logger = aCTLogger(self.name)
+        self.log = self.logger()
+        self.criticallogger = aCTLogger('aCTCritical', arclog=False)
         self.criticallog = self.criticallogger()
 
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
+
         # config
-        self.conf=aCTConfig.aCTConfigAPP()
-        self.arcconf=aCTConfig.aCTConfigARC()
-        self.tmpdir=str(self.arcconf.get(['tmp', 'dir']))
+        self.conf = aCTConfigAPP()
+        self.arcconf = aCTConfigARC()
+        self.tmpdir = self.arcconf.tmp.dir
         # database
-        self.dbarc=aCTDBArc.aCTDBArc(self.log)
-        self.dbcondor=aCTDBCondor.aCTDBCondor(self.log)
-        self.dbpanda=aCTDBPanda.aCTDBPanda(self.log)
+        self.dbarc = aCTDBArc(self.log)
+        self.dbcondor = aCTDBCondor(self.log)
+        self.dbpanda = aCTDBPanda(self.log)
 
         # APFMon
-        self.apfmon = aCTAPFMon.aCTAPFMon(self.conf)
+        self.apfmon = aCTAPFMon(self.conf)
 
         # CRIC info
         self.flavour = ceflavour
-        self.cricparser = aCTCRICParser.aCTCRICParser(self.log)
+        self.cricparser = aCTCRICParser(self.log)
         self.sites = {}
-        self.osmap = {}
         self.sitesselect = ''
 
         # start time for periodic restart
-        self.starttime=time.time()
-        self.log.info("Started %s", self.name)
+        self.starttime = time.time()
+        self.log.info(f"Started {self.name}")
 
     def setSites(self):
         self.sites = self.cricparser.getSites(flavour=self.flavour)
-        self.osmap = self.cricparser.getOSMap()
         # For DB queries
-        self.sitesselect =  "('%s')" % "','".join(self.sites.keys())
+        self.sitesselect = "('%s')" % "','".join(self.sites.keys())
 
     def process(self):
         '''
@@ -74,24 +74,30 @@ class aCTATLASProcess:
         try:
             while 1:
                 # parse config file
-                self.conf.parse()
-                self.arcconf.parse()
+                self.conf = aCTConfigAPP()
+                self.arcconf = aCTConfigARC()
                 # do class-specific things
                 self.process()
                 # sleep
                 aCTUtils.sleep(2)
                 # restart periodically in case of hangs
-                #ip=int(self.conf.get(['periodicrestart', self.name.lower()]))
+                #ip=self.conf.periodicrestart.get(self.name.lower())
                 #if time.time()-self.starttime > ip and ip != 0 :
                 #    self.log.info("%s for %s exited for periodic restart", self.name, self.cluster)
                 #    return
-        except aCTSignal.ExceptInterrupt as x:
-            self.log.info("Received interrupt %s, exiting", str(x))
+
+                if self.signal.isInterrupted():
+                    self.log.info("*** Exiting on exit interrupt ***")
+                    break
+
         except:
             self.log.critical("*** Unexpected exception! ***")
             self.log.critical(traceback.format_exc())
             self.log.critical("*** Process exiting ***")
             self.criticallog.critical(traceback.format_exc())
+
+        finally:
+            self.finish()
 
     def finish(self):
         '''

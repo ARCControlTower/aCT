@@ -104,10 +104,10 @@ class aCTLDMXRegister(aCTLDMXProcess):
         '''
         sessionid = arcjob['JobID'][arcjob['JobID'].rfind('/')+1:]
         date = arcjob['created'].strftime('%Y-%m-%d')
-        outd = os.path.join(self.conf.get(['joblog','dir']), date)
+        outd = os.path.join(self.conf.joblog.dir, date)
         os.makedirs(outd, 0o755, exist_ok=True)
 
-        if str(self.conf.get(['joblog', 'keepsuccessful'])) == '1' and self.conf.get(['joblog','dir']):
+        if self.conf.joblog.keepsuccessful and self.conf.joblog.dir:
             localdir = os.path.join(self.tmpdir, sessionid)
             gmlogerrors = os.path.join(localdir, "gmlog", "errors")
             arcjoblog = os.path.join(outd, "%s.log" % arcjob['appjobid'])
@@ -239,8 +239,8 @@ class aCTLDMXRegister(aCTLDMXProcess):
                                'containerscope', 'containername', 'remote_output',
                                'local_replica']
             # Metadata values must be strings to be searchable
-            self.rucio.add_did_meta(scope, name,
-                                    {x: str(y) for x, y in metadata.items() if x not in native_metadata})
+            self.rucio.set_metadata_bulk(scope, name,
+                                         {x: str(y) for x, y in metadata.items() if x not in native_metadata})
         except KeyError as e:
             self.log.info(f'key missing in metadata json: {e}')
             return False

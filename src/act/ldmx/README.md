@@ -4,33 +4,32 @@ This module contains agents for handling jobs for the LDMX experiment
 
 # Configuration
 
-Example app configuration:
+Example app configuration (aCTConfigAPP.yaml):
 
 ```
-<config>
+modules:
+    app:
+        act.ldmx
 
-<modules>
-    <app>act.ldmx</app>
-</modules>
+jobs:
+    bufferdir: /path/to/bufferdir
 
-<jobs>
-    <bufferdir>/path/to/bufferdir</bufferdir>
-    <maxsubmitted>2</maxsubmitted>
-</jobs>
+executable:
+    wrapper: /path/to/LDCS-repo/LDCS/helperScripts/ldmxsim.sh
+    ruciohelper: /path/to/LDCS-repo/LDCS/helperScripts/ldmx-simprod-rte-helper.py
+    simprodrte: LDMX-SIMPROD-3.0
 
-<executable>
-    <wrapper>/path/to/LDCS-repo/LDCS/helperScripts/ldmxsim.sh</wrapper>
-    <ruciohelper>/path/to/LDCS-repo/LDCS/helperScripts/ldmx-simprod-rte-helper.py</ruciohelper>
-    <simprodrte>LDMX-SIMPROD-3.0</simprodrte>
-</executable>
-
-</config>
+joblog:
+    urlprefix: http://hostname/jobs
+    dir: /var/www/html/jobs
+    keepsuccessful: 0
 ```
 
 - `bufferdir` is a directory for storing temporary configuration files generated per job by aCT
 - `wrapper` is the wrapper script which runs the job on grid worker nodes
 - `ruciohelper` is another script which runs at the end of the job to extract rucio metadata of output files
 - `simprodrte` is the RTE required to run the simulation. The LDMX software RTE is specified in the job configuration.
+- `joblog` defines the URL and local directory for job logs. If `keepsuccessful` is set to zero then only failed job logs are kept.
 
 The wrapper and rucio helper scripts are maintained in the LDCS repo at https://github.com/LDMX-Software/LDCS/tree/master/helperScripts
 

@@ -14,7 +14,7 @@ class aCTPrometheusCollector:
     def app_collect(self):
 
         appconf = aCTConfigAPP()
-        apps = appconf.getList(["modules", "app"])
+        apps = appconf.modules.app
         for app in apps:
             try:
                 yield from importlib.import_module(f'{app}.aCTMonitor').collect(self.log)
@@ -62,7 +62,7 @@ class aCTMonitor(aCTProcess):
 
     def __init__(self):
         aCTProcess.__init__(self)
-        self.prometheus_port = int(self.conf.get(['monitor', 'prometheusport']) or 0)
+        self.prometheus_port = self.conf.monitor.prometheusport or 0
 
         if self.prometheus_port:
             start_http_server(self.prometheus_port)

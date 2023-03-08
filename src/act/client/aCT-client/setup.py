@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name = 'aCT-client',
@@ -8,21 +8,13 @@ setup(
     author_email = 'act-dev@cern.ch',
     package_dir = {'': 'src'},
     packages=find_packages('src'),
-    entry_points = {
+    entry_points={
         'console_scripts': [
-            'actproxy       = actproxy:main',
-            'actlistproxies = actlistproxies:main',
-            'actdeleteproxy = actdeleteproxy:main',
-            'actstat        = actstat:main',
-            'actclean       = actclean:main',
-            'actfetch       = actfetch:main',
-            'actkill        = actkill:main',
-            'actresub       = actresub:main',
-            'actsub         = actsub:main',
-            'actget         = actget:main',
-        ],
+            'act = act_client.cli:main',
+        ]
     },
-    install_requires = [
-        'requests',
+    install_requires=[
+        'cryptography',
+        'pyyaml',
     ]
 )

@@ -19,10 +19,9 @@ import sys
 import logging
 import os
 
-import act.client.jobmgr as jobmgr
-import act.client.clicommon as clicommon
-from act.client.errors import InvalidJobRangeError
-from act.client.errors import InvalidJobIDError
+from act.client.jobmgr import getIDsFromList, JobManager
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
+from act.client.errors import InvalidJobRangeError, InvalidJobIDError
 
 def main():
     # parse arguments
@@ -40,7 +39,7 @@ def main():
     parser.add_argument('-p', '--proxy', default=None,
             help='custom path to proxy certificate')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -56,7 +55,7 @@ def main():
         jobs = [] # empty means all jobs
     elif args.jobs: #TODO: should warning be added when both -a and -j are used?
         try:
-            jobs = jobmgr.getIDsFromList(args.jobs)
+            jobs = getIDsFromList(args.jobs)
         except InvalidJobRangeError as e:
             print("error: range '{}' is not a valid range".format(e.jobRange))
             sys.exit(2)
@@ -68,12 +67,12 @@ def main():
         sys.exit(10)
 
     # get proxy ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # clean jobs
-    manager = jobmgr.JobManager()
-    numDeleted = manager.cleanJobs(proxyid, jobs, args.state, args.find)
-    print('Jobs deleted: {}'.format(numDeleted))
+    manager = JobManager()
+    deleted = manager.cleanJobs(proxyid, jobs, args.state, args.find)
+    print('Jobs deleted: {}'.format(len(deleted)))
 
 
 if __name__ == '__main__':

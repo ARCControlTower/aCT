@@ -10,13 +10,13 @@ import os
 import sys
 import traceback
 import time
+import arc
 
-import act.arc.aCTDBArc as aCTDBArc
-import act.common.aCTConfig as aCTConfig
-import act.common.aCTLogger as aCTLogger
-import act.common.aCTSignal as aCTSignal
-import act.client.config as config
-import act.client.clientdb as clientdb
+from act.arc.aCTDBArc import aCTDBArc
+from act.common.aCTConfig import aCTConfigARC
+from act.common.aCTLogger import aCTLogger
+from act.common.aCTSignal import aCTSignal
+from act.client.clientdb import ClientDB
 
 
 class Client2Arc(object):
@@ -26,13 +26,6 @@ class Client2Arc(object):
     This object is very similar to other process objects, namely
     :class:~`act.common.aCTProcess.aCTProcess` and children, as well
     as :class:~`act.common.aCTATLASProcess.aCTATLASProcess` and children.
-
-    When exceptions are raised while dealing with database, they are logged
-    and reraised. They are caught again in main loop of this process and it
-    has not yet been investigated how much overlapping information is emmited
-    from both places. You can find those places where comment
-    '# possible double log' is. This is current simple solution for database
-    error management.
 
     Attributes:
         name: Name of a process, extracted from source code file.
@@ -45,17 +38,22 @@ class Client2Arc(object):
 
     def __init__(self):
         """Initialize all attributes."""
+
         # get name, remove .py from the end
         self.name = os.path.basename(sys.argv[0])[:-3]
 
-        self.arcconf = aCTConfig.aCTConfigARC()
+        self.arcconf = aCTConfigARC()
 
-        self.logger = aCTLogger.aCTLogger(self.name)
+        self.logger = aCTLogger(self.name)
         self.log = self.logger()
-        self.clidb = clientdb.ClientDB(self.log)
-        self.arcdb = aCTDBArc.aCTDBArc(self.log)
 
-        self.log.info('Started {}'.format(self.name))
+        # set up signal handlers
+        self.signal = aCTSignal(self.log)
+
+        self.clidb = ClientDB(self.log)
+        self.arcdb = aCTDBArc(self.log)
+
+        self.log.info(f'Started {self.name}')
 
     def run(self):
         """
@@ -68,15 +66,21 @@ class Client2Arc(object):
         try:
             while True:
                 # TODO: this parsing does not make any difference
-                self.arcconf.parse()
+                self.arcconf = aCTConfigARC()
                 self.process()
-                time.sleep(10) # TODO: HARDCODED
-        except aCTSignal.ExceptInterrupt as x:
-            self.log.info('Received interrupt {}, exiting'.format(str(x)))
+                time.sleep(10)  # TODO: HARDCODED
+
+                if self.signal.isInterrupted():
+                    self.log.info("*** Exiting on exit interrupt ***")
+                    break
+
         except:
             self.log.critical('*** Unexpected exception! ***')
             self.log.critical(traceback.format_exc())
             self.log.critical('*** Process exiting ***')
+
+        finally:
+            self.finish()
 
     def process(self):
         """
@@ -89,52 +93,7 @@ class Client2Arc(object):
         """
         proxies = self.clidb.getProxies()
         for proxyid in proxies:
-            # get number of all states of jobs with fairshare proxyid
-            states = self.getJobStateCount('fairshare = {}'.format(proxyid))
-
-            # get number of running and submitted jobs
-            running = 0
-            submitted = 0
-            for state in states:
-                if state['arcstate'] == 'running':
-                    running = state['COUNT(arcstate)']
-                elif state['arcstate'] in ('submitted', 'submitting'):
-                    submitted += state['COUNT(arcstate)']
-            #self.log.debug('{} jobs running for proxyid {}'.format(running, proxyid))
-            #self.log.debug('{} jobs submitted for proxyid {}'.format(submitted, proxyid))
-
-            if submitted < max(0.2 * running, 100): # TODO: HARDCODED
-                self.insertNewJobs(proxyid, 20)
-
-    def getJobStateCount(self, select):
-        """
-        Return states and numbers of jobs in those states.
-
-        Args:
-            select: A string with custom WHERE clause for MySQL query.
-
-        Returns:
-            A list of dictionaries where every dictionary has a state name
-            and number of jobs in that state. State name is mapped by
-            'arcstate', number of jobs by 'COUNT(arcstate). For example:
-
-            [{'arcstate': 'toclean', 'COUNT(arcstate)': 10},
-             {'arcstate': 'running', 'COUNT(arcstate)': 58}]
-        """
-        c = self.arcdb.db.getCursor()
-        try:
-            c.execute(
-                'SELECT arcstate,COUNT(arcstate) \
-                FROM arcjobs \
-                WHERE {} \
-                GROUP BY arcstate'.format(select)
-            )
-        except:
-            # possible double log
-            self.log.exception('Error getting job info from arc table')
-            raise
-        else:
-            return c.fetchall()
+            self.insertNewJobs(proxyid, 100)
 
     def insertNewJobs(self, proxyid, num):
         """
@@ -145,53 +104,54 @@ class Client2Arc(object):
         # Get jobs that haven't been inserted to ARC table yet
         # (they don't have reference to ARC table, arcjobid is null).
         jobs = self.clidb.getJobsInfo(
-            ['id', 'jobdesc', 'siteName'],
+            ['id', 'jobdesc', 'clusterlist'],
             where='proxyid = %s AND arcjobid IS NULL AND jobdesc IS NOT NULL',
             where_params=[proxyid],
             order_by='%s',
             order_by_params=['id'],
             limit=num
         )
+        jobdescs = arc.JobDescriptionList()
         for job in jobs:
-            # get cluster list from config
-            clusterlist = ""
-            sites = config.readSites()
-            clusterlist = ''
-            for cluster in sites[job['siteName']]:
-                clusterlist += cluster + ','
-            clusterlist = clusterlist.rstrip(',')
 
-            # get job description, needed for setting priority
-            jobdesc = self.arcdb.getArcJobDescription(job['jobdesc'])
+            # create downloads list
+            arc.JobDescription_Parse(job['jobdesc'], jobdescs)
+            # all files from session dir
+            downloads = ['/']
+            # all diagnose files if log dir is specified
+            logdir = jobdescs[-1].Application.LogDir
+            if logdir:
+                if logdir.endswith('/'):
+                    downloads.append(f'diagnose={logdir}')
+                else:
+                    downloads.append(f'diagnose={logdir}/')
 
             # insert job to ARC table
             try:
-                row = self.clidb.insertArcJob(
-                    jobdesc,
+                row = self.arcdb.insertArcJobDescription(
                     job['jobdesc'],
                     proxyid,
                     0,
-                    clusterlist,
+                    job['clusterlist'],
                     job['id'],
-                    '',
-                    proxyid
+                    ';'.join(downloads)
                 )
             except:
-                # possible double log
-                self.log.exception('Error inserting job {} to arc table'.format(job['id']))
-                raise
-            else: # create reference to job in client table
-                self.clidb.updateJob(job['id'], {'arcjobid': row['LAST_INSERT_ID()']})
-
+                self.log.exception(f'Error inserting job {job["id"]} to arc table')
+            else:
+                # create a reference to job in client table
+                self.clidb.updateJob(job['id'], {
+                    'arcjobid': row['LAST_INSERT_ID()'],
+                    'modified': self.clidb.getTimeStamp()
+                })
+                self.log.info(f'Successfully inserted job {job["id"]} {row["LAST_INSERT_ID()"]} to ARC engine')
 
     def finish(self):
         """Log stop message."""
-        self.log.info('Stopped {}'.format(self.name))
+        self.log.info(f'Stopped {self.name}')
 
 
 if __name__ == '__main__':
     proc = Client2Arc()
     proc.run()
     proc.finish()
-
-

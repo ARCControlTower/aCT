@@ -11,10 +11,8 @@ class aCTCRICFetcher(aCTATLASProcess):
 
     def __init__(self):
         aCTATLASProcess.__init__(self)
-        self.queues = self.conf.get(['cric','server'])
-        self.oses = self.conf.get(['cric','objectstores'])
-        self.queuesfile =self.conf.get(['cric', 'jsonfilename'])
-        self.osesfile =self.conf.get(['cric', 'osfilename'])
+        self.queues = self.conf.cric.server
+        self.queuesfile = self.conf.cric.jsonfilename
 
 
     def fetchFromCRIC(self, url, filename):
@@ -61,10 +59,8 @@ class aCTCRICFetcher(aCTATLASProcess):
         # todo: check if cric.json exists and return if too new
         # fetch data from CRIC
         queuesjson = self.fetchFromCRIC(self.queues, self.queuesfile)
-        osesjson = self.fetchFromCRIC(self.oses, self.osesfile)
         # store data to file
         self.storeToFile(queuesjson, self.queuesfile)
-        self.storeToFile(osesjson, self.osesfile)
         # temporary hack to avoid too much cric fetching
         time.sleep(600)
 

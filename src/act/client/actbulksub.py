@@ -14,12 +14,11 @@ import sys
 import logging
 import os
 
-import act.client.jobmgr as jobmgr
-import act.client.clientdb as clientdb
-import act.common.aCTConfig as aCTConfig
-import act.client.clicommon as clicommon
-from act.client.errors import NoSuchSiteError
-from act.client.errors import InvalidJobDescriptionError
+from act.client.clientdb import ClientDB
+from act.common.aCTConfig import aCTConfigARC
+from act.client.jobmgr import checkSite, checkJobDesc
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
+from act.client.errors import NoSuchSiteError, InvalidJobDescriptionError
 
 
 def readXRSL(filepath):
@@ -39,7 +38,7 @@ def main():
             help='show more information')
     parser.add_argument('xRSL', nargs='+', help='path(s) to xRSL file(s)')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -52,11 +51,11 @@ def main():
 
 
     # get ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # check site
     try:
-        jobmgr.checkSite(args.site) # use default path for sites.json
+        checkSite(args.site) # use default path for sites.json
     except NoSuchSiteError as e:
         print("error: site '{}' is not configured".format(args.site))
         sys.exit(4)
@@ -65,12 +64,12 @@ def main():
         sys.exit(11) # TODO: refactor error handling
 
     # check descriptions and submit jobs
-    arcconf = aCTConfig.aCTConfigARC()
-    clidb = clientdb.ClientDB()
+    arcconf = aCTConfigARC()
+    clidb = ClientDB()
     for xrsl in args.xRSL:
         try:
             jobdesc = readXRSL(xrsl)
-            jobmgr.checkJobDesc(jobdesc)
+            checkJobDesc(jobdesc)
         except InvalidJobDescriptionError:
             print('error: invalid job description in {}'.format(xrsl))
         except IOError:

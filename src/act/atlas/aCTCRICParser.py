@@ -1,8 +1,9 @@
 import logging
 import time
-import os, re, sys
+import os
+import sys
 import json
-from act.common import aCTConfig
+from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 
 class aCTCRICParser:
     '''
@@ -12,59 +13,38 @@ class aCTCRICParser:
 
     def __init__(self, logger):
         self.log = logger
-        self.conf = aCTConfig.aCTConfigAPP()
-        self.arcconf = aCTConfig.aCTConfigARC()
+        self.conf = aCTConfigAPP()
+        self.arcconf = aCTConfigARC()
         self.tparse = 0
         self.getSites()
 
     def _parseConfigSites(self):
         sites = {}
-        for sitename in self.conf.getList(["sites","site","name"]):
+
+        for sitename, site in self.conf.panda.sites:
             siteinfo = {}
-            configendpoints = self.conf.getListCond(["sites","site"],"name=" + sitename, ["endpoints","item"])
-            if configendpoints:
-                siteinfo['endpoints'] = configendpoints
-            try:
-                siteinfo['flavour'] = self.conf.getListCond(["sites","site"],"name=" + sitename, ["flavour"])[0]
-            except:
-                pass
-            try:
-                siteinfo['schedconfig'] = self.conf.getListCond(["sites","site"],"name=" + sitename, ["schedconfig"])[0]
-            except:
-                pass
-            try:
-                siteinfo['type'] = self.conf.getListCond(["sites","site"],"name=" + sitename, ["type"])[0]
-            except:
-                # ignore missing type and hope cric has the info
-                pass
-            try:
-                siteinfo['corecount'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["corecount"])[0])
-            except:
-                pass
-            try:
-                siteinfo['maxjobs'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["maxjobs"])[0])
-            except:
-                pass
-            try:
-                siteinfo['truepilot'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["truepilot"])[0])
-            except:
-                pass
-            try:
-                siteinfo['push'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["push"])[0])
-            except:
-                pass
-            try:
-                siteinfo['cricjsons'] = int(self.conf.getListCond(["sites","site"],"name=" + sitename, ["cricjsons"])[0])
-            except:
-                siteinfo['cricjsons'] = 0
-            # If status is already defined in CRIC then only override if explicity specified here
-            try:
-                siteinfo['status'] = self.conf.getListCond(["sites","site"],"name=" + sitename, ["status"])[0]
-            except:
-                if not self.sites.get(sitename, {}).get('status'):
-                    siteinfo['status'] = 'online'
+            if site.endpoints:
+                siteinfo['endpoints'] = site.endpoints
+            if site.flavour:
+                siteinfo['flavour'] = site.flavour
+            if site.schedconfig:
+                siteinfo['schedconfig'] = site.schedconfig
+            if site.type:
+                siteinfo['type'] = site.type
+            if site.corecount:
+                siteinfo['corecount'] = site.corecount
+            if site.maxjobs:
+                siteinfo['maxjobs'] = site.maxjobs
+            if site.truepilot:
+                siteinfo['truepilot'] = site.truepilot
+            if site.push:
+                siteinfo['push'] = site.push
+
+            siteinfo['cricjsons'] = site.cricjsons or 0
+            siteinfo['status'] = site.status or 'online'
             siteinfo['enabled'] = True
             sites[sitename] = siteinfo
+
         self.log.info("Parsed sites from config: %s" % str(list(sites.keys())))
         return sites
 
@@ -72,13 +52,13 @@ class aCTCRICParser:
         with open(cricfilename) as f:
             sites = json.load(f)
         for sitename, siteinfo in sites.items():
-            siteinfo['push'] = 'push' in siteinfo['workflow']
+            siteinfo['push'] = 'push' in (siteinfo['workflow'] or 'push')
             siteinfo['schedconfig'] = sitename
             if (pilotmgr == 'all' or siteinfo['pilot_manager'] == pilotmgr) and \
                (pilotver is None or siteinfo['pilot_version'] == str(pilotver)) and \
                siteinfo['state'] == 'ACTIVE' and not siteinfo['is_virtual']:
                 siteinfo['enabled'] = True
-                siteinfo['maxjobs'] = int(self.conf.get(["cric", "maxjobs"]))
+                siteinfo['maxjobs'] = self.conf.cric.maxjobs
             else:
                 siteinfo['enabled'] = False
                 siteinfo['maxjobs'] = 0
@@ -131,43 +111,12 @@ class aCTCRICParser:
                 if len(siteinfo['copytools']) == 1 or 'mv' in siteinfo['acopytools'].get('pr', []):
                     truepilot = False
             siteinfo['truepilot'] = truepilot
-            # set OS bucket IDs
-            try:
-                objstore = [self.bucketmap[e]['bucket_id'] for e in siteinfo['astorages']['es_events'] if e in self.bucketmap and self.bucketmap[e]['type'] == 'OS_ES'][0]
-                siteinfo['ddmoses'] = objstore
-            except:
-                if siteinfo['enabled'] and siteinfo['jobseed'] in ('es', 'all'):
-                    self.log.debug('No ES object store for %s but jobseed is %s' % (sitename, siteinfo['jobseed']))
 
         if len(sites) < 100:
             self.log.info("Parsed sites from CRIC: %s" % str(list(sites.keys())))
         else:
             self.log.info("Parsed %d sites from CRIC" % len(sites))
         return sites
-
-    def _parseDDMEndpoints(self, filename):
-        self.osmap = {}
-        self.bucketmap = {}
-        with open(filename) as f:
-            self.ddmjson = json.load(f)
-        # make map of bucket_id: endpoint
-        for ep, info in self.ddmjson.items():
-            if info['state'] != 'ACTIVE':
-                continue
-            try:
-                bucket_id = info['id']
-            except:
-                self.log.info('No bucket_id info for %s', info['name'])
-                continue
-            try:
-                protocol = [p for p in info['aprotocols']['r'] if p[0].startswith('s3://')][0]
-                endpoint = '%s%s' % (protocol[0], protocol[2])
-            except:
-                self.log.info('No s3 endpoint for %s' % ep)
-                continue
-            endpoint = re.sub('s3:/', 's3://', re.sub('//', '/', endpoint))
-            self.osmap[bucket_id] = endpoint
-            self.bucketmap[ep] = {'bucket_id': bucket_id, 'type': info['type']}
 
     def _mergeSiteDicts(self, dict1, dict2):
         for d in dict2.keys():
@@ -179,8 +128,8 @@ class aCTCRICParser:
     def getSites(self, flavour=None):
         '''Get site info, filtered by CE flavour(s) if given'''
 
-        self.conf.parse()
-        cricfile = self.conf.get(['cric','jsonfilename'])
+        self.conf = aCTConfigAPP()
+        cricfile = self.conf.cric.jsonfilename
         if not cricfile:
             # No CRIC, only manually configured sites
             return self._parseConfigSites()
@@ -199,12 +148,11 @@ class aCTCRICParser:
                 time.sleep(10)
 
         # check if json file or config file changed before parsing
-        if (self.tparse < cricmtime) or (self.tparse < os.stat(self.conf.configfile).st_mtime):
+        if (self.tparse < cricmtime) or (self.tparse < os.stat(self.conf.path).st_mtime):
             self.log.info("CRIC file and/or config modified, reparsing site info")
-            pilotmgr = self.conf.get(['cric','pilotmanager'])
-            pilotver = self.conf.get(['cric','pilotversion'])
+            pilotmgr = self.conf.cric.pilotmanager
+            pilotver = self.conf.cric.pilotversion
             start_parsing = time.time()
-            self._parseDDMEndpoints(self.conf.get(['cric', 'osfilename']))
             self.sites = self._parseCRICJson(cricfile, pilotmgr, pilotver)
             self._mergeSiteDicts(self.sites, self._parseConfigSites())
             self.tparse = time.time()
@@ -223,14 +171,8 @@ class aCTCRICParser:
             return dict((k,v) for (k,v) in self.sites.items() if v.get('flavour') in flavour)
         return self.sites
 
-    def getOSMap(self):
-        ''' Return dictionary of OS ID to OS endpoint'''
-
-        return self.osmap
-
 if __name__ == '__main__':
 
-    from pprint import pprint
     log = logging.getLogger()
     log.setLevel("DEBUG")
     out = logging.StreamHandler(sys.stdout)
@@ -238,8 +180,4 @@ if __name__ == '__main__':
     cricparser = aCTCRICParser(log)
     sites = cricparser.getSites()
     sites = {s:i for s,i in sites.items() if i['enabled']}
-    for s,i in sites.items():
-        log.info(f'{s}, {i.get("ddmoses")}')
     log.info(f'{len(sites)} sites')
-    oses = cricparser.getOSMap()
-    pprint(oses)

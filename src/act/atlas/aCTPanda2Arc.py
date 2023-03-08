@@ -25,8 +25,7 @@ class aCTPanda2Arc(aCTATLASProcess):
             if job['proxyid'] not in proxies_map:
                 proxies_map[job['proxyid']] = self.dbarc.getProxyPath(job['proxyid'])
 
-            parser = aCTPanda2Xrsl(job, self.sites[job['siteName']], self.osmap,
-                                   self.tmpdir, self.conf, self.log)
+            parser = aCTPanda2Xrsl(job, self.sites[job['siteName']], self.tmpdir, self.conf, self.log)
 
             self.log.info("site %s maxwalltime %s", job['siteName'],self.sites[job['siteName']]['maxwalltime'] )
 
@@ -61,15 +60,14 @@ class aCTPanda2Arc(aCTATLASProcess):
                     maxattempts = 0
 
                 # Set the list of files to download at the end of the job
-                downloadfiles = 'gmlog/errors'
+                # new syntax for rest
+                downloadfiles = 'diagnose=gmlog/errors'
                 try:
                     downloadfiles += ';%s' % parser.jobdesc['logFile'][0].replace('.tgz', '')
                 except:
                     pass
                 if not self.sites[job['siteName']]['truepilot']:
                     downloadfiles += ';heartbeat.json'
-                if job['eventranges']:
-                    downloadfiles += ';metadata-es.xml'
 
                 aid = self.dbarc.insertArcJobDescription(xrsl, maxattempts=maxattempts, clusterlist=cls,
                                                          proxyid=job['proxyid'], appjobid=str(job['pandaid']),
@@ -86,8 +84,8 @@ class aCTPanda2Arc(aCTATLASProcess):
                 self.dbpanda.updateJob(job['pandaid'], jd)
 
                 # Dump description for APFMon
-                if self.conf.get(["monitor", "apfmon"]):
-                    logdir = os.path.join(self.conf.get(["joblog", "dir"]),
+                if self.conf.monitor.apfmon:
+                    logdir = os.path.join(self.conf.joblog.dir,
                                           job['created'].strftime('%Y-%m-%d'),
                                           job['siteName'])
                     try: os.makedirs(logdir, 0o755)

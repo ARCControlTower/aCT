@@ -1,0 +1,58 @@
+modules:
+  app:
+    - act.atlas
+
+executable:
+  wrapperurl: /cvmfs/atlas.cern.ch/repo/sw/PandaPilotWrapper/latest/runpilot2-wrapper.sh
+  wrapperurlrc: /cvmfs/atlas.cern.ch/repo/sw/PandaPilotWrapper/testing/runpilot2-wrapper.sh
+  ptarurl: http://pandaserver.cern.ch:25085/cache/pilot/pilot2.tar.gz
+  ptarurlrc: http://cern.ch/atlas-panda-pilot/pilot2-dev.tar.gz
+  ptarurldev: http://cern.ch/atlas-panda-pilot/pilot2-dev2.tar.gz
+  p3tarurl: http://pandaserver.cern.ch:25085/cache/pilot/pilot3.tar.gz
+  p3tarurlrc: http://cern.ch/atlas-panda-pilot/pilot3-dev.tar.gz
+  p3tarurldev: http://cern.ch/atlas-panda-pilot/pilot3-dev2.tar.gz
+
+monitor:
+  apfmon: http://apfmon.lancs.ac.uk/api
+
+db:
+  type: mysql
+  socket: /data/user/atlact1/act-mysql/act.mysql.socket
+  name: act
+  user: user
+  password: password
+  host: host.name
+  port: 42
+
+joblog:
+  urlprefix: http://aipanda404.cern.ch/data/jobs
+  dir: /cephfs/user/atlact1/www/jobs
+
+cric:
+  server: "https://atlas-cric.cern.ch/api/atlas/pandaqueue/query/?json&state=ANY&is_virtual=False&ce_state[]=ACTIVE&ce_state[]=INACTIVE"
+  objectstores: "https://atlas-cric.cern.ch/api/atlas/ddmendpoint/query/?json&type[]=OS_LOGS&type[]=OS_ES"
+  jsonfilename: /cephfs/user/atlact1/act-prod/act404/tmp/cric.json
+  osfilename: /cephfs/user/atlact1/act-prod/act404/tmp/oses.json
+  pilotmanager: Harvester
+  maxjobs: 0
+
+panda:
+  server: https://pandaserver.cern.ch:25443/server/panda/
+  heartbeattime: 1800
+  threads: 10
+  getjobs: 10
+  schedulerid: harvester-CERN_central_ACTA
+  timeout: 60
+  minjobs: 20
+
+  sites:
+    TOKYO_HPC:
+      cricjsons: 1
+    LRZ-LMU_MUC_MCORE:
+      cricjsons: 1
+    UAM_MareNostrum4:
+      cricjsons: 1
+    IFIC_MareNostrum4:
+      cricjsons: 1
+    pic_MareNostrum4:
+      cricjsons: 1

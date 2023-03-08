@@ -39,7 +39,7 @@ class aCTStatus(aCTProcess):
         '''
 
         # minimum time between checks
-        if time.time() < self.checktime + int(self.conf.get(['jobs', 'checkmintime'])):
+        if time.time() < self.checktime + self.conf.jobs.checkmintime:
             self.log.debug("mininterval not reached")
             return
         self.checktime = time.time()
@@ -47,7 +47,7 @@ class aCTStatus(aCTProcess):
         # check jobs which were last checked more than checkinterval ago
         query = "condorstate in ('submitted', 'running', 'cancelling', 'holding') and " \
                 "ClusterId not like '' and cluster='"+self.cluster+"' and "+ \
-                self.dbcondor.timeStampLessThan("tcondorstate", self.conf.get(['jobs','checkinterval'])) + \
+                self.dbcondor.timeStampLessThan("tcondorstate", self.conf.jobs.checkinterval) + \
                 " limit 100000"
         jobstocheck = self.dbcondor.getCondorJobsInfo(query, columns=['id', 'appjobid', 'JobStatus', 'ClusterId'])
 
@@ -184,7 +184,7 @@ class aCTStatus(aCTProcess):
         # Loop over possible states
         # Note: MySQL is case-insensitive. Need to watch out with other DBs
         for jobstateid, jobstate in self.condorjobstatemap.items():
-            maxtime = self.conf.get(['jobs', 'maxtime%s' % jobstate.lower()])
+            maxtime = self.conf.jobs.get(f"maxtime{jobstate.lower()}")
             if not maxtime:
                 continue
 

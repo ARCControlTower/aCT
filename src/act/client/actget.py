@@ -18,12 +18,10 @@ import os
 import os.path
 import logging
 
-import act.client.jobmgr as jobmgr
-import act.client.clicommon as clicommon
-from act.client.errors import TargetDirExistsError
-from act.client.errors import InvalidJobRangeError
-from act.client.errors import InvalidJobIDError
-from act.client.errors import TmpConfigurationError
+from act.client.jobmgr import getIDsFromList, JobManager
+from act.client.common import showHelpOnCommandOnly, getProxyIdFromProxy
+from act.client.errors import TargetDirExistsError, InvalidJobRangeError
+from act.client.errors import InvalidJobIDError, ConfigError
 from act.client.errors import NoJobDirectoryError
 
 
@@ -65,7 +63,7 @@ def main():
     parser.add_argument('-D', '--dir', default='',
             help='directory where job result directoires should be copied to')
 
-    clicommon.showHelpOnCommandOnly(parser)
+    showHelpOnCommandOnly(parser)
 
     args = parser.parse_args()
 
@@ -78,10 +76,10 @@ def main():
 
     # create a list of jobs to work on
     if args.all:
-        jobs = [] # empty means all jobs
+        jobs = []  # empty means all jobs
     elif args.jobs:
         try:
-            jobs = jobmgr.getIDsFromList(args.jobs)
+            jobs = getIDsFromList(args.jobs)
         except InvalidJobRangeError as e:
             print("error: range '{}' is not a valid range".format(e.jobRange))
             sys.exit(2)
@@ -93,13 +91,13 @@ def main():
         sys.exit(10)
 
     # get proxy ID given proxy
-    proxyid = clicommon.getProxyIdFromProxy(args.proxy)
+    proxyid = getProxyIdFromProxy(args.proxy)
 
     # get job info
-    manager = jobmgr.JobManager()
+    manager = JobManager()
     try:
         results = manager.getJobs(proxyid, jobs, args.state, args.find)
-    except TmpConfigurationError:
+    except ConfigError:
         print('error: tmp directory not configured')
         sys.exit(5)
 
@@ -111,7 +109,7 @@ def main():
     dontRemove = []
     for result in results.jobdicts:
         try:
-            if result['dir']: # if there are job results in tmp
+            if result['dir']:  # if there are job results in tmp
                 dst_dirname = os.path.basename(os.path.normpath(result['name']))
                 dstdir = getLocalDir(dst_dirname, args.dir)
                 shutil.copytree(result['dir'], dstdir)

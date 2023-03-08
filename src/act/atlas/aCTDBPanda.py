@@ -43,7 +43,6 @@ class aCTDBPanda(aCTDB):
            - computingElement: CE where the job is running
            - proxyid: ID of proxy in proxies table to use for this job
            - sendhb: Flag to say whether or not to send heartbeat
-           - eventranges: event ranges for event service jobs
            - corecount: Number of cores used by job
            - metadata: Generic json metadata sent by the client
            - error: Error string from a failed job
@@ -74,7 +73,6 @@ class aCTDBPanda(aCTDB):
         computingElement VARCHAR(255),
         proxyid integer,
         sendhb TINYINT(1) DEFAULT 1,
-        eventranges mediumtext,
         corecount integer,
         metadata BLOB,
         error mediumtext,

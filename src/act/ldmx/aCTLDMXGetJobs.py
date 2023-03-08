@@ -51,6 +51,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             inputfilegrouping = self.groupInputFiles(files, config)
             inputfilesperjob = int(config.get('InputFilesPerJob', 1))
             newconfig = config.copy()
+            runnumber = 1
             for files in inputfilegrouping.values():
                 for i, f in enumerate(files, start=1):
 
@@ -58,11 +59,12 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                         newconfig[k] = f'{newconfig[k]},{v}' if k in newconfig else v
 
                     if i % inputfilesperjob == 0 or i == len(files):
-                        newconfig['runNumber'] = math.ceil(i / inputfilesperjob)
+                        newconfig['runNumber'] = runnumber
                         # Set metadata of just the last file
                         try:
-                            meta = self.rucio.get_did_meta(f["InputFile"].split(':')[0],
-                                                           f["InputFile"].split(':')[1])
+                            meta = self.rucio.get_metadata(f["InputFile"].split(':')[0],
+                                                           f["InputFile"].split(':')[1],
+                                                           plugin='JSON')
                         except RucioException as e:
                             raise Exception(f'Rucio exception while looking up metadata for {f["InputFile"]}: {e}')
 
@@ -82,6 +84,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
                         yield newconfig
                         newconfig = config.copy()
+                        runnumber += 1
 
         else:
             # Jobs with no input: generate jobs based on specified number of jobs
@@ -158,7 +161,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
         Read new job files in buffer dir and create necessary job descriptions
         '''
 
-        bufferdir = self.conf.get(['jobs', 'bufferdir'])
+        bufferdir = self.conf.jobs.bufferdir
         configsdir = os.path.join(bufferdir, 'configs')
         os.makedirs(configsdir, 0o755, exist_ok=True)
         jobs = [os.path.join(configsdir, j) for j in os.listdir(configsdir) if os.path.isfile(os.path.join(configsdir, j))]
@@ -211,7 +214,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                         if output_base:
                             njf.write(f'FinalOutputBasePath={output_base}\n')
  
-                        nouploadsites = self.arcconf.getListCond(["sites", "site"], "noupload=1", ["endpoint"])
+                        nouploadsites = [site.endpoint for _, site in self.arcconf.sites if site.noupload == 1]
                         if nouploadsites:
                             self.log.debug(nouploadsites)
                             njf.write(f'NoUploadSites={",".join(nouploadsites)}\n')
@@ -219,21 +222,40 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                     newtemplatefile = os.path.join(self.tmpdir, os.path.basename(templatefile))
                     with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newtemplatefile}.', delete=False, encoding='utf-8') as ntf:
                         newtemplatefile = ntf.name
+                        # might need a long list of input files, but without the scope. 
+                        if "InputFile" in jobconfig :
+                            inFileScope = jobconfig["InputFile"].split(":")[0] # use first input file to look up the scope
+                            inFileList = (jobconfig["InputFile"].replace(inFileScope+":", "")).split(",")
                         for l in template:
                             if l.startswith('sim.runNumber'):
                                 ntf.write(f'sim.runNumber = {jobconfig["runNumber"]}\n')
                             elif l.startswith('p.run = RUNNUMBER'):
                                 ntf.write(f'p.run = {jobconfig["runNumber"]}\n')
                             elif l.startswith('p.inputFiles'):
-                                ntf.write(f'p.inputFiles = [ "{jobconfig["InputFile"].split(":")[1]}" ]\n')
+                                ntf.write(f'p.inputFiles = {inFileList} \n') #jobconfig["InputFile"].split(":")[1]}" ]\n')
                             elif l.startswith('p.maxEvents') and 'NumberOfEvents' in jobconfig :
                                 ntf.write(f'p.maxEvents = {jobconfig["NumberOfEvents"]}\n')                           
                             elif l.startswith('lheLib=INPUTFILE'):
                                 ntf.write(f'lheLib="{jobconfig["InputFile"].split(":")[1]}"\n')
+                                #ntf.write(f'lheLib={inFileList}\n') # {jobconfig["InputFile"].split(":")[1]}"\n')
                             elif l.startswith('pileupFileName'):
                                 ntf.write(f'pileupFileName = "{jobconfig["PileupFile"].split(":")[1]}" \n')
                             elif l.startswith('sim.randomSeeds'):
                                 ntf.write(f'sim.randomSeeds = [ {jobconfig.get("RandomSeed1", 0)}, {jobconfig.get("RandomSeed2", 0)} ]\n')
+                            #ldmx-sw v1-style mac template stuff
+                            elif l.startswith('/random/setSeeds'):
+                                ntf.write(f'/random/setSeeds {jobconfig.get("RandomSeed1", 0)} {jobconfig.get("RandomSeed2", 0)}\n')
+                            elif l.startswith('/ldmx/persistency/root/runNumber'):
+                                ntf.write(f'/ldmx/persistency/root/runNumber {jobconfig["runNumber"]}\n')
+                            elif  l.startswith('sim.setDetector(') :
+                                ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", False )\n')
+                            elif  l.startswith('sim.scoringPlanes') :  #overwrite use SP false-->true by reconfiguring
+                                ntf.write(f'sim.scoringPlanes = makeScoringPlanesPath("ldmx-det-v{jobconfig["DetectorVersion"]}")\n')
+                                ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", True )\n')
+                            elif  l.startswith('nElectrons =') or l.startswith('nElectrons='):
+                                ntf.write(f'nElectrons = {jobconfig["ElectronNumber"]}\n')              
+                            elif  l.startswith('beamEnergy =') or l.startswith('beamEnergy='):
+                                ntf.write(f'beamEnergy = {jobconfig["BeamEnergy"]}\n')              
                             else:
                                 ntf.write(l)
                     jobfiles.append((newjobfile, newtemplatefile))
