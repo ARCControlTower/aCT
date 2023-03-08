@@ -1,3 +1,11 @@
+# There are some try blocks that deal with process management and module
+# importing that can be faulty. The blocks prevent the program to crash and
+# the process management to break down which would leave the managed processes
+# hanging around or hanging up the main program.
+#
+# TODO: there is probably a more elegant way of hardening
+
+
 import datetime
 import importlib
 import itertools
@@ -144,8 +152,15 @@ class aCTProcessManager:
         moduleProcs = self.processes.setdefault(module, {})
         typeProcs = moduleProcs.setdefault(procType, {})
         clusterProcs = typeProcs.setdefault(cluster, {})
-        mod = importlib.import_module(module)
+
+        # try for hardening
+        try:
+            mod = importlib.import_module(module)
+        except Exception as exc:
+            self.log.debug(f'Error loading module {module}: {exc}')
+            return
         typeList = mod.processes.get(procType, {})
+
         for procClass in typeList:
             procName = procClass.__name__
             # do not start if process disabled in config
@@ -155,24 +170,49 @@ class aCTProcessManager:
             # create process if it doesn't exist
             elif procName not in clusterProcs:
                 self.log.debug(f'Starting process {procName} for cluster {cluster}')
-                clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
-                clusterProcs[procName].start()
+
+                # try for hardening
+                try:
+                    clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
+                    clusterProcs[procName].start()
+                except Exception as exc:
+                    self.log.debug(f'Error starting process {procName} for cluster {cluster}: {exc}')
+                    continue
+
             # close not alive process and create new one
             elif not clusterProcs[procName].is_alive():
                 self.log.debug(f'Process {procName} for cluster {cluster} not alive, restarting')
                 # only available from Python 3.7
                 #clusterProcs[procName].close()
-                clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
-                clusterProcs[procName].start()
-            if clusterProcs[procName].is_alive():
-                self.log.debug(f'Process {procName} running for cluster {cluster}')
+
+                # try for hardening
+                try:
+                    clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
+                    clusterProcs[procName].start()
+                except Exception as exc:
+                    self.log.debug(f'Error starting process {procName} for cluster {cluster}: {exc}')
+                    continue
+
+            # try for hardening
+            try:
+                if clusterProcs[procName].is_alive():
+                    self.log.debug(f'Process {procName} running for cluster {cluster}')
+            except Exception as exc:
+                self.log.debug(f'Error checking if {procName} is running for cluster {cluster}: {exc}')
 
     def startSingleProcs(self, module):
         """Start all enabled single processes for a given module."""
         moduleProcs = self.processes.setdefault(module, {})
         singleProcs = moduleProcs.setdefault('single', {})
-        mod = importlib.import_module(module)
+
+        # try for hardening
+        try:
+            mod = importlib.import_module(module)
+        except Exception as exc:
+            self.log.debug(f'Error loading module {module}: {exc}')
+            return
         singleList = mod.processes.get('single', {})
+
         for procClass in singleList:
             procName = procClass.__name__
             # do not start if process disabled in config
@@ -182,18 +222,37 @@ class aCTProcessManager:
             # create process if it doesn't exist
             if procName not in singleProcs:
                 self.log.debug(f'Starting process {procName}')
-                singleProcs[procName] = multiprocessing.Process(target=procClass())
-                singleProcs[procName].start()
+
+                # try for hardening
+                try:
+                    singleProcs[procName] = multiprocessing.Process(target=procClass())
+                    singleProcs[procName].start()
+                except Exception as exc:
+                    self.log.debug(f'Error starting process {procName}: {exc}')
+                    continue
+
             # close not alive process and create new one
             elif not singleProcs[procName].is_alive():
                 self.log.debug(f'Process {procName} not alive, restarting')
                 # only available from Python 3.7
                 #singleProcs[procName].close()
-                singleProcs[procName] = multiprocessing.Process(target=procClass())
-                singleProcs[procName].start()
-            if singleProcs[procName].is_alive():
-                self.log.debug(f'Process {procName} running')
 
+                # try for hardening
+                try:
+                    singleProcs[procName] = multiprocessing.Process(target=procClass())
+                    singleProcs[procName].start()
+                except Exception as exc:
+                    self.log.debug(f'Error starting process {procName}: {exc}')
+                    continue
+
+            # try for hardening
+            try:
+                if singleProcs[procName].is_alive():
+                    self.log.debug(f'Process {procName} running')
+            except Exception as exc:
+                self.log.debug(f'Error checking if {procName} is running: {exc}')
+
+    # TODO: would it be cleaner to have a method for stopping a single process?
     def stopProcs(self, procs):
         """
         Terminate a given list of processes.
@@ -205,7 +264,13 @@ class aCTProcessManager:
         """
         now = datetime.datetime.utcnow()
         for proc in procs:
-            proc.terminate()
+
+            # try for hardening
+            try:
+                proc.terminate()
+            except Exception as exc:
+                self.log.debug(f'Failed to terminate process {proc.name}: {exc}')
+
             self.terminating.append((proc, now))
 
     def killProcs(self, timeout=5):
@@ -218,16 +283,23 @@ class aCTProcessManager:
         now = datetime.datetime.utcnow()
         for i in range(len(self.terminating) - 1, -1, -1):
             proc, termtime = self.terminating[i]
-            # close if terminated
-            if not proc.is_alive():
-                # only available from Python 3.7
-                #proc.close()
-                self.terminating.pop(i)
-            # kill if not terminated after timeout
-            elif (now - termtime).seconds > timeout:
-                # only available from Python 3.7
-                #proc.kill()
-                self.killing.append((proc, datetime))
+
+            # try for hardening
+            try:
+                # close if terminated
+                if not proc.is_alive():
+                    # only available from Python 3.7
+                    #proc.close()
+                    self.terminating.pop(i)
+                # kill if not terminated after timeout
+                elif (now - termtime).seconds > timeout:
+                    # only available from Python 3.7
+                    #proc.kill()
+                    self.killing.append((proc, now))
+                    self.terminating.pop(i)
+            except Exception as exc:
+                self.log.debug(f'Failed to check if process {proc.name} is running: {exc}')
+                self.killing.append((proc, now))
                 self.terminating.pop(i)
 
     def closeProcs(self, timeout=5):
@@ -241,19 +313,24 @@ class aCTProcessManager:
         now = datetime.datetime.utcnow()
         for i in range(len(self.killing) - 1, -1, -1):
             proc, killtime = self.killing[i]
-            # close process if terminated or timeout
-            if not proc.is_alive():
-                self.killing.pop(i)
-            elif (now - killtime).seconds > timeout:
-                ## only available from Python 3.7
-                ##try:
-                ##    proc.close()
-                ##except ValueError:
-                ##    pass
-                #self.killing.pop(i)
-                # Rather leave process in killing and join it in the end.
-                # Could potentially lead to accumulation of alive processes.
-                pass
+
+            # try for hardening
+            try:
+                # close process if terminated or timeout
+                if not proc.is_alive():
+                    self.killing.pop(i)
+                elif (now - killtime).seconds > timeout:
+                    ## only available from Python 3.7
+                    ##try:
+                    ##    proc.close()
+                    ##except ValueError:
+                    ##    pass
+                    #self.killing.pop(i)
+                    # Rather leave process in killing and join it in the end.
+                    # Could potentially lead to accumulation of alive processes.
+                    pass
+            except Exception as exc:
+                self.log.debug(f'Failed to check if process {proc.name} is running: {exc}')
 
     def updateClusterProcs(self, module):
         """
@@ -333,9 +410,17 @@ class aCTProcessManager:
                 self.stopProcs(managers.values())
 
         for proc, _ in self.terminating:
-            proc.join()
+            # try for hardening
+            try:
+                proc.join()
+            except Exception as exc:
+                self.log.debug(f'Failed to wait for stopped process {proc.name}')
         for proc, _ in self.killing:
-            proc.join()
+            # try for hardening
+            try:
+                proc.join()
+            except Exception as exc:
+                self.log.debug(f'Failed to wait for killed process {proc.name}')
 
     def reconnectDB(self):
         """Reconnect database connections."""
