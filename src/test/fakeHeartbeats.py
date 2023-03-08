@@ -10,7 +10,7 @@ import logging
 import sys
 
 if len(sys.argv) != 2:
-    print "Usage: fakeHeartbeats.py <path to proxy>"
+    print ("Usage: fakeHeartbeats.py <path to proxy>")
     sys.exit(0)
 
 logging.basicConfig(level=logging.DEBUG)
@@ -22,5 +22,5 @@ for cloud in ['ND', 'CA', 'CERN', 'DE', 'ES', 'FR', 'IT', 'NL', 'TW', 'UK', 'US'
     jobs = p.queryJobInfo(cloud=cloud)
     for j in jobs:
         if j['jobStatus'] == 'starting' or j['jobStatus'] == 'running':
-            print j
+            print (j)
             p.updateStatus(j['PandaID'], j['jobStatus'])
