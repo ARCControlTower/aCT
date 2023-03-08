@@ -1,0 +1,28 @@
+name: Pylint
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10"]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        sudo apt-get install -y python3-nordugrid-arc python3-selinux
+        python -m pip install --upgrade pip
+        pip install pylint
+        pip install -r requirements.txt
+        pip install rucio-clients
+    - name: Analysing the code with pylint
+      run: |
+        pylint --extension-pkg-whitelist=htcondor,classad --errors-only $(git ls-files '*.py')
