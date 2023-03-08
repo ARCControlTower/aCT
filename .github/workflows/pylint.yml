@@ -24,6 +24,9 @@ jobs:
         pip install pylint
         pip install -r requirements.txt
         pip install rucio-clients
+        # Hack to access ARC packges from pip environment
+        ln -s /usr/lib/python3/dist-packages/_arc.cpython-39-x86_64-linux-gnu.so /opt/hostedtoolcache/Python/3.9.16/x64/lib/python3.9/site-packages/
+        ln -s /usr/lib/python3/dist-packages/arc /opt/hostedtoolcache/Python/3.9.16/x64/lib/python3.9/site-packages/
     - name: Analysing the code with pylint
       run: |
         pylint --extension-pkg-whitelist=htcondor,classad --errors-only $(git ls-files '*.py')
