@@ -3,6 +3,7 @@ from act.common.aCTProxy import aCTProxy
 from act.common import aCTUtils
 from act.atlas.aCTPandaJob import aCTPandaJob
 import datetime
+import errno
 import os
 import shutil
 import time
@@ -225,7 +226,7 @@ class aCTValidator(aCTATLASProcess):
 
                 # do bulk call
                 (files, status) = dp.h.Stat(datapointlist)
-                if not status and status.GetErrno() != os.errno.EOPNOTSUPP:
+                if not status and status.GetErrno() != errno.EOPNOTSUPP:
                     # If call fails it is generally a server or connection problem
                     # and in most cases should be retryable
                     if status.Retryable():
@@ -239,7 +240,7 @@ class aCTValidator(aCTATLASProcess):
                     # files is a list of FileInfo objects. If file is not found or has
                     # another error in the listing FileInfo object will be invalid
                     for i in range(len(datapointlist)):
-                        if status.GetErrno() == os.errno.EOPNOTSUPP:
+                        if status.GetErrno() == errno.EOPNOTSUPP:
                             # Bulk stat was not supported, do non-bulk here
                             f = arc.FileInfo()
                             st = datapointlist[i].Stat(f)
@@ -314,7 +315,7 @@ class aCTValidator(aCTATLASProcess):
                     self.log.warning("Failed to delete %s for %s, will retry later: %s" %
                                      (surl['surl'], surl['arcjobid'], str(status)))
                     result[surl['arcjobid']] = self.retry
-                elif status.GetErrno() == os.errno.ENOENT:
+                elif status.GetErrno() == errno.ENOENT:
                     self.log.info("File %s for %s does not exist" % (surl['surl'], surl['arcjobid']))
                     result[surl['arcjobid']] = self.ok
                 else:

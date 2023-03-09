@@ -130,6 +130,7 @@ class ACTRest:
 
         dirname = ''
         extractFailed = False
+        msg = ''
         try:
             # Unzip results. extractFailed is needed to exit with error after zip
             # file removal if extraction failes.
