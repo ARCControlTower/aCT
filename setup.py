@@ -14,7 +14,6 @@ setup(
     install_requires=[
         'mysql-connector-python',   # connection to MySQL database
         'htcondor',                 # bindings to use HTCondor to submit jobs
-        'pylint',                   # for travis automatic tests
         'requests',                 # for APF mon calls
         'prometheus_client',        # Prometheus monitoring
         'selinux',                  # SELinux context handling
