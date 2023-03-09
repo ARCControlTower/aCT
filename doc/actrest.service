@@ -1,8 +1,7 @@
 [Unit]
 Description = Python APP server for aCT REST
-Requires = act.service
-After = act.service
-BindsTo = act.service
+Requires = mariadb.service
+After = mariadb.service
 
 [Service]
 ExecStart = /opt/act/venv/bin/gunicorn act.client.app:app --bind 0.0.0.0:8080 --timeout 900
@@ -10,4 +9,4 @@ Restart = on-failure
 User = act
 
 [Install]
-WantedBy = act.service
+WantedBy = multi-user.service
