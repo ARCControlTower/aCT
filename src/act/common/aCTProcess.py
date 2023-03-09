@@ -158,7 +158,10 @@ def stopProcess():
     raise ExitProcessException()
 
 
-class ExitProcessException(Exception):
+# The reason for inheriting from BaseException instead of recommended Exception
+# is to avoid typical catch-all exception handlers disrupting the required
+# behaviour.
+class ExitProcessException(BaseException):
     """Exception that indicates normal process exit."""
     pass
 

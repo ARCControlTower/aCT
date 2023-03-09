@@ -264,12 +264,24 @@ class aCTSubmitter(aCTARCProcess):
 
                 nsubmitted += limit
 
-            except Exception as exc:
+            except (Exception, ExitProcessException) as exc:
                 if isinstance(exc, ExitProcessException):
                     self.log.info(f"Rolling back DB transaction for proxyid {proxyid} on process exit")
                 else:
                     self.log.error(f"Rolling back DB transaction for proxyid {proxyid} on error: {exc}")
                 self.db.db.conn.rollback()
+
+                # There is an edge case where if the block of code is
+                # interrupted for exit and this handler is run, the error
+                # "mysql.connector.errors.InternalError: Unread result found"
+                # is raised in setJobsArcstate in aCTDBMySQL:getCursor()
+                # while trying to commit in try handler. This is weird because
+                # the handler for exactly this exception is used there. This
+                # causes the crash and the jobs hanging in "submitting".
+                # Reconnecting before resetting the job state is a temporary
+                # hack for now.
+                self.db.db.conn.close()
+                self.db.db._connect(self.db.db.dbname)
 
                 if resetSubmitting:
                     self.setJobsArcstate(jobs, "tosubmit", commit=True)
