@@ -1,0 +1,32 @@
+name: Pylint
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ "3.9" ]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        sudo apt-get install -y python3-nordugrid-arc python3-selinux
+        python -m pip install --upgrade pip
+        pip install pylint
+        pip install -r requirements.txt
+        pip install rucio-clients
+        # Hack to access ARC packges from pip environment
+        ln -s /usr/lib/python3/dist-packages/_arc.cpython-39-x86_64-linux-gnu.so /opt/hostedtoolcache/Python/3.9.16/x64/lib/python3.9/site-packages/
+        ln -s /usr/lib/python3/dist-packages/arc /opt/hostedtoolcache/Python/3.9.16/x64/lib/python3.9/site-packages/
+    - name: Analysing the code with pylint
+      run: |
+        pylint --extension-pkg-whitelist=htcondor,classad --errors-only $(git ls-files '*.py')

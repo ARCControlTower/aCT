@@ -9,6 +9,8 @@ requests                # for APF mon calls
 prometheus_client       # Prometheus monitoring
 selinux                 # SELinux context handling
 psutil                  # Reports of processes kills
+cryptography            # x509 auth with ARC
+pyyaml                  # YAML configuration parsing
 
 # For aCT client
 flask
