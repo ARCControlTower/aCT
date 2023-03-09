@@ -19,6 +19,7 @@ setup(
         'prometheus_client',        # Prometheus monitoring
         'selinux',                  # SELinux context handling
         'psutil',                   # Reports of process kills
+        'tabulate',                 # Pretty tables
 
         'flask',
         'gunicorn',
@@ -35,6 +36,7 @@ setup(
             'actcriticalmonitor = act.common.aCTCriticalMonitor:main',
             'actheartbeatwatchdog = act.atlas.aCTHeartbeatWatchdog:main',
             'actldmxadmin = act.ldmx.aCTLDMXAdmin:main',
+            'actldmx = act.ldmx.aCTLDMXUser:main',
 
             'actbulksub = act.client.actbulksub:main',
             'actcat     = act.client.actcat:main',

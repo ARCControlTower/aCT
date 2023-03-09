@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 from act.common.aCTLogger import aCTLogger
 from act.ldmx.aCTDBLDMX import aCTDBLDMX
@@ -5,8 +6,10 @@ from act.ldmx.aCTDBLDMX import aCTDBLDMX
 def report(actconfs):
 
     # Get current jobs
-    actlogger = aCTLogger('aCTReport')
+    actlogger = aCTLogger('aCTReport', stderr=True)
     logger = actlogger()
+    logger.logger.setLevel(logging.INFO)
+
     rep = defaultdict(lambda: defaultdict(int))
     rtot = defaultdict(int)
     log = ''
@@ -14,9 +17,9 @@ def report(actconfs):
               "toclean", "finished", "failed", "tocancel", "cancelling", "cancelled"]
 
     db = aCTDBLDMX(logger)
-    rows = db.getGroupedJobs('batchid, ldmxstatus')
+    rows = db.getGroupedJobs('batchname, ldmxstatus')
     for r in rows:
-        count, state, site = (r['count(*)'], r['ldmxstatus'], r['batchid'] or 'None')
+        count, state, site = (r['count(*)'], r['ldmxstatus'], r['batchname'] or 'None')
         rep[site][state] += count
         rtot[state] += count
 
@@ -48,6 +51,28 @@ def report(actconfs):
         rtot[state] += 1
 
     log += f"Active LDMX jobs by site: {sum(rtot.values())}\n"
+    log += f"{'':{maxbatchlen+1}} {' '.join([f'{s:>9}' for s in states])}\n"
+
+    for k in sorted(rep.keys(), key=lambda x: x != None):
+        log += '{:>{width}.{width}}:'.format(k, width=maxbatchlen)
+        log += ''.join([f'{(rep[k][s] or "-"):>10}' for s in states])
+        log += '\n'
+
+    log += f'{"Totals":>{maxbatchlen}}:'
+    log += ''.join([f'{(rtot[s] or "-"):>10}' for s in states])
+    log += '\n\n'
+
+    rep = defaultdict(lambda: defaultdict(int))
+    rtot = defaultdict(int)
+
+    rows = db.getGroupedJobs('username, ldmxstatus')
+    for r in rows:
+
+        count, state, user = (r['count(*)'], r['ldmxstatus'], r['username'])
+        rep[user][state] += count
+        rtot[state] += count
+
+    log += f"Active LDMX jobs by user: {sum(rtot.values())}\n"
     log += f"{'':{maxbatchlen+1}} {' '.join([f'{s:>9}' for s in states])}\n"
 
     for k in sorted(rep.keys(), key=lambda x: x != None):

@@ -35,7 +35,7 @@ class aCTLDMXRegister(aCTLDMXProcess):
         '''
 
         select = f"ldmxstatus='finishing' and arcstate='done' and arcjobs.id=ldmxjobs.arcjobid limit 100"
-        columns = ['arcjobs.id', 'JobID', 'appjobid', 'cluster', 'UsedTotalWallTime', 'batchid',
+        columns = ['arcjobs.id', 'JobID', 'appjobid', 'cluster', 'UsedTotalWallTime', 'fairshare',
                    'arcjobs.EndTime', 'stdout', 'ldmxjobs.created', 'description', 'template']
         arcjobs = self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs,ldmxjobs')
         for aj in arcjobs:
@@ -189,7 +189,7 @@ class aCTLDMXRegister(aCTLDMXProcess):
         # Set some aCT metadata
         metadata['ComputingElement'] = urlparse(arcjob['cluster']).hostname or 'unknown'
         metadata['JobSubmissionTime'] = arcjob['created']
-        metadata['BatchID'] = arcjob['batchid']
+        metadata['BatchID'] = arcjob['fairshare']
         try:
             scope = metadata['scope']
             name = metadata['name']

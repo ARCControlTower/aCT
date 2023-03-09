@@ -83,7 +83,7 @@ class aCTDBCondor(aCTDB):
         if row:
             answer = input("Table condorjobs already exists!\nAre you sure you want to recreate it? (y/n) ")
             if answer != 'y':
-                return False
+                return True
             c.execute("drop table condorjobs")
 
         # Create condorjobs

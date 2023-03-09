@@ -640,8 +640,8 @@ class aCTValidator(aCTATLASProcess):
 
 
     def process(self):
-        self.logger.arclogfile.setReopen(True)
-        self.logger.arclogfile.setReopen(False)
+        self.logger.arclog.setReopen(True)
+        self.logger.arclog.setReopen(False)
         self.setSites()
         self.validateFinishedJobs()
         self.cleanFailedJobs()

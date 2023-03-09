@@ -158,13 +158,9 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
     def getNewJobs(self):
         '''
-        Read new job files in buffer dir and create necessary job descriptions
+        Check new batches and create necessary job descriptions
         '''
 
-        bufferdir = self.conf.jobs.bufferdir
-        configsdir = os.path.join(bufferdir, 'configs')
-        os.makedirs(configsdir, 0o755, exist_ok=True)
-        jobs = [os.path.join(configsdir, j) for j in os.listdir(configsdir) if os.path.isfile(os.path.join(configsdir, j))]
         now = time.time()
         try:
             # Take the first proxy available
@@ -173,31 +169,33 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             self.log.error('No proxies found in DB')
             return
 
-        for jobfile in jobs:
+        batches = self.dbldmx.getBatches("status='new'")
 
-            # Avoid partially written files by delaying the read
-            if now - os.path.getmtime(jobfile) < 5:
-                self.log.debug(f'Job {jobfile} is too new')
+        for batch in batches:
+
+            self.log.info(f"New batch {batch['batchname']}")
+            configfile = batch['description']
+            templatefile = batch['template']
+            user = self.dbldmx.getUser(batch['userid'])
+            if not user:
+                self.log.error(f"No such user with userid {batch['userid']}")
+                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
                 continue
 
-            self.log.info(f'Picked up job at {jobfile}')
-
-            with open(jobfile) as f:
-                try:
+            try:
+                with open(configfile) as f:
                     config = {l.split('=')[0]: l.split('=')[1].strip() for l in f if '=' in l}
-                    batchid = config.get('BatchID', f'Batch-{time.strftime("%Y-%m-%dT%H:%M:%S")}')
-                except Exception as e:
-                    self.log.error(f'Failed to parse job config file {jobfile}: {e}')
-                    os.remove(jobfile)
-                    continue
+            except Exception as e:
+                self.log.error(f'Failed to parse job config file {configfile}: {e}')
+                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
+                continue
 
             try:
-                templatefile = os.path.join(bufferdir, 'templates', config['JobTemplate'])
                 with open(templatefile) as tf:
                     template = tf.readlines()
             except Exception as e:
-                self.log.error(f'Bad template file or template not defined in {jobfile}: {e}')
-                os.remove(jobfile)
+                self.log.error(f'Bad template file or template not defined in {configfile}: {e}')
+                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
                 continue
 
             try:
@@ -207,17 +205,23 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                 # Generate copies of config and template
                 jobfiles = []
                 for jobconfig in self.generateJobs(config):
-                    newjobfile = os.path.join(self.tmpdir, os.path.basename(jobfile))
+                    newjobfile = os.path.join(self.tmpdir, os.path.basename(configfile))
                     with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newjobfile}.', delete=False, encoding='utf-8') as njf:
                         newjobfile = njf.name
                         njf.write('\n'.join(f'{k}={v}' for k,v in jobconfig.items()) + '\n')
                         if output_base:
                             njf.write(f'FinalOutputBasePath={output_base}\n')
- 
+
                         nouploadsites = [site.endpoint for _, site in self.arcconf.sites if site.noupload == 1]
                         if nouploadsites:
                             self.log.debug(nouploadsites)
                             njf.write(f'NoUploadSites={",".join(nouploadsites)}\n')
+
+                        if 'Scope' not in jobconfig:
+                            njf.write(f'Scope=user.{user["ruciouser"]}\n')
+
+                        if 'BatchID' not in jobconfig:
+                            njf.write(f'BatchID={batch["batchname"]}\n')
 
                     newtemplatefile = os.path.join(self.tmpdir, os.path.basename(templatefile))
                     with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newtemplatefile}.', delete=False, encoding='utf-8') as ntf:
@@ -247,6 +251,8 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                                 ntf.write(f'/random/setSeeds {jobconfig.get("RandomSeed1", 0)} {jobconfig.get("RandomSeed2", 0)}\n')
                             elif l.startswith('/ldmx/persistency/root/runNumber'):
                                 ntf.write(f'/ldmx/persistency/root/runNumber {jobconfig["runNumber"]}\n')
+                            elif  l.startswith('detector =') or l.startswith('detector='):
+                                ntf.write(f'detector = "ldmx-det-v{jobconfig["DetectorVersion"]}"\n')
                             elif  l.startswith('sim.setDetector(') :
                                 ntf.write(f'sim.setDetector("ldmx-det-v{jobconfig["DetectorVersion"]}", False )\n')
                             elif  l.startswith('sim.scoringPlanes') :  #overwrite use SP false-->true by reconfiguring
@@ -261,12 +267,13 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                     jobfiles.append((newjobfile, newtemplatefile))
 
                 for (newjobfile, newtemplatefile) in jobfiles:
-                    self.dbldmx.insertJob(newjobfile, newtemplatefile, proxyid, batchid=batchid)
+                    self.dbldmx.insertJob(newjobfile, newtemplatefile, proxyid, batch['userid'], batchid=batch['id'])
                     self.log.info(f'Inserted job from {newjobfile} into DB')
 
+                self.dbldmx.updateBatch(batch['id'], {'status': 'inprogress'})
             except Exception as e:
-                self.log.error(f'Failed to create jobs from {jobfile}: {e}')
-            os.remove(jobfile)
+                self.log.error(f'Failed to create jobs from {configfile}: {e}')
+                self.dbldmx.updateBatch(batch['id'], {'status': 'failed'})
 
 
     def archiveBatches(self):
@@ -284,16 +291,28 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
             # All jobs are finished, so archive
             select = f"batchid='{batchid}'" if batchid else 'batchid is NULL'
-            columns = ['id', 'sitename', 'ldmxstatus', 'starttime', 'endtime', 'batchid']
-            jobs = self.dbldmx.getJobs(select, columns)
+            select += ' AND ldmxjobs.batchid = ldmxbatches.id'
+            columns = ['ldmxjobs.id', 'sitename', 'ldmxstatus', 'starttime', 'endtime', 'batchname']
+            jobs = self.dbldmx.getJobs(select, columns, tables='ldmxjobs, ldmxbatches')
             if not jobs:
                 continue
 
             self.log.info(f'Archiving {len(jobs)} jobs for batch {batchid}')
             for job in jobs:
                 self.log.debug(f'Archiving LDMX job {job["id"]}')
+                # For backwards compatbility with archive table
+                job['batchid'] = job['batchname']
+                del job['batchname']
                 self.dbldmx.insertJobArchiveLazy(job)
                 self.dbldmx.deleteJob(job['id']) # commit is called here
+
+            # Set final batch state
+            finalbatchstate = 'finished'
+            if 'failed' in statuses:
+                finalbatchstate = 'failed'
+            elif 'cancelled' in statuses:
+                finalbatchstate = 'cancelled'
+            self.dbldmx.updateBatch(batchid, {'status': finalbatchstate})
 
 
     def process(self):
