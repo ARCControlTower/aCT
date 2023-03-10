@@ -11,20 +11,9 @@ sites:
   sitename:
     endpoint: https://my.arc.ce/arex
     maxjobs: 50
-    submitters: 5
-
-periodicrestart:
-  actsubmitter: 120
-  actstatus: 600
-  actfetcher: 600
-  actcleaner: 600
 
 tmp:
   dir: /data/user/atlact1/act-test1/tmp
-
-actlocation:
-  dir: /data/user/atlact1/src/aCT/act
-  pidfile: /data/user/atlact1/act-test1/act.pid
 
 logger:
   level: debug
@@ -49,9 +38,6 @@ jobs:
 downtime:
   stopsubmission: False
   srmdown: False
-  clusters:
-    - nosuchcluster
-    - Xjeannedarc.hpc2n.umu.se
 
 voms:
   vo: atlas

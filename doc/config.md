@@ -17,15 +17,15 @@ config = aCTConfigARC()
 print(config.voms.proxystoredir)
 
 # value is a list, normal iteration
-for cluster in config.downtime.clusters:
+for role in config.voms.roles:
     print(cluster)
 ```
 
 DictObj values can be used like other containers.
 ```python
 # dictionary like iteration
-for state, timeout in config.timeouts.aCT_state:
-    print(f"timeout for state {state}: {timeout}")
+for name, source in config.executable:
+    print(f"executable {name} at {source}")
 
 # check if value exists
 if config.jobs.maxtimerunning:
