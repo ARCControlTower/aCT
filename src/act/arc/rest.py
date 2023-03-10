@@ -492,10 +492,7 @@ class ARCRest:
         headers["Accept"] = "application/json"
         resp = httpClient.request(*args, headers=headers, **kwargs)
         text = resp.read().decode()
-        try:
-            return resp.status, json.loads(text)
-        except json.JSONDecodeError:
-            return resp.status, text
+        return resp.status, json.loads(text)
 
     @staticmethod
     def _getAPIVersions(httpClient, apiBase="/arex"):
