@@ -164,10 +164,22 @@ class aCTStatus(aCTARCProcess):
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
-            arcrest = None
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
+            except Exception as exc:
+                self.log.error(f"Cannot create REST client for proxyid {proxyid}: {exc}")
+                continue
+
+            # For now, if the list cannot be fetched, the empty list is
+            # returned, which will cause jobs stuck for a long time to be
+            # deleted.
+            try:
                 joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
+            except Exception as exc:
+                self.log.warning(f"Cannot fetch a list of jobs for proxyid {proxyid}: {exc}")
+                joblist = []
+
+            try:
                 arcrest.getJobsInfo(tocheck)
             except json.JSONDecodeError as exc:
                 self.log.error(f"Error parsing returned JSON document: {exc.doc}")
@@ -176,8 +188,7 @@ class aCTStatus(aCTARCProcess):
                 self.log.error(f"Error fetching job info from ARC: {e}")
                 continue
             finally:
-                if arcrest:
-                    arcrest.close()
+                arcrest.close()
 
             tstamp = self.db.getTimeStamp()
 
