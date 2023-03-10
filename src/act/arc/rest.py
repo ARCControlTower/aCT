@@ -784,11 +784,8 @@ class ARCRest_1_0(ARCRest):
             cpuTime = desc.Resources.TotalCPUTime.range.max
             wallTime = desc.Resources.TotalWallTime.range.max
             envs = [str(env) for env in desc.Resources.RunTimeEnvironment.getSoftwareList()]
-            maxCPUTime = int(queueInfo.get("MaxCPUTime", sys.maxsize))
             maxWallTime = int(queueInfo.get("MaxWallTime", sys.maxsize))
             error = None
-            if cpuTime > maxCPUTime:
-                error = MatchmakingError(f"Requested CPU time {cpuTime} higher than available {maxCPUTime}")
             elif wallTime > maxWallTime:
                 error = MatchmakingError(f"Requested wall time {wallTime} higher than available {maxWallTime}")
             else:
