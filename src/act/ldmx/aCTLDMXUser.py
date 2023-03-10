@@ -32,9 +32,14 @@ def submit(args):
 
     # Check for mandatory parameters
     if 'InputDataset' not in config:
-        for param in ('JobTemplate', 'RandomSeed1SequenceStart', 'RandomSeed2SequenceStart', 'NumberofJobs'):
+        for param in ('JobTemplate', 'NumberofJobs'):
             if param not in config:
                 logger.error(f"Error: {param} not defined in {args.conffile}")
+                return 1
+
+        if 'IsImage' not in config or config['IsImage'] == "No":
+            if 'RandomSeed1SequenceStart' not in config :  #required for unique run numbering in simulation jobs
+                logger.error(f"Error: 'RandomSeed1SequenceStart' not defined in {args.conffile}")
                 return 1
 
     dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
