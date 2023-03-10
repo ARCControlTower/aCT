@@ -302,7 +302,7 @@ class aCTSubmitter(aCTARCProcess):
         self.log.debug(f"Setting arcstate of jobs to {arcstate}")
         tstamp = self.db.getTimeStamp()
         for job in jobs:
-            updateDict = {"arcstate": arcstate, "tarcstate": tstamp, "cluster": None}
+            updateDict = {"arcstate": arcstate, "tarcstate": tstamp}
             self.db.updateArcJobLazy(job["id"], updateDict)
         if commit:
             self.db.Commit()
