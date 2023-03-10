@@ -100,13 +100,13 @@ class ARCRest:
         status, jsonData = self._requestJSON("GET", f"{self.apiPath}/info")
         if status != 200:
             raise ARCHTTPError(status, jsonData, f"Error getting ARC CE info - {status} {jsonData}")
-        else:
-            return jsonData
+        return self._loadJSON(status, jsonData)
 
     def getJobsList(self):
         status, jsonData = self._requestJSON("GET", f"{self.apiPath}/jobs")
         if status != 200:
             raise ARCHTTPError(status, jsonData, f"ARC jobs list error - {status} {jsonData}")
+        jsonData = self._loadJSON(status, jsonData)
 
         # /rest/1.0 compatibility
         if isinstance(jsonData["job"], dict):
@@ -443,6 +443,7 @@ class ARCRest:
         )
         if status != 201:
             raise ARCHTTPError(status, jsonData, f"ARC jobs \"{action}\" action error: {status} {jsonData}")
+        jsonData = self._loadJSON(status, jsonData)
 
         # /rest/1.0 compatibility
         if isinstance(jsonData["job"], dict):
@@ -492,15 +493,22 @@ class ARCRest:
         headers["Accept"] = "application/json"
         resp = httpClient.request(*args, headers=headers, **kwargs)
         text = resp.read().decode()
-        return resp.status, json.loads(text)
+        return resp.status, text
+
+    @staticmethod
+    def _loadJSON(status, jsonData):
+        try:
+            return json.loads(jsonData)
+        except json.JSONDecodeError:
+            raise ARCHTTPError(status, jsonData, f"Invalid JSON data in successful response - {status} {jsonData}")
+
 
     @staticmethod
     def _getAPIVersions(httpClient, apiBase="/arex"):
         status, jsonData = ARCRest._requestJSONStatic(httpClient, "GET", f"{apiBase}/rest")
         if status != 200:
             raise ARCHTTPError(status, jsonData, f"Error getting ARC API versions - {status} {jsonData}")
-        else:
-            return jsonData
+        return ARCRest._loadJSON(status, jsonData)
 
     @staticmethod
     def _downloadFile(httpClient, url, path):
@@ -530,8 +538,7 @@ class ARCRest:
         status, jsonData = ARCRest._requestJSONStatic(httpClient, "GET", url)
         if status != 200:
             raise ARCHTTPError(status, jsonData, f"Error downloading listing {url}: {status} {jsonData}")
-        else:
-            return jsonData
+        return ARCRest._loadJSON(status, jsonData)
 
     def _POSTNewDelegation(self):
         resp = self.httpClient.request(
@@ -835,6 +842,7 @@ class ARCRest_1_0(ARCRest):
         )
         if status != 201:
             raise ARCHTTPError(status, jsonData, f"Error submitting jobs - {status} {jsonData}")
+        jsonData = self._loadJSON(status, jsonData)
 
         # /rest/1.0 compatibility
         if isinstance(jsonData["job"], dict):
