@@ -786,7 +786,7 @@ class ARCRest_1_0(ARCRest):
             envs = [str(env) for env in desc.Resources.RunTimeEnvironment.getSoftwareList()]
             maxWallTime = int(queueInfo.get("MaxWallTime", sys.maxsize))
             error = None
-            elif wallTime > maxWallTime:
+            if wallTime > maxWallTime:
                 error = MatchmakingError(f"Requested wall time {wallTime} higher than available {maxWallTime}")
             else:
                 for env in envs:
