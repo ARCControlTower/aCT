@@ -50,8 +50,4 @@ setup(
             'actsub     = act.client.actsub:main'
         ]
     },
-    data_files=[
-        ('etc/act', ['doc/aCTConfigARC.xml.template',
-         'doc/aCTConfigATLAS.xml.template'])
-    ]
 )
