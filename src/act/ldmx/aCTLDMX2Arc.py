@@ -104,7 +104,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
                     inputfiles += f'({pup.split("/")[-1]} \"{pup}\" "cache=copy")\n'
 
         if 'ImageLocation' in config:
-            img= config.get('ImageLocation').split(',')
+            img= config.get('ImageLocation')#.split(',')
             if img != 'None':
                 inputfiles += f'({img.split("/")[-1]} \"{img}\" "cache=copy")\n'
 
