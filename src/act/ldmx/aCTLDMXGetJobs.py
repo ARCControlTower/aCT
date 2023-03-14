@@ -21,6 +21,43 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
     def generateJobs(self, config):
 
+        #pull the user id to use for all subsequent user based scopes (images, analysis job output)
+        config['UserID'] = "user."+os.environ['USER'] if os.environ['USER']!='centos' else "prod"
+        self.log.info(f'Setting UserID {config["UserID"]}')
+
+        #first, set up to use a specific image. modify config --> copied to all later newconfig
+        if 'LdmxImage' in config:
+            # Jobs will use specified image rather than one based on RTE
+            if ";" not in config['LdmxImage'] : #no scope defined. assume user's scope
+                name=config['LdmxImage']
+                if ".sif" not in name :
+                    name=name+".sif"
+                scope=config['UserID']+".image"
+            else :
+                try:
+                    scope, name = config['LdmxImage'].split(':')
+                except ValueError: #normally we should never end up here 
+                    raise Exception(f'{config["LdmxImage"]} is not correctly formatted as scope:name')
+            #now enforce this naming scheme for metadata preservation, and error message
+            config["LdmxImage"]=scope+':'+name 
+            self.log.info(f'Setting LdmxImage={config["LdmxImage"]}')
+            # List dataset replica (should be just one) and set filename in the config
+            try:
+                imageList = list(self.rucio.list_replicas([{'scope': scope, 'name': name}]))
+            except RucioException as e:
+                raise Exception(f'Rucio exception while looking up image {f["LdmxImage"]}: {e}')
+            image=imageList[0]
+            # Always use remote copy so that it is cached                                                                           
+            for rep in image['rses'].values():
+                if not rep[0].startswith('file://'):
+                    self.log.debug(f'Found remote replica of {image} in {rep}')
+                    config['ImageLocation'] = rep[0]
+            if not config.get('ImageLocation'):
+                raise Exception(f'No suitable locations found for image file {image["scope"]}:{image["name"]}')
+            config['ImageLocationLocal'] = f'{image["name"]}'  #try removing ./
+            config['ImageFile'] = f'{image["scope"]}:{image["name"]}'
+
+
         if 'InputDataset' in config:
             # Jobs with input files: generate one job per file
             try:
@@ -85,6 +122,31 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                         yield newconfig
                         newconfig = config.copy()
                         runnumber += 1
+
+        elif 'IsImage' in config and config['IsImage']=="Yes":
+            self.log.info(f'Preparing image generating job with FileName={config["FileName"]}')
+            #first: check if an image with this name already exists
+            if ";" not in config['FileName'] : #no scope defined (normal). assume user's scope
+                name=config['FileName']
+                if ".sif" not in name :
+                    name=name+".sif"
+                scope=config['UserID']+".image"
+            else :
+                try:
+                    scope, name = config['FileName'].split(':')
+                except ValueError: #normally we should never end up here
+                    raise Exception(f'{config["FileName"]} is not correctly formatted as scope:name; unable to verify that it does not already exist in rucio')
+
+            try :
+                image = list(self.rucio.list_replicas([{'scope': scope, 'name': name}]))
+            except RucioException as e:
+                raise Exception(f'Rucio exception while looking up image {f["FileName"]}: {e}')
+            if len(image) > 0 : 
+                raise Exception(f'A file named  {f["FileName"]} has already been defined in rucio. Choose a different name.')
+            #else. all is good!
+            newconfig = config.copy()
+            yield newconfig
+
 
         else:
             # Jobs with no input: generate jobs based on specified number of jobs

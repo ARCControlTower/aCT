@@ -103,6 +103,11 @@ class aCTLDMX2Arc(aCTLDMXProcess):
                 if pup != 'None':
                     inputfiles += f'({pup.split("/")[-1]} \"{pup}\" "cache=copy")\n'
 
+        if 'ImageLocation' in config:
+            img= config.get('ImageLocation').split(',')
+            if img != 'None':
+                inputfiles += f'({img.split("/")[-1]} \"{img}\" "cache=copy")\n'
+
         xrsl['inputfiles'] = f'(inputfiles = {inputfiles})'
 
         xrsl['stdout'] = '(stdout = stdout)'
