@@ -45,7 +45,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             try:
                 imageList = list(self.rucio.list_replicas([{'scope': scope, 'name': name}]))
             except RucioException as e:
-                raise Exception(f'Rucio exception while looking up image {f["LdmxImage"]}: {e}')
+                raise Exception(f'Rucio exception while looking up image {config["LdmxImage"]}: {e}')
             image=imageList[0]
             # Always use remote copy so that it is cached                                                                           
             for rep in image['rses'].values():
