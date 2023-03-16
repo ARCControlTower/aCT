@@ -671,6 +671,11 @@ class ARCRest:
                     # download listing
                     try:
                         listing = cls._downloadListing(httpClient, transfer["url"])
+                    except ARCHTTPError as exc:
+                        if exc.text == "":
+                            listing = {}
+                        else:
+                            raise
                     except Exception as exc:
                         if not isinstance(exc, ARCHTTPError):
                             job.cancelEvent.set()
