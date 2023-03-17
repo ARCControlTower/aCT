@@ -24,10 +24,7 @@ class aCTFetcher(aCTARCProcess):
         Download results of jobs to configured directory.
 
         Signal handling strategy:
-        - Per proxyid batches of jobs are downloaded and updated in the DB. A
-          batch that is interrupted by exit signal or unhandled exception is
-          rolled back in the DB and the files remain, which is not a problem
-          since subsequent downloads will overwrite the data.
+        - method checks termination before job batch for every proxyid
         """
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "tarcstate"]
 
@@ -46,6 +43,11 @@ class aCTFetcher(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
+
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+
             jobs = []
             tofetch = []
             for dbjob in dbjobs:
@@ -76,29 +78,27 @@ class aCTFetcher(aCTARCProcess):
                 if arcrest:
                     arcrest.close()
 
-            with self.transaction([self.db]):
-
-                for job in jobs:
-                    isError = False
-                    for error in job.arcjob.errors:
-                        # don't treat missing diagnose file as fail
-                        if isinstance(error, MissingDiagnoseFile):
-                            self.log.info(str(error))
-                        else:
-                            isError = True
-                            self.log.error(f"Error fetching job {job.appid} {job.arcid}: {error}")
-                    if isError:
-                        # TODO: HARDCODED
-                        if job.tstate + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
-                            self.log.info(f"Fetch timeout for job {job.appid} {job.arcid}, marking job \"donefailed\"")
-                            jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
-                            self.db.updateArcJobLazy(job.arcid, jobdict)
-                        else:
-                            self.log.info(f"Fetch timeout for job {job.appid} {job.arcid} not reached, will retry")
+            for job in jobs:
+                isError = False
+                for error in job.arcjob.errors:
+                    # don't treat missing diagnose file as fail
+                    if isinstance(error, MissingDiagnoseFile):
+                        self.log.info(str(error))
                     else:
-                        self.log.debug(f"Successfully fetched job {job.appid} {job.arcid}")
-                        jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
-                        self.db.updateArcJobLazy(job.arcid, jobdict)
+                        isError = True
+                        self.log.error(f"Error fetching job {job.appid} {job.arcid}: {error}")
+                if isError:
+                    # TODO: HARDCODED
+                    if job.tstate + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
+                        self.log.info(f"Fetch timeout for job {job.appid} {job.arcid}, marking job \"donefailed\"")
+                        jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
+                        self.db.updateArcJob(job.arcid, jobdict)
+                    else:
+                        self.log.info(f"Fetch timeout for job {job.appid} {job.arcid} not reached, will retry")
+                else:
+                    self.log.debug(f"Successfully fetched job {job.appid} {job.arcid}")
+                    jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
+                    self.db.updateArcJob(job.arcid, jobdict)
 
         self.log.debug("Done")
 

@@ -6,9 +6,8 @@ import tempfile
 import time
 
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
-from act.common.aCTProcess import aCTProcess, exitHandler
+from act.common.aCTProcess import aCTProcess
 from act.common.aCTProcessManager import aCTProcessManager
-from act.common.aCTSignal import aCTSignalDeferrer
 
 
 class aCTMain(aCTProcess):
@@ -26,9 +25,8 @@ class aCTMain(aCTProcess):
 
         # override handlers for SIGINT and SIGTERM to support running the main
         # process from terminal
-        signal.signal(signal.SIGINT, mainExitHandler)
-        signal.signal(signal.SIGTERM, mainExitHandler)
-        self.sigdefer = aCTSignalDeferrer(self.log, signal.SIGINT, signal.SIGTERM)
+        signal.signal(signal.SIGINT, self.sigintHandler)
+        signal.signal(signal.SIGTERM, self.sigtermHandler)
 
         self.loadConf()
 
@@ -93,10 +91,13 @@ class aCTMain(aCTProcess):
         self.log.info('Stopping all processes ...')
         self.procmanager.stopAllProcesses()
 
+    def sigintHandler(self, signum, frame):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        self.stopWithException()
 
-def mainExitHandler(signum, frame):
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    exitHandler(signum, frame)
+    def sigtermHandler(self, signum, frame):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        self.stopWithException()
 
 
 def main():

@@ -54,6 +54,7 @@ class aCTProcess:
         """Set up attributes needed for setup() in spawned OS process."""
         self.name = self.__class__.__name__
         self.cluster = cluster
+        self.mustExit = False
 
     def __call__(self, *args, **kwargs):
         """Call the method implementing the process code."""
@@ -85,16 +86,15 @@ class aCTProcess:
         self.log = self.logger()
         self.criticallog = self.criticallogger()
 
-        # ignore SIGINT for use case of running aCT from terminal
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-        signal.signal(signal.SIGTERM, exitHandler)
-        self.sigdefer = aCTSignalDeferrer(self.log, signal.SIGTERM)
-
         msg = f'Starting process {self.name}'
         if self.cluster:
             msg += f' for cluster {self.cluster}'
         self.log.info(msg)
+
+        # ignore SIGINT for use case of running aCT from terminal
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        signal.signal(signal.SIGTERM, self.exitHandler)
 
     def loadConf(self):
         """
@@ -120,18 +120,24 @@ class aCTProcess:
             msg += f' for cluster {self.cluster}'
         self.log.info(msg)
 
-    def stop(self):
-        """Call function for normal process exit."""
-        stopProcess()
+    def stopWithFlag(self):
+        """Set flag for process termination."""
+        self.mustExit = True
+
+    def stopWithException(self):
+        """Raise exception for process termination."""
+        self.stopWithFlag()
+        raise ExitProcessException()
 
     def run(self):
         """Run the process code."""
         try:
             self.setup()
-            while True:
+            while not self.mustExit:
                 self.loadConf()
                 self.process()
                 self.wait()
+            self.log.info("*** Process exiting normally ***")
         except ExitProcessException:
             self.log.info("*** Process exiting normally ***")
         except:
@@ -146,16 +152,9 @@ class aCTProcess:
         """Return transaction with process' logger and signal deferrer."""
         return aCTTransaction(self.log, self.sigdefer, dbobjects)
 
-
-def exitHandler(signum, frame):
-    """Call function for normal process exit."""
-    stopProcess()
-
-
-def stopProcess():
-    """Throw exception for normal process exit."""
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    raise ExitProcessException()
+    def exitHandler(self, signum, frame):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        self.mustExit = True
 
 
 # The reason for inheriting from BaseException instead of recommended Exception
