@@ -29,98 +29,95 @@ class aCTLDMXStatus(aCTLDMXProcess):
         Look for newly submitted, running or finishing jobs
 
         Signal handling strategy:
-        - all operations are done in a single transaction that is rolled back
-          on signal
+        - exit is checked before every job update
         '''
-        with self.transaction([self.dbldmx]):
+        select = "ldmxstatus='waiting' and arcstate in ('submitted', 'running', 'finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
+        columns = ['arcstate', 'cluster', 'state', 'ldmxjobs.id']
+        submittedjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
+        for job in submittedjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.info(f"Job {job['id']}: waiting -> {STATE_MAP[job['arcstate']]} (ARC state {job['state']})")
+            desc = {'ldmxstatus': STATE_MAP[job['arcstate']],
+                    'computingelement': job['cluster'] or 'None',
+                    'sitename': self.endpoints.get(job['cluster'], 'None')}
+            self.dbldmx.updateJob(job['id'], desc)
 
-            select = "ldmxstatus='waiting' and arcstate in ('submitted', 'running', 'finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
-            columns = ['arcstate', 'cluster', 'state', 'ldmxjobs.id']
-            submittedjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
+        select = "ldmxstatus='queueing' and arcstate in ('running', 'finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
+        queueingjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
+        for job in queueingjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.info(f"Job {job['id']}: queueing -> {STATE_MAP[job['arcstate']]} (ARC state {job['state']})")
+            desc = {'ldmxstatus': STATE_MAP[job['arcstate']],
+                    'computingelement': job['cluster'] or 'None',
+                    'sitename': self.endpoints.get(job['cluster'], 'None')}
+            self.dbldmx.updateJob(job['id'], desc)
 
-            for job in submittedjobs:
-                self.log.info(f"Job {job['id']}: waiting -> {STATE_MAP[job['arcstate']]} (ARC state {job['state']})")
-                desc = {'ldmxstatus': STATE_MAP[job['arcstate']],
-                        'computingelement': job['cluster'] or 'None',
-                        'sitename': self.endpoints.get(job['cluster'], 'None')}
-                self.dbldmx.updateJobLazy(job['id'], desc)
-
-            select = "ldmxstatus='queueing' and arcstate in ('running', 'finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
-            queueingjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
-
-            for job in queueingjobs:
-                self.log.info(f"Job {job['id']}: queueing -> {STATE_MAP[job['arcstate']]} (ARC state {job['state']})")
-                desc = {'ldmxstatus': STATE_MAP[job['arcstate']],
-                        'computingelement': job['cluster'] or 'None',
-                        'sitename': self.endpoints.get(job['cluster'], 'None')}
-                self.dbldmx.updateJobLazy(job['id'], desc)
-
-            # Get post-batch ARC statuses
-            select = "ldmxstatus='running' and arcstate in ('finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
-            finishingjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
-
-            for job in finishingjobs:
-                self.log.info(f"Job {job['id']}: running -> finishing (ARC state {job['state']})")
-                desc = {'ldmxstatus': 'finishing',
-                        'computingelement': job['cluster'] or 'None',
-                        'sitename': self.endpoints.get(job['cluster'], 'None')}
-                self.dbldmx.updateJobLazy(job['id'], desc)
+        # Get post-batch ARC statuses
+        select = "ldmxstatus='running' and arcstate in ('finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
+        finishingjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
+        for job in finishingjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.info(f"Job {job['id']}: running -> finishing (ARC state {job['state']})")
+            desc = {'ldmxstatus': 'finishing',
+                    'computingelement': job['cluster'] or 'None',
+                    'sitename': self.endpoints.get(job['cluster'], 'None')}
+            self.dbldmx.updateJob(job['id'], desc)
 
     def checkToCancelJobs(self):
         '''
         Look for jobs marked to cancel and cancel the arc jobs
 
         Signal handling strategy:
-        - tocancel arcjob state needs to be commited ASAP but in a transaction
-          with ldmxstatus and cleanup of input files to maintain consistency
-        - input file cleanup cannot be done as a transaction though
-        - the signals are deferred for the entire operation for simplicity
+        - exit is checked before every job update
        '''
-        # exit handling context manager
-        with self.sigdefer:
+        select = "ldmxstatus='tocancel'"
+        columns = ['id', 'arcjobid', 'description', 'template']
+        cancelledjobs = self.dbldmx.getJobs(select, columns)
 
-            select = "ldmxstatus='tocancel'"
-            columns = ['id', 'arcjobid', 'description', 'template']
-            cancelledjobs = self.dbldmx.getJobs(select, columns)
+        if not cancelledjobs:
+            return
 
-            if not cancelledjobs:
-                return
+        for job in cancelledjobs:
 
-            for job in cancelledjobs:
-                self.log.info(f"Job {job['id']} requested to cancel, killing arc job")
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
 
-                # Check if there is an arc job
-                columns = ['id', 'JobID']
-                arcjob = self.dbarc.getArcJobInfo(job['arcjobid'], columns) if job['arcjobid'] else None
-                if arcjob:
-                    self.log.info(f"Cancelling arc job {arcjob['id']}")
-                    select = "id='{}'".format(job['arcjobid'])
-                    desc = {"arcstate": "tocancel", "tarcstate": self.dbarc.getTimeStamp()}
-                    self.dbarc.updateArcJobs(desc, select)
-                    if arcjob['JobID']:
-                        # Job was submitted to wait for it to be cancelled
-                        self.dbldmx.updateJobLazy(job['id'], {'ldmxstatus': 'cancelling'})
-                    else:
-                        # No job submitted, mark cancelled
-                        self.log.info(f"Job {job['id']} was not submitted to arc, marking cancelled")
-                        self.dbldmx.updateJobLazy(job['id'], {'ldmxstatus': 'cancelled'})
+            self.log.info(f"Job {job['id']} requested to cancel, killing arc job")
+
+            # Check if there is an arc job
+            columns = ['id', 'JobID']
+            arcjob = self.dbarc.getArcJobInfo(job['arcjobid'], columns) if job['arcjobid'] else None
+            if arcjob:
+                self.log.info(f"Cancelling arc job {arcjob['id']}")
+                select = "id='{}'".format(job['arcjobid'])
+                desc = {"arcstate": "tocancel", "tarcstate": self.dbarc.getTimeStamp()}
+                self.dbarc.updateArcJobs(desc, select)
+                if arcjob['JobID']:
+                    # Job was submitted to wait for it to be cancelled
+                    self.dbldmx.updateJob(job['id'], {'ldmxstatus': 'cancelling'})
                 else:
-                    self.log.info(f"Job {job['id']} has no arc job, marking cancelled")
-                    self.dbldmx.updateJobLazy(job['id'], {'ldmxstatus': 'cancelled'})
+                    # No job submitted, mark cancelled
+                    self.log.info(f"Job {job['id']} was not submitted to arc, marking cancelled")
+                    self.dbldmx.updateJob(job['id'], {'ldmxstatus': 'cancelled'})
+            else:
+                self.log.info(f"Job {job['id']} has no arc job, marking cancelled")
+                self.dbldmx.updateJob(job['id'], {'ldmxstatus': 'cancelled'})
 
-                self.cleanInputFiles(job)
-
-            self.dbldmx.Commit()
-
+            self.cleanInputFiles(job)
 
     def checkToResubmitJobs(self):
         '''
         Look for jobs marked to resubmit, cancel the arc jobs and set to waiting
 
         Signal handling strategy:
-        - tocancel arcjob state needs to be commited ASAP but in a transaction
-          with ldmxstatus to maintain consistency, hence the per job
-          transaction
+        - exit is checked before every job update
         '''
         select = "ldmxstatus='toresubmit'"
         columns = ['id', 'arcjobid']
@@ -130,25 +127,28 @@ class aCTLDMXStatus(aCTLDMXProcess):
             return
 
         for job in toresubmitjobs:
+
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+
             self.log.info(f"Job {job['id']} requested to resubmit, killing arc job")
 
             # Check if there is an arc job
             columns = ['id']
             arcjob = self.dbarc.getArcJobInfo(job['arcjobid'], columns) if job['arcjobid'] else None
 
-            with self.transaction([self.dbarc, self.dbldmx]):
+            if arcjob:
+                self.log.info(f"Cancelling arc job {arcjob['id']}")
+                select = "id='{}'".format(job['arcjobid'])
+                desc = {"arcstate": "tocancel", "tarcstate": self.dbarc.getTimeStamp()}
+                self.dbarc.updateArcJobs(desc, select)
+            else:
+                self.log.info(f"Job {job['id']} has no arc job")
 
-                if arcjob:
-                    self.log.info(f"Cancelling arc job {arcjob['id']}")
-                    select = "id='{}'".format(job['arcjobid'])
-                    desc = {"arcstate": "tocancel", "tarcstate": self.dbarc.getTimeStamp()}
-                    self.dbarc.updateArcJobsLazy(desc, select)
-                else:
-                    self.log.info(f"Job {job['id']} has no arc job")
-
-                ldmxdesc = {'ldmxstatus': 'new', 'arcjobid': None,
-                            'sitename': None, 'computingelement': None}
-                self.dbldmx.updateJobLazy(job['id'], ldmxdesc)
+            ldmxdesc = {'ldmxstatus': 'new', 'arcjobid': None,
+                        'sitename': None, 'computingelement': None}
+            self.dbldmx.updateJob(job['id'], ldmxdesc)
 
     def checkFailedJobs(self):
         '''
@@ -156,15 +156,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         TODO: whether to try and keep logs
 
         Signal handling strategy:
-        - failed -> tofetch is rolled back implicitly so no special handling
-          required here?
-        - failedjobs, lostjobs and cancelledjobs do input file cleanup, so the
-          signals are deferred during the rest of the operation
-
-        - note: deletArcJob() is problematic if signals were not deferred and
-          only transacton was to be used because it is not lazy
-        - note: checkForResubmission() is problematic because it does commit on
-          dbldmx
+        - exit is checked on every job update
         '''
         # Get outputs to download for failed jobs
         select = "arcstate='failed'"
@@ -172,10 +164,12 @@ class aCTLDMXStatus(aCTLDMXProcess):
         arcjobs = self.dbarc.getArcJobsInfo(select, columns)
         if arcjobs:
             for aj in arcjobs:
+                if self.mustExit:
+                    self.log.info(f"Exiting early due to requested shutdown")
+                    self.stopWithException()
                 select = "id='{}'".format(str(aj["id"]))
                 desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
-                self.dbarc.updateArcJobsLazy(desc, select)
-            self.dbarc.Commit()
+                self.dbarc.updateArcJobs(desc, select)
 
         # Look for failed final states in ARC which are still starting or running in LDMX
         select = "arcstate in ('donefailed', 'cancelled', 'lost') and arcjobs.id=ldmxjobs.arcjobid"
@@ -199,39 +193,42 @@ class aCTLDMXStatus(aCTLDMXProcess):
 
         desc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
 
-        # exit handling context manager
-        with self.sigdefer:
+        for aj in failedjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.copyOutputFiles(aj)
+            self.checkForResubmission(aj)
+            select = f"id={aj['id']}"
+            self.dbarc.updateArcJobs(desc, select)
+            self.dbldmx.updateJobs(f"arcjobid={aj['id']}", {'ldmxstatus': 'failed',
+                                                            'computingelement': aj.get('cluster'),
+                                                            'sitename': self.endpoints.get(aj.get('cluster'))})
 
-            for aj in failedjobs:
-                self.copyOutputFiles(aj)
-                self.checkForResubmission(aj)
-                select = f"id={aj['id']}"
-                self.dbarc.updateArcJobsLazy(desc, select)
-                self.dbldmx.updateJobsLazy(f"arcjobid={aj['id']}", {'ldmxstatus': 'failed',
-                                                                    'computingelement': aj.get('cluster'),
-                                                                    'sitename': self.endpoints.get(aj.get('cluster'))})
+        for aj in lostjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            select = f"id={aj['id']}"
+            self.dbarc.updateArcJobs(desc, select)
+            self.dbldmx.updateJobs(f"arcjobid={aj['id']}", {'ldmxstatus': 'failed',
+                                                            'computingelement': aj.get('cluster'),
+                                                            'sitename': self.endpoints.get(aj.get('cluster'))})
+            self.cleanInputFiles(aj)
 
-            for aj in lostjobs:
-                select = f"id={aj['id']}"
-                self.dbarc.updateArcJobsLazy(desc, select)
-                self.dbldmx.updateJobsLazy(f"arcjobid={aj['id']}", {'ldmxstatus': 'failed',
-                                                                    'computingelement': aj.get('cluster'),
-                                                                    'sitename': self.endpoints.get(aj.get('cluster'))})
-                self.cleanInputFiles(aj)
-
-            for aj in cancelledjobs:
-                select = f"id={aj['id']}"
-                if aj['JobID']:
-                    self.dbarc.updateArcJobsLazy(desc, select)
-                else: # job was not submitted so just delete
-                    self.dbarc.deleteArcJob(aj['id'])
-                self.dbldmx.updateJobsLazy(f"arcjobid={aj['id']}", {'ldmxstatus': 'cancelled',
-                                                                    'computingelement': aj.get('cluster'),
-                                                                    'sitename': self.endpoints.get(aj.get('cluster'))})
-                self.cleanInputFiles(aj)
-
-            self.dbarc.Commit()
-            self.dbldmx.Commit()
+        for aj in cancelledjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            select = f"id={aj['id']}"
+            if aj['JobID']:
+                self.dbarc.updateArcJobs(desc, select)
+            else: # job was not submitted so just delete
+                self.dbarc.deleteArcJob(aj['id'])
+            self.dbldmx.updateJobsLazy(f"arcjobid={aj['id']}", {'ldmxstatus': 'cancelled',
+                                                                'computingelement': aj.get('cluster'),
+                                                                'sitename': self.endpoints.get(aj.get('cluster'))})
+            self.cleanInputFiles(aj)
 
     def cleanupLeftovers(self):
         """
@@ -244,11 +241,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         4. ldmxstate=cancelling and no arc jobs (job was cancelled before being submitted)
 
         Signal handling strategy:
-        - interruption notes for above points:
-          1. no handling required
-          2. could be problematic if no other code does filesystem cleanup
-          3. no handling required
-          4. no handling required
+        - exit is checked before every job update
 
         Some further notes:
         - It might be a little bit out of place to handle cancel state
@@ -260,39 +253,46 @@ class aCTLDMXStatus(aCTLDMXProcess):
         select = "arcstate in ('tocancel', 'cancelling', 'toclean') and (cluster='' or cluster is NULL)"
         jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid'])
         for job in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
             self.log.info(f"{job['appjobid']}: Deleting from arcjobs unsubmitted job {job['id']}")
             self.dbarc.deleteArcJob(job['id'])
 
-        # exit handling context manager
-        with self.sigdefer:
-
-            select = "(arcstate='done' or arcstate='lost' or arcstate='cancelled' or arcstate='donefailed') \
-                     and arcjobs.id not in (select arcjobid from ldmxjobs where arcjobid is not NULL)"
-            jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid', 'arcstate', 'JobID'])
-            cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
-            for job in jobs:
-                # done jobs should not be there, log a warning
-                if job['arcstate'] == 'done':
-                    self.log.warning(f"{job['appjobid']}: Removing orphaned done job {job['id']}")
-                else:
-                    self.log.info(f"{job['appjobid']}: Cleaning left behind {job['arcstate']} job {job['id']}")
-                self.dbarc.updateArcJobLazy(job['id'], cleandesc)
-                if job['JobID'] and job['JobID'].rfind('/') != -1:
-                    sessionid = job['JobID'][job['JobID'].rfind('/'):]
-                    localdir = self.tmpdir + sessionid
-                    shutil.rmtree(localdir, ignore_errors=True)
-            if jobs:
-                self.dbarc.Commit()
+        select = "(arcstate='done' or arcstate='lost' or arcstate='cancelled' or arcstate='donefailed') \
+                    and arcjobs.id not in (select arcjobid from ldmxjobs where arcjobid is not NULL)"
+        jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid', 'arcstate', 'JobID'])
+        cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+        for job in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            # done jobs should not be there, log a warning
+            if job['arcstate'] == 'done':
+                self.log.warning(f"{job['appjobid']}: Removing orphaned done job {job['id']}")
+            else:
+                self.log.info(f"{job['appjobid']}: Cleaning left behind {job['arcstate']} job {job['id']}")
+            self.dbarc.updateArcJob(job['id'], cleandesc)
+            if job['JobID'] and job['JobID'].rfind('/') != -1:
+                sessionid = job['JobID'][job['JobID'].rfind('/'):]
+                localdir = self.tmpdir + sessionid
+                shutil.rmtree(localdir, ignore_errors=True)
 
         select = "arcstate='done' and ldmxstatus='cancelling' and arcjobs.id=ldmxjobs.arcjobid"
         jobs = self.dbarc.getArcJobsInfo(select, ['arcjobs.id', 'appjobid'], tables='arcjobs,ldmxjobs')
         for job in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
             self.log.info(f"{job['appjobid']}: Cleaning finished job which was already cancelled")
             self.dbarc.updateArcJob(job['id'], {'arcstate': 'cancelled'})
 
         select = "ldmxstatus='cancelling' and arcjobid not in (select id from arcjobs)"
         jobs = self.dbldmx.getJobs(select, ['id'])
         for job in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
             self.log.info(f"{job['id']}: Cleaning cancelling job which was never submitted")
             self.dbldmx.updateJobs(f"id={job['id']}", {'ldmxstatus': 'cancelled'})
 
@@ -317,7 +317,6 @@ class aCTLDMXStatus(aCTLDMXProcess):
         self.dbldmx.insertJob(arcjob['description'], arcjob['template'],
                               arcjob['proxyid'], arcjob['userid'],
                               batchid=arcjob['batchid'])
-
 
     def copyOutputFiles(self, arcjob):
         '''
@@ -382,7 +381,6 @@ class aCTLDMXStatus(aCTLDMXProcess):
             self.log.debug(f'Removed {job["description"]} and {job["template"]}')
         except:
             pass
-
 
     def process(self):
         self.setSites()

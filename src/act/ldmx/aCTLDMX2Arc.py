@@ -13,60 +13,55 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         Submit new jobs.
 
         Signal handling strategy:
-        - insertArcJobDescription() has no lazy variant. That means that the
-          transaction cannot be rolled back. This then requires the signals
-          to be deferred at least per job.
+        - exit is checked before every job update
         """
-        # exit handling context manager
-        with self.sigdefer:
+        # Submit new jobs
+        select = "ldmxstatus='new' and ldmxjobs.batchid = ldmxbatches.id order by ldmxjobs.modified limit 100"
+        columns = ['ldmxjobs.id', 'ldmxjobs.created', 'ldmxjobs.description',
+                'ldmxjobs.template', 'proxyid', 'batchname']
+        newjobs = self.dbldmx.getJobs(select, columns=columns, tables='ldmxjobs, ldmxbatches')
+        for job in newjobs:
 
-            # Submit new jobs
-            select = "ldmxstatus='new' and ldmxjobs.batchid = ldmxbatches.id order by ldmxjobs.modified limit 100"
-            columns = ['ldmxjobs.id', 'ldmxjobs.created', 'ldmxjobs.description',
-                    'ldmxjobs.template', 'proxyid', 'batchname']
-            newjobs = self.dbldmx.getJobs(select, columns=columns, tables='ldmxjobs, ldmxbatches')
-            for job in newjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
 
-                with open(job['description']) as f:
-                    config = {l.split('=')[0]: l.split('=')[1].strip() for l in f}
+            with open(job['description']) as f:
+                config = {l.split('=')[0]: l.split('=')[1].strip() for l in f}
 
-                xrsl = self.createXRSL(job['description'], job['template'], config)
-                if not xrsl:
-                    self.log.warning(f'Could not create xrsl for {job["id"]}')
-                    # Set back to new to put at the back of the queue
-                    self.dbldmx.updateJobLazy(job['id'], {'ldmxstatus': 'new'})
-                    continue
+            xrsl = self.createXRSL(job['description'], job['template'], config)
+            if not xrsl:
+                self.log.warning(f'Could not create xrsl for {job["id"]}')
+                # Set back to new to put at the back of the queue
+                self.dbldmx.updateJob(job['id'], {'ldmxstatus': 'new'})
+                continue
 
-                # Send to cluster with the data if possible
-                clusterlist = self.chooseEndpoints(config)
-                self.log.info(f'Inserting job {job["id"]} to CEs {clusterlist}\n with xrsl {xrsl}')
-                arcid = self.dbarc.insertArcJobDescription(xrsl,
-                                                           proxyid=job['proxyid'],
-                                                           clusterlist=clusterlist,
-                                                           downloadfiles='diagnose=gmlog/errors;stdout;rucio.metadata',
-                                                           appjobid=str(job['id']),
-                                                           fairshare=job['batchname'])
+            # Send to cluster with the data if possible
+            clusterlist = self.chooseEndpoints(config)
+            self.log.info(f'Inserting job {job["id"]} to CEs {clusterlist}\n with xrsl {xrsl}')
+            arcid = self.dbarc.insertArcJobDescription(xrsl,
+                                                       proxyid=job['proxyid'],
+                                                       clusterlist=clusterlist,
+                                                       downloadfiles='diagnose=gmlog/errors;stdout;rucio.metadata',
+                                                       appjobid=str(job['id']),
+                                                       fairshare=job['batchname'])
 
-                if not arcid:
-                    self.log.error('Failed to insert arc job')
-                    self.dbldmx.updateJobLazy(job['id'], {'ldmxstatus': 'failed'})
-                    continue
+            if not arcid:
+                self.log.error('Failed to insert arc job')
+                self.dbldmx.updateJob(job['id'], {'ldmxstatus': 'failed'})
+                continue
 
-                desc = {'ldmxstatus': 'waiting', 'arcjobid': arcid['LAST_INSERT_ID()']}
-                self.dbldmx.updateJobLazy(job['id'], desc)
+            desc = {'ldmxstatus': 'waiting', 'arcjobid': arcid['LAST_INSERT_ID()']}
+            self.dbldmx.updateJob(job['id'], desc)
 
-                # Dump job description
-                logdir = os.path.join(self.conf.joblog.dir,
-                                      job['created'].strftime('%Y-%m-%d'))
-                os.makedirs(logdir, 0o755, exist_ok=True)
-                xrslfile = os.path.join(logdir, f'{job["id"]}.xrsl')
-                with open(xrslfile, 'w') as f:
-                    f.write(xrsl)
-                    self.log.debug(f'Wrote description to {xrslfile}')
-
-            if newjobs:
-                self.dbldmx.Commit()
-
+            # Dump job description
+            logdir = os.path.join(self.conf.joblog.dir,
+                                    job['created'].strftime('%Y-%m-%d'))
+            os.makedirs(logdir, 0o755, exist_ok=True)
+            xrslfile = os.path.join(logdir, f'{job["id"]}.xrsl')
+            with open(xrslfile, 'w') as f:
+                f.write(xrsl)
+                self.log.debug(f'Wrote description to {xrslfile}')
 
     def createXRSL(self, descriptionfile, templatefile, config):
 
