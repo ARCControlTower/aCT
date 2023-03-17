@@ -132,8 +132,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         - startTime
 
         Signal handling strategy:
-        - all updates are performed in one transaction which is rolled back
-          on signal
+        - exit is checked before every job update
         """
         # do an inner join to pick up all jobs that should be set to running
         select = "condorjobs.id=pandajobs.condorjobid and condorjobs.condorstate='running' and pandajobs.actpandastatus='starting'"
@@ -219,83 +218,81 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
-        with self.transaction([self.dbpanda, self.dbcondor]):
+        # Look for failed final states
+        select = "(condorstate='donefailed' or condorstate='cancelled' or condorstate='lost')"
+        select += " and actpandastatus!='toclean' and actpandastatus!='toresubmit'"
+        select += " and pandajobs.condorjobid = condorjobs.id and pandajobs.sitename in %s limit 100000" % self.sitesselect
+        columns = ['condorstate', 'appjobid', 'condorjobid', 'JobCurrentStartDate', 'CompletionDate', 'actpandastatus']
 
-            # Look for failed final states
-            select = "(condorstate='donefailed' or condorstate='cancelled' or condorstate='lost')"
-            select += " and actpandastatus!='toclean' and actpandastatus!='toresubmit'"
-            select += " and pandajobs.condorjobid = condorjobs.id and pandajobs.sitename in %s limit 100000" % self.sitesselect
-            columns = ['condorstate', 'appjobid', 'condorjobid', 'JobCurrentStartDate', 'CompletionDate', 'actpandastatus']
+        jobstoupdate = self.dbcondor.getCondorJobsInfo(select, columns=columns, tables='condorjobs,pandajobs')
 
-            jobstoupdate = self.dbcondor.getCondorJobsInfo(select, columns=columns, tables='condorjobs,pandajobs')
+        if len(jobstoupdate) == 0:
+            return
 
-            if len(jobstoupdate) == 0:
-                return
+        failedjobs = [job for job in jobstoupdate if job['condorstate']=='donefailed']
+        if len(failedjobs) != 0:
+            self.log.debug("Found %d failed jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
+        lostjobs = [job for job in jobstoupdate if job['condorstate']=='lost']
+        if len(lostjobs) != 0:
+            self.log.debug("Found %d lost jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
+        # Cancelled jobs already in terminal state will be cleaned up in cleanupLeftovers()
+        cancelledjobs = [job for job in jobstoupdate if job['condorstate']=='cancelled' and job['actpandastatus'] not in ('cancelled', 'donecancelled', 'failed', 'donefailed')]
+        if len(cancelledjobs) != 0:
+            self.log.debug("Found %d cancelled jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
 
-            failedjobs = [job for job in jobstoupdate if job['condorstate']=='donefailed']
-            if len(failedjobs) != 0:
-                self.log.debug("Found %d failed jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
-            lostjobs = [job for job in jobstoupdate if job['condorstate']=='lost']
-            if len(lostjobs) != 0:
-                self.log.debug("Found %d lost jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
-            # Cancelled jobs already in terminal state will be cleaned up in cleanupLeftovers()
-            cancelledjobs = [job for job in jobstoupdate if job['condorstate']=='cancelled' and job['actpandastatus'] not in ('cancelled', 'donecancelled', 'failed', 'donefailed')]
-            if len(cancelledjobs) != 0:
-                self.log.debug("Found %d cancelled jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
+        # Get outputs to download for failed jobs
+        select = "condorstate='failed'"
+        columns = ['id']
+        condorjobs = self.dbcondor.getCondorJobsInfo(select, columns)
 
-            # Get outputs to download for failed jobs
-            select = "condorstate='failed'"
-            columns = ['id']
-            condorjobs = self.dbcondor.getCondorJobsInfo(select, columns)
+        for cj in condorjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            select = "id='"+str(cj["id"])+"'"
+            desc = {"condorstate":"tofetch", "tcondorstate": self.dbcondor.getTimeStamp()}
+            self.dbcondor.updateCondorJobs(desc, select)
 
-            for cj in condorjobs:
-                if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
-                    self.stopWithException()
-                select = "id='"+str(cj["id"])+"'"
-                desc = {"condorstate":"tofetch", "tcondorstate": self.dbcondor.getTimeStamp()}
-                self.dbcondor.updateCondorJobs(desc, select)
+        for cj in failedjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.info("%s: Job failed so stop sending heartbeats", cj['appjobid'])
+            select = "condorjobid='"+str(cj["condorjobid"])+"'"
+            desc = {}
+            desc["pandastatus"] = "transferring"
+            desc["actpandastatus"] = "toclean" # to clean up any output
+            desc["endTime"] = cj['CompletionDate']
+            desc["startTime"] = cj['JobCurrentStartDate']
+            # True pilot job may have gone straight to failed, turn off aCT heartbeats
+            desc['sendhb'] = 0
+            self.dbpanda.updateJobs(select, desc)
 
-            for cj in failedjobs:
-                if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
-                    self.stopWithException()
-                self.log.info("%s: Job failed so stop sending heartbeats", cj['appjobid'])
-                select = "condorjobid='"+str(cj["condorjobid"])+"'"
-                desc = {}
-                desc["pandastatus"] = "transferring"
-                desc["actpandastatus"] = "toclean" # to clean up any output
-                desc["endTime"] = cj['CompletionDate']
-                desc["startTime"] = cj['JobCurrentStartDate']
-                # True pilot job may have gone straight to failed, turn off aCT heartbeats
-                desc['sendhb'] = 0
-                self.dbpanda.updateJobs(select, desc)
+        for cj in lostjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            # For truepilot, just set to clean and transferring to clean up condor job
+            self.log.info("%s: Job is lost, cleaning up condor job", cj['appjobid'])
+            select = "condorjobid='"+str(cj["condorjobid"])+"'"
+            desc = {}
+            desc['sendhb'] = 0
+            desc['pandastatus'] = 'transferring'
+            desc['actpandastatus'] = 'toclean'
+            self.dbpanda.updateJobs(select,desc)
 
-            for cj in lostjobs:
-                if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
-                    self.stopWithException()
-                # For truepilot, just set to clean and transferring to clean up condor job
-                self.log.info("%s: Job is lost, cleaning up condor job", cj['appjobid'])
-                select = "condorjobid='"+str(cj["condorjobid"])+"'"
-                desc = {}
-                desc['sendhb'] = 0
-                desc['pandastatus'] = 'transferring'
-                desc['actpandastatus'] = 'toclean'
-                self.dbpanda.updateJobs(select,desc)
-
-            for cj in cancelledjobs:
-                if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
-                    self.stopWithException()
-                # Only applies to manually cancelled jobs, simply clean them
-                self.log.info("%s: Job was cancelled, cleaning up condor job", cj['appjobid'])
-                select = "condorjobid='%s'" % str(cj["condorjobid"])
-                desc = {}
-                desc['sendhb'] = 0
-                desc['pandastatus'] = 'transferring'
-                desc['actpandastatus'] = 'toclean'
-                self.dbpanda.updateJobs(select, desc)
+        for cj in cancelledjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            # Only applies to manually cancelled jobs, simply clean them
+            self.log.info("%s: Job was cancelled, cleaning up condor job", cj['appjobid'])
+            select = "condorjobid='%s'" % str(cj["condorjobid"])
+            desc = {}
+            desc['sendhb'] = 0
+            desc['pandastatus'] = 'transferring'
+            desc['actpandastatus'] = 'toclean'
+            self.dbpanda.updateJobs(select, desc)
 
     def cleanupLeftovers(self):
         """
