@@ -29,6 +29,7 @@ class aCTCRICFetcher(aCTATLASProcess):
 
     def exitHandler(self, signum, frame):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        self.mustExit = True
         self.terminate.set()
 
     def wait(self):
