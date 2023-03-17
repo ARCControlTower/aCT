@@ -99,11 +99,14 @@ class aCTAutopilot(aCTATLASProcess):
         Heartbeat status updates.
 
         Signal handling strategy:
-        - signals are deferred for Panda update and results processing
-        - TODO: review: once the Panda is updated is it important to
-                update aCT state without interruption or can it be done
-                again on next Panda update?
+        - exit is checked before doing anything
+        - everything is executed without checking for exit to do heartbeats
+          and their result processing uninterrupted
         """
+        if self.mustExit:
+            self.log.info(f"Exiting early due to requested shutdown")
+            self.stopWithException()
+
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
         jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
         if not jobs:
@@ -143,42 +146,38 @@ class aCTAutopilot(aCTATLASProcess):
             t=PandaThr(self.getPanda(j['siteName']).updateStatus,j['pandaid'],pstatus,jd)
             tlist.append(t)
 
-        # exit handling context manager
-        with self.sigdefer:
+        aCTUtils.RunThreadsSplit(tlist, self.nthreads)
 
-            aCTUtils.RunThreadsSplit(tlist, self.nthreads)
+        for t in tlist:
+            if t.result == None or 'StatusCode' not in t.result:
+                # Strange response from panda, try later
+                continue
+            if t.result['StatusCode'] and t.result['StatusCode'][0] == '60':
+                self.log.error('Failed to contact Panda, proxy may have expired')
+                continue
+            if 'command' in t.result  and t.result['command'][0] != "NULL":
+                self.log.info("%s: response: %s" % (t.id,t.result) )
+            jd={}
+            if changed_pstatus:
+                jd['pandastatus']=pstatus
+            # Make sure heartbeat is ahead of modified time so it is not picked up again
+            if self.sites[t.args['siteName']]['truepilot'] and pstatus == 'starting':
+                # Set theartbeat 1h in the future to allow job to start
+                # running and avoid race conditions with heartbeats
+                # Now heartbeat timeout is 2h so we remove the offset
+                #jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+3600)
+                jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
+            else:
+                jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
+            # If panda tells us to kill the job, set actpandastatus to tobekilled
+            # and remove from heartbeats
+            if 'command' in t.result and ( ("tobekilled" in t.result['command'][0]) or ("badattemptnr" in t.result['command'][0]) ):
+                self.log.info('%s: cancelled by panda' % t.id)
+                jd['actpandastatus']="tobekilled"
+                jd['pandastatus']=None
+            self.dbpanda.updateJob(t.id,jd)
 
-            for t in tlist:
-                if t.result == None or 'StatusCode' not in t.result:
-                    # Strange response from panda, try later
-                    continue
-                if t.result['StatusCode'] and t.result['StatusCode'][0] == '60':
-                    self.log.error('Failed to contact Panda, proxy may have expired')
-                    continue
-                if 'command' in t.result  and t.result['command'][0] != "NULL":
-                    self.log.info("%s: response: %s" % (t.id,t.result) )
-                jd={}
-                if changed_pstatus:
-                    jd['pandastatus']=pstatus
-                # Make sure heartbeat is ahead of modified time so it is not picked up again
-                if self.sites[t.args['siteName']]['truepilot'] and pstatus == 'starting':
-                    # Set theartbeat 1h in the future to allow job to start
-                    # running and avoid race conditions with heartbeats
-                    # Now heartbeat timeout is 2h so we remove the offset
-                    #jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+3600)
-                    jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
-                else:
-                    jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
-                # If panda tells us to kill the job, set actpandastatus to tobekilled
-                # and remove from heartbeats
-                if 'command' in t.result and ( ("tobekilled" in t.result['command'][0]) or ("badattemptnr" in t.result['command'][0]) ):
-                    self.log.info('%s: cancelled by panda' % t.id)
-                    jd['actpandastatus']="tobekilled"
-                    jd['pandastatus']=None
-                self.dbpanda.updateJobLazy(t.id,jd)
-
-            self.dbpanda.Commit()
-            self.log.info("Threads finished")
+        self.log.info("Threads finished")
 
 
     def updatePandaHeartbeatBulk(self,pstatus):
@@ -186,11 +185,14 @@ class aCTAutopilot(aCTATLASProcess):
         Heartbeat status updates in bulk.
 
         Signal handling strategy:
-        - signals are deferred for Panda update and results processing
-        - TODO: review: once the Panda is updated is it important to
-                update aCT state without interruption or can it be done
-                again on next Panda update?
+        - exit is checked before doing anything
+        - everything is executed without checking for exit to do heartbeats
+          and their result processing uninterrupted
         """
+        if self.mustExit:
+            self.log.info(f"Exiting early due to requested shutdown")
+            self.stopWithException()
+
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
         jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
         #jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", 60)+" or modified > theartbeat) limit 1000", columns)
@@ -239,46 +241,42 @@ class aCTAutopilot(aCTATLASProcess):
             t = PandaBulkThr(self.pandas.get(sitetype, self.pandas.get('production')).updateStatuses, [j['jobId'] for j in jobs], jobs)
             tlist.append(t)
 
-        # exit handling context manager
-        with self.sigdefer:
+        aCTUtils.RunThreadsSplit(tlist, self.nthreads)
 
-            aCTUtils.RunThreadsSplit(tlist, self.nthreads)
+        for t in tlist:
+            if not t or not t.result or not t.result[0]:
+                # Strange response from panda, try later
+                continue
 
-            for t in tlist:
-                if not t or not t.result or not t.result[0]:
-                    # Strange response from panda, try later
+            for pandaid, response in zip(t.ids, t.result[1]):
+                try:
+                    result = parse_qs(response)
+                except Exception:
+                    self.log.error('Could not parse result from panda: %s' % response)
                     continue
 
-                for pandaid, response in zip(t.ids, t.result[1]):
-                    try:
-                        result = parse_qs(response)
-                    except Exception:
-                        self.log.error('Could not parse result from panda: %s' % response)
-                        continue
+                if not result.get('StatusCode'):
+                    # Strange response from panda, try later
+                    continue
+                if result['StatusCode'][0] == '60':
+                    self.log.error('Failed to contact Panda, proxy may have expired')
+                    continue
+                if result.get('command', [''])[0] not in ['', "NULL"]:
+                    self.log.info("%s: response: %s" % (pandaid, result))
+                jd = {}
+                if changed_pstatus:
+                    jd['pandastatus'] = pstatus
+                # Make sure heartbeat is ahead of modified time so it is not picked up again
+                jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
+                # If panda tells us to kill the job, set actpandastatus to tobekilled
+                # and remove from heartbeats
+                if result.get('command', [''])[0] in ["tobekilled", "badattemptnr", "alreadydone"]:
+                    self.log.info('%s: cancelled by panda' % pandaid)
+                    jd['actpandastatus'] = "tobekilled"
+                    jd['pandastatus'] = None
+                self.dbpanda.updateJob(pandaid, jd)
 
-                    if not result.get('StatusCode'):
-                        # Strange response from panda, try later
-                        continue
-                    if result['StatusCode'][0] == '60':
-                        self.log.error('Failed to contact Panda, proxy may have expired')
-                        continue
-                    if result.get('command', [''])[0] not in ['', "NULL"]:
-                        self.log.info("%s: response: %s" % (pandaid, result))
-                    jd = {}
-                    if changed_pstatus:
-                        jd['pandastatus'] = pstatus
-                    # Make sure heartbeat is ahead of modified time so it is not picked up again
-                    jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
-                    # If panda tells us to kill the job, set actpandastatus to tobekilled
-                    # and remove from heartbeats
-                    if result.get('command', [''])[0] in ["tobekilled", "badattemptnr", "alreadydone"]:
-                        self.log.info('%s: cancelled by panda' % pandaid)
-                        jd['actpandastatus'] = "tobekilled"
-                        jd['pandastatus'] = None
-                    self.dbpanda.updateJobLazy(pandaid, jd)
-
-            self.dbpanda.Commit()
-            self.log.info("Threads finished")
+        self.log.info("Threads finished")
 
 
     def updatePandaFinishedPilot(self):
@@ -287,11 +285,14 @@ class aCTAutopilot(aCTATLASProcess):
         and cancelled jobs
 
         Signal handling strategy:
-        - signals are deferred for Panda update and results processing
-        - TODO: review: once the Panda is updated is it important to
-                update aCT state without interruption or can it be done
-                again on next Panda update?
+        - exit is checked before doing anything
+        - everything is executed without checking for exit to do heartbeats
+          and their result processing uninterrupted
         """
+        if self.mustExit:
+            self.log.info(f"Exiting early due to requested shutdown")
+            self.stopWithException()
+
         jobs=self.dbpanda.getJobs("actpandastatus='finished' or actpandastatus='failed' or actpandastatus='cancelled' limit 1000")
 
         if not jobs:
@@ -343,45 +344,41 @@ class aCTAutopilot(aCTATLASProcess):
             t=PandaThr(self.getPanda(j['siteName']).updateStatus,j['pandaid'],j['pandastatus'],jobinfo.dictionary())
             tlist.append(t)
 
-        # exit handling context manager
-        with self.sigdefer:
+        aCTUtils.RunThreadsSplit(tlist, self.nthreads)
 
-            aCTUtils.RunThreadsSplit(tlist, self.nthreads)
+        for t in tlist:
+            if t.result == None:
+                continue
+            if 'StatusCode' in t.result and t.result['StatusCode'] and t.result['StatusCode'][0] != '0':
+                self.log.error('Error updating panda')
+                continue
+            jd={}
+            jd['pandastatus']=None
+            jd['actpandastatus']='done'
+            if t.status == 'failed':
+                jd['actpandastatus']='donefailed'
+            if 'pilotErrorCode' in t.args and t.args['pilotErrorCode'] == 1144:
+                jd['actpandastatus']='donecancelled'
+            jd['theartbeat']=self.dbpanda.getTimeStamp()
 
-            for t in tlist:
-                if t.result == None:
-                    continue
-                if 'StatusCode' in t.result and t.result['StatusCode'] and t.result['StatusCode'][0] != '0':
-                    self.log.error('Error updating panda')
-                    continue
-                jd={}
-                jd['pandastatus']=None
-                jd['actpandastatus']='done'
-                if t.status == 'failed':
-                    jd['actpandastatus']='donefailed'
-                if 'pilotErrorCode' in t.args and t.args['pilotErrorCode'] == 1144:
-                    jd['actpandastatus']='donecancelled'
-                jd['theartbeat']=self.dbpanda.getTimeStamp()
+            self.dbpanda.updateJob(t.id,jd)
+            # Send done message to APFMon
+            self.apfmon.updateJob(t.id, 'done' if jd['actpandastatus'] == 'done' else 'fault')
 
-                self.dbpanda.updateJobLazy(t.id,jd)
-                # Send done message to APFMon
-                self.apfmon.updateJob(t.id, 'done' if jd['actpandastatus'] == 'done' else 'fault')
+        self.dbpanda.Commit()
+        self.log.info("Threads finished")
 
-            self.dbpanda.Commit()
-            self.log.info("Threads finished")
-
-            # Clean inputfiles
-            for j in jobs:
-                pandainputdir = os.path.join(self.tmpdir, 'inputfiles', str(j['pandaid']))
-                shutil.rmtree(pandainputdir, ignore_errors=True)
+        # Clean inputfiles
+        for j in jobs:
+            pandainputdir = os.path.join(self.tmpdir, 'inputfiles', str(j['pandaid']))
+            shutil.rmtree(pandainputdir, ignore_errors=True)
 
     def checkJobs(self):
         """
         Sanity checks when restarting aCT. Check for nonexistent jobs... TODO
 
         Signal handling strategy:
-        - TODO: review: deferring all signals for now to avoid any potential
-                issues with inconsistency of aCT and Panda state.
+        - exit is checked before every job update
         """
         # Does it matter which proxy is used? Assume no
         panda = next(iter(self.pandas.values()))
@@ -402,31 +399,33 @@ class aCTAutopilot(aCTATLASProcess):
 
         jobs=self.dbpanda.getJobs("pandastatus like '%'")
 
-        # exit handling context manager
-        with self.sigdefer:
+        for j in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.info("%d" % j['pandaid'])
+            if j['pandaid'] in pjids:
+                pass
+            else:
+                self.log.info("%d not in panda, cancel and remove from aCT", j['pandaid'])
+                jd={}
+                jd['pandastatus'] = None
+                jd['actpandastatus']='tobekilled'
+                self.dbpanda.updateJob(j['pandaid'],jd)
 
-            for j in jobs:
-                self.log.info("%d" % j['pandaid'])
-                if j['pandaid'] in pjids:
-                    pass
-                else:
-                    self.log.info("%d not in panda, cancel and remove from aCT", j['pandaid'])
-                    jd={}
-                    jd['pandastatus'] = None
-                    jd['actpandastatus']='tobekilled'
-                    self.dbpanda.updateJobLazy(j['pandaid'],jd)
-            self.dbpanda.Commit()
-
-            # check db for jobs in Panda but not in aCT
-            count=0
-            for j in pjobs:
-                self.log.debug("checking job %d" % j['PandaID'])
-                job=self.dbpanda.getJob(j['PandaID'])
-                if job is None and ( j['pandastatus'] == 'running' or j['pandastatus'] == 'transferring' or j['pandastatus'] == 'starting') :
-                    self.log.info("Missing: %d" % j['PandaID'])
-                    count+=1
-                    panda.updateStatus(j['PandaID'],'failed')
-            self.log.info("missing jobs: %d removed" % count)
+        # check db for jobs in Panda but not in aCT
+        count=0
+        for j in pjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.debug("checking job %d" % j['PandaID'])
+            job=self.dbpanda.getJob(j['PandaID'])
+            if job is None and ( j['pandastatus'] == 'running' or j['pandastatus'] == 'transferring' or j['pandastatus'] == 'starting') :
+                self.log.info("Missing: %d" % j['PandaID'])
+                count+=1
+                panda.updateStatus(j['PandaID'],'failed')
+        self.log.info("missing jobs: %d removed" % count)
 
 
     def updateArchive(self):
@@ -434,9 +433,7 @@ class aCTAutopilot(aCTATLASProcess):
         Move old jobs older than 1 day to archive table.
 
         Signal handling strategy:
-        - No specific signal handling is required since either the per job
-          transaction gets rolled back implicitly on exception or
-          dbpanda.deleteJob() commits it.
+        - exit is checked before every job update
         """
         # modified column is reported in local time so may not be exactly one day
         select = self.dbpanda.timeStampLessThan('modified', 60*60*24)
@@ -448,6 +445,9 @@ class aCTAutopilot(aCTATLASProcess):
 
         self.log.info('Archiving %d jobs' % len(jobs))
         for job in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
             self.log.debug('Archiving panda job %d' % job['pandaid'])
             # Fill out empty start/end time
             if job['starttime']:

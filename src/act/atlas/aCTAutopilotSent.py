@@ -79,9 +79,8 @@ class aCTAutopilotSent(aCTATLASProcess):
         Heartbeat status updates.
 
         Signal handling strategy:
-        - TODO: review: Threads updating status and the subsequent handling of
-                the results is protected from signals for any potential
-                consistency issues between aCT and Panda.
+        - no exit checking is performed because this is done automatically by
+          parent aCTProcess and this is the only operation executed in the process loop
         """
         nthreads=self.conf.panda.threads
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
@@ -121,43 +120,39 @@ class aCTAutopilotSent(aCTATLASProcess):
             t=PandaThr(self.getPanda(j['siteName']).updateStatus,j['pandaid'],pstatus,jd)
             tlist.append(t)
 
-        # exit handlind context manager
-        with self.sigdefer:
+        aCTUtils.RunThreadsSplit(tlist,nthreads)
 
-            aCTUtils.RunThreadsSplit(tlist,nthreads)
+        for t in tlist:
+            if t.result == None or 'StatusCode' not in t.result:
+                # Strange response from panda, try later
+                continue
+            if t.result['StatusCode'] and t.result['StatusCode'][0] == '60':
+                self.log.error('Failed to contact Panda, proxy may have expired')
+                continue
+            #self.log.debug('%s: %s' % (t.id, t.result))
+            if 'command' in t.result  and t.result['command'][0] != "NULL":
+                self.log.info("%s: response: %s" % (t.id,t.result) )
+            jd={}
+            if changed_pstatus:
+                jd['pandastatus']=pstatus
+            # Make sure heartbeat is ahead of modified time so it is not picked up again
+            if self.sites[t.args['siteName']]['truepilot'] and pstatus == 'starting':
+                # Set theartbeat 1h in the future to allow job to start
+                # running and avoid race conditions with heartbeats
+                # Now heartbeat timeout is 2h so we remove the offset
+                #jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+3600)
+                jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
+            else:
+                jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
+            # If panda tells us to kill the job, set actpandastatus to tobekilled
+            # and remove from heartbeats
+            if 'command' in t.result and ( ("tobekilled" in t.result['command'][0]) or ("badattemptnr" in t.result['command'][0]) ):
+                self.log.info('%s: cancelled by panda' % t.id)
+                jd['actpandastatus']="tobekilled"
+                jd['pandastatus']=None
+            self.dbpanda.updateJob(t.id,jd)
 
-            for t in tlist:
-                if t.result == None or 'StatusCode' not in t.result:
-                    # Strange response from panda, try later
-                    continue
-                if t.result['StatusCode'] and t.result['StatusCode'][0] == '60':
-                    self.log.error('Failed to contact Panda, proxy may have expired')
-                    continue
-                #self.log.debug('%s: %s' % (t.id, t.result))
-                if 'command' in t.result  and t.result['command'][0] != "NULL":
-                    self.log.info("%s: response: %s" % (t.id,t.result) )
-                jd={}
-                if changed_pstatus:
-                    jd['pandastatus']=pstatus
-                # Make sure heartbeat is ahead of modified time so it is not picked up again
-                if self.sites[t.args['siteName']]['truepilot'] and pstatus == 'starting':
-                    # Set theartbeat 1h in the future to allow job to start
-                    # running and avoid race conditions with heartbeats
-                    # Now heartbeat timeout is 2h so we remove the offset
-                    #jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+3600)
-                    jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
-                else:
-                    jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
-                # If panda tells us to kill the job, set actpandastatus to tobekilled
-                # and remove from heartbeats
-                if 'command' in t.result and ( ("tobekilled" in t.result['command'][0]) or ("badattemptnr" in t.result['command'][0]) ):
-                    self.log.info('%s: cancelled by panda' % t.id)
-                    jd['actpandastatus']="tobekilled"
-                    jd['pandastatus']=None
-                self.dbpanda.updateJobLazy(t.id,jd)
-
-            self.dbpanda.Commit()
-            self.log.info("Threads finished")
+        self.log.info("Threads finished")
 
 
     def process(self):

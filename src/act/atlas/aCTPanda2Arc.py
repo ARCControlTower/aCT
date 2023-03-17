@@ -17,16 +17,16 @@ class aCTPanda2Arc(aCTATLASProcess):
         Insert new jobs from pandajobs to arcjobs.
 
         Signal handling strategy:
-        - signals are deferred per job because arcjob insertion is not lazy
-        - TODO: review: Assume that arcjobs insertion, pandajobs update and
-                APFMon desc dump need to be atomic because desc dump cannot be
-                rolled back and it might not be cleaned if job is not properly
-                inserted to arcjobs and updated in dbpanda.
+        - exit is checked before every job update
         """
         jobs = self.dbpanda.getJobs("arcjobid is NULL and actpandastatus in ('sent', 'starting') and siteName in %s limit 10000" % self.sitesselect)
         proxies_map = {}
 
         for job in jobs:
+
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
 
             if job['proxyid'] not in proxies_map:
                 proxies_map[job['proxyid']] = self.dbarc.getProxyPath(job['proxyid'])
@@ -75,33 +75,30 @@ class aCTPanda2Arc(aCTATLASProcess):
                 if not self.sites[job['siteName']]['truepilot']:
                     downloadfiles += ';heartbeat.json'
 
-                # exit handling context manager
-                with self.sigdefer:
+                aid = self.dbarc.insertArcJobDescription(xrsl, maxattempts=maxattempts, clusterlist=cls,
+                                                        proxyid=job['proxyid'], appjobid=str(job['pandaid']),
+                                                        downloadfiles=downloadfiles, fairshare=job['siteName'])
+                if not aid:
+                    self.log.error("%s: Failed to insert arc job description: %s" % (job['pandaid'], xrsl))
+                    continue
 
-                    aid = self.dbarc.insertArcJobDescription(xrsl, maxattempts=maxattempts, clusterlist=cls,
-                                                            proxyid=job['proxyid'], appjobid=str(job['pandaid']),
-                                                            downloadfiles=downloadfiles, fairshare=job['siteName'])
-                    if not aid:
-                        self.log.error("%s: Failed to insert arc job description: %s" % (job['pandaid'], xrsl))
-                        continue
+                jd = {}
+                jd['arcjobid'] = aid['LAST_INSERT_ID()']
+                jd['pandastatus'] = 'starting'
+                # make sure actpandastatus is really 'sent', in case of resubmitting
+                jd['actpandastatus'] = 'sent'
+                self.dbpanda.updateJob(job['pandaid'], jd)
 
-                    jd = {}
-                    jd['arcjobid'] = aid['LAST_INSERT_ID()']
-                    jd['pandastatus'] = 'starting'
-                    # make sure actpandastatus is really 'sent', in case of resubmitting
-                    jd['actpandastatus'] = 'sent'
-                    self.dbpanda.updateJob(job['pandaid'], jd)
-
-                    # Dump description for APFMon
-                    if self.conf.monitor.apfmon:
-                        logdir = os.path.join(self.conf.joblog.dir,
-                                            job['created'].strftime('%Y-%m-%d'),
-                                            job['siteName'])
-                        os.makedirs(logdir, 0o755, exist_ok=True)
-                        jdlfile = os.path.join(logdir, '%s.jdl' % job['pandaid'])
-                        with open(jdlfile, 'w') as f:
-                            self.log.debug('Wrote description to %s' % jdlfile)
-                            f.write(xrsl)
+                # Dump description for APFMon
+                if self.conf.monitor.apfmon:
+                    logdir = os.path.join(self.conf.joblog.dir,
+                                        job['created'].strftime('%Y-%m-%d'),
+                                        job['siteName'])
+                    os.makedirs(logdir, 0o755, exist_ok=True)
+                    jdlfile = os.path.join(logdir, '%s.jdl' % job['pandaid'])
+                    with open(jdlfile, 'w') as f:
+                        self.log.debug('Wrote description to %s' % jdlfile)
+                        f.write(xrsl)
 
     def process(self):
         self.setSites()

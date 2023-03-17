@@ -23,49 +23,23 @@ class aCTATLASStatus(aCTATLASProcess):
           and report failed back to panda
 
         Signal handling strategy:
-        - The killing of starting jobs on offline sites can be interrupted and
-          rolled back.
-
-        - Efficient handling of "tobekilled" jobs is a little trickier for two
-          reasons. On the one hand, it is most efficient if everything could be
-          done in a single transaction. On the other hand, setting arcjobs to
-          tocancel is a racy operation due to the current concurrency model
-          (multiple processes are handling the jobs that can be cancelled, in
-          this case aCTStatus and aCTATLASStatus), hence the transaction should
-          be commited ASAP.
-
-         (different sync model or concurrency model is still required to
-          eliminate races!)
-
-        - Another problem is signal handling. Both pandajob and arcjob have to
-          be cancelled. That is why the update for arcjob was switched to lazy
-          operation. Previously, arcjob was commited immediately and pandajob
-          only at the end of the batch. This could cause inconsistency by
-          arcjob being cancelled and pandajob still being in "tobekilled"
-          (which might not have been a problem and could have got resolved
-          later by some cleanup operations?).
-
-        - TODO: One possibility is also to break appart the method into
-                separate methods for independent parts, e. g. starting jobs on
-                offline sites can be handled separately from "tobekilled" jobs.
+        - exit is checked before every job update
         """
         offlinesites = [s for s,a in self.sites.items() if a['status'] == 'offline']
-
         if offlinesites:
-
             offlinesitesselect = "('%s')" % "','".join(offlinesites)
             jobs = self.dbpanda.getJobs("(actpandastatus='starting' or actpandastatus='sent') and sitename in %s" % offlinesitesselect,
                                         ['pandaid', 'arcjobid', 'siteName', 'id'])
-
-            with self.transaction([self.dbpanda, self.dbarc]):
-
-                for job in jobs:
-                    self.log.info("Cancelling starting job for %d for offline site %s" % (job['pandaid'], job['siteName']))
-                    select = 'id=%s' % job['id']
-                    self.dbpanda.updateJobsLazy(select, {'actpandastatus': 'failed', 'pandastatus': 'failed',
-                                                        'error': 'Starting job was killed because queue went offline'})
-                    if job['arcjobid']:
-                        self.dbarc.updateArcJobLazy(job['arcjobid'], {'arcstate': 'tocancel'})
+            for job in jobs:
+                if self.mustExit:
+                    self.log.info(f"Exiting early due to requested shutdown")
+                    self.stopWithException()
+                self.log.info("Cancelling starting job for %d for offline site %s" % (job['pandaid'], job['siteName']))
+                select = 'id=%s' % job['id']
+                self.dbpanda.updateJobs(select, {'actpandastatus': 'failed', 'pandastatus': 'failed',
+                                                    'error': 'Starting job was killed because queue went offline'})
+                if job['arcjobid']:
+                    self.dbarc.updateArcJob(job['arcjobid'], {'arcstate': 'tocancel'})
 
         # Get jobs killed by panda
         jobs = self.dbpanda.getJobs("actpandastatus='tobekilled' and siteName in %s limit 100" % self.sitesselect,
@@ -74,44 +48,47 @@ class aCTATLASStatus(aCTATLASProcess):
             return
 
         for job in jobs:
+
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+
             self.log.info("Cancelling arc job for %d", job['pandaid'])
             select = 'id=%s' % job['id']
 
-            with self.transaction([self.dbpanda, self.dbarc]):
+            # Check if arcjobid is set before cancelling the job
+            if not job['arcjobid']:
+                self.dbpanda.updateJobs(select, {'actpandastatus': 'cancelled'})
+                continue
 
-                # Check if arcjobid is set before cancelling the job
-                if not job['arcjobid']:
-                    self.dbpanda.updateJobsLazy(select, {'actpandastatus': 'cancelled'})
-                    continue
+            # Put timings in the DB
+            arcselect = "arcjobid='%s' and arcjobs.id=pandajobs.arcjobid and sitename in %s" % (job['arcjobid'], self.sitesselect)
+            columns = ['arcjobs.EndTime', 'UsedTotalWallTime', 'stdout', 'JobID', 'appjobid', 'siteName', 'cluster', 'metadata',
+                        'ExecutionNode', 'pandaid', 'UsedTotalCPUTime', 'ExitCode', 'arcjobs.Error', 'sendhb', 'pandajobs.created', 'corecount']
 
-                # Put timings in the DB
-                arcselect = "arcjobid='%s' and arcjobs.id=pandajobs.arcjobid and sitename in %s" % (job['arcjobid'], self.sitesselect)
-                columns = ['arcjobs.EndTime', 'UsedTotalWallTime', 'stdout', 'JobID', 'appjobid', 'siteName', 'cluster', 'metadata',
-                           'ExecutionNode', 'pandaid', 'UsedTotalCPUTime', 'ExitCode', 'arcjobs.Error', 'sendhb', 'pandajobs.created', 'corecount']
+            arcjobs = self.dbarc.getArcJobsInfo(arcselect, columns=columns, tables='arcjobs,pandajobs')
+            desc = {}
+            if arcjobs:
+                desc['endTime'] = datetime.datetime.utcnow()
+                desc['startTime'] = datetime.datetime.utcnow()
 
-                arcjobs = self.dbarc.getArcJobsInfo(arcselect, columns=columns, tables='arcjobs,pandajobs')
-                desc = {}
-                if arcjobs:
-                    desc['endTime'] = datetime.datetime.utcnow()
-                    desc['startTime'] = datetime.datetime.utcnow()
+            self.processFailed(arcjobs)
 
-                self.processFailed(arcjobs)
+            # Check if job was manually killed
+            if job['pandastatus'] is not None:
+                self.log.info('%s: Manually killed, will report failure to panda' % job['pandaid'])
+                # Skip validator since there is no metadata.xml
+                desc['actpandastatus'] = 'failed'
+                desc['pandastatus'] = 'failed'
+                desc['error'] = 'Job was killed in aCT'
+                if self.sites[job['siteName']]['truepilot']:
+                    desc['sendhb'] = 0
+            else:
+                desc['actpandastatus'] = 'cancelled'
+            self.dbpanda.updateJobs(select, desc)
 
-                # Check if job was manually killed
-                if job['pandastatus'] is not None:
-                    self.log.info('%s: Manually killed, will report failure to panda' % job['pandaid'])
-                    # Skip validator since there is no metadata.xml
-                    desc['actpandastatus'] = 'failed'
-                    desc['pandastatus'] = 'failed'
-                    desc['error'] = 'Job was killed in aCT'
-                    if self.sites[job['siteName']]['truepilot']:
-                        desc['sendhb'] = 0
-                else:
-                    desc['actpandastatus'] = 'cancelled'
-                self.dbpanda.updateJobsLazy(select, desc)
-
-                # Finally cancel the arc job
-                self.dbarc.updateArcJobLazy(job['arcjobid'], {'arcstate': 'tocancel'})
+            # Finally cancel the arc job
+            self.dbarc.updateArcJob(job['arcjobid'], {'arcstate': 'tocancel'})
 
     def getStartTime(self, endtime, walltime):
         """
@@ -129,30 +106,30 @@ class aCTATLASStatus(aCTATLASProcess):
         from running.
 
         Signal handling strategy:
-        - all updates are performed in one transaction which is rolled back
-          on signal
+        - exit is checked before every job update
         """
-        with self.transaction([self.dbpanda]):
+        select = "((arcjobs.arcstate in ('submitted', 'holding') and pandajobs.actpandastatus='sent') or"
+        select += " (arcjobs.arcstate in ('tosubmit', 'submitting', 'submitted', 'holding') and pandajobs.actpandastatus='running'))"
+        select += " and arcjobs.id=pandajobs.arcjobid and pandajobs.sitename in %s limit 100000" % self.sitesselect
+        columns = ["arcjobs.id", "arcjobs.cluster", "arcjobs.appjobid"]
+        jobstoupdate = self.dbarc.getArcJobsInfo(select, columns=columns, tables="arcjobs,pandajobs")
 
-            select = "((arcjobs.arcstate in ('submitted', 'holding') and pandajobs.actpandastatus='sent') or"
-            select += " (arcjobs.arcstate in ('tosubmit', 'submitting', 'submitted', 'holding') and pandajobs.actpandastatus='running'))"
-            select += " and arcjobs.id=pandajobs.arcjobid and pandajobs.sitename in %s limit 100000" % self.sitesselect
-            columns = ["arcjobs.id", "arcjobs.cluster", "arcjobs.appjobid"]
-            jobstoupdate = self.dbarc.getArcJobsInfo(select, columns=columns, tables="arcjobs,pandajobs")
+        if len(jobstoupdate) == 0:
+            return
+        else:
+            self.log.debug("Found %d submitted jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
 
-            if len(jobstoupdate) == 0:
-                return
-            else:
-                self.log.debug("Found %d submitted jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
-
-            for aj in jobstoupdate:
-                select = "arcjobid='"+str(aj["id"])+"'"
-                desc = {}
-                desc["pandastatus"] = "starting"
-                desc["actpandastatus"] = "starting"
-                if aj['cluster']:
-                    desc["computingElement"] = urlparse(aj['cluster']).hostname
-                self.dbpanda.updateJobsLazy(select, desc)
+        for aj in jobstoupdate:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            select = "arcjobid='"+str(aj["id"])+"'"
+            desc = {}
+            desc["pandastatus"] = "starting"
+            desc["actpandastatus"] = "starting"
+            if aj['cluster']:
+                desc["computingElement"] = urlparse(aj['cluster']).hostname
+            self.dbpanda.updateJobs(select, desc)
 
     def updateRunningJobs(self,state):
         """
@@ -165,15 +142,7 @@ class aCTATLASStatus(aCTATLASProcess):
         - startTime
 
         Signal handling strategy:
-        - Signals are deferred and updates are commited instead of lazy
-          on a per job basis to ensure aCTAPFMon and dbpanda consistency.
-
-        TODO: Review the required signal handling for state consistency of
-              aCTAPFMon and DB (e. g. is it a problem if apfmon.updateJob()
-              and dbpanda.updateJobs() do not execute atomically or as a
-              transaction that has to be rolled back in some way?).
-        TODO: Can apfmon.updateJob() take a longer time (> 5 seconds) and does
-              is it then require a different strategy?
+        - exit is checked before every job update
         """
         # do an inner join to pick up all jobs that should be set to running
         # TODO: pandajobs.starttime will not be updated if a job is resubmitted
@@ -194,6 +163,11 @@ class aCTATLASStatus(aCTATLASProcess):
             self.log.debug("Found %s: %d jobs (%s)" % (state, len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
 
         for aj in jobstoupdate:
+
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+
             select = "arcjobid='"+str(aj["id"])+"'"
             desc = {}
             desc["pandastatus"] = "running"
@@ -210,22 +184,19 @@ class aCTATLASStatus(aCTATLASProcess):
             desc["startTime"] = self.getStartTime(datetime.datetime.utcnow(), aj['UsedTotalWalltime'])
             desc["corecount"] = aj['RequestedSlots']
 
-            # exit handling context manager
-            with self.sigdefer:
+            # When true pilot job has started running, turn of aCT heartbeats
+            if self.sites[aj['siteName']]['truepilot']:
+                self.log.info("%s: Job is running so stop sending heartbeats", aj['pandaid'])
+                desc['sendhb'] = 0
+            else:
+                # Update APFmon (done by wrapper for truepilot)
+                self.apfmon.updateJob(aj['pandaid'], 'running')
 
-                # When true pilot job has started running, turn of aCT heartbeats
-                if self.sites[aj['siteName']]['truepilot']:
-                    self.log.info("%s: Job is running so stop sending heartbeats", aj['pandaid'])
-                    desc['sendhb'] = 0
-                else:
-                    # Update APFmon (done by wrapper for truepilot)
-                    self.apfmon.updateJob(aj['pandaid'], 'running')
-
-                try:
-                    self.dbpanda.updateJobs(select, desc)
-                except:
-                    desc['startTime'] = datetime.datetime.utcnow()
-                    self.dbpanda.updateJobs(select, desc)
+            try:
+                self.dbpanda.updateJobs(select, desc)
+            except:
+                desc['startTime'] = datetime.datetime.utcnow()
+                self.dbpanda.updateJobs(select, desc)
 
     def updateFinishedJobs(self):
         """
@@ -237,15 +208,7 @@ class aCTATLASStatus(aCTATLASProcess):
         - endTime
 
         Signal handling strategy:
-        - Signals are deferred and updates are commited instead of lazy
-          on a per job basis to ensure aCTAPFMon and dbpanda consistency.
-
-        TODO: Review the required signal handling for state consistency of
-              aCTAPFMon and DB (e. g. is it a problem if apfmon.updateJob()
-              and dbpanda.updateJobs() do not execute atomically or as a
-              transaction that has to be rolled back in some way?).
-        TODO: Can apfmon.updateJob() take a longer time (> 5 seconds) and does
-              is it then require a different strategy?
+        - exit is checked before every job update
         """
         # don't get jobs already having actpandastatus states treated by
         # validator to avoid race conditions
@@ -264,6 +227,11 @@ class aCTATLASStatus(aCTATLASProcess):
             self.log.debug("Found %d finished jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
 
         for aj in jobstoupdate:
+
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+
             select = "arcjobid='"+str(aj["id"])+"'"
             desc = {}
             desc["pandastatus"] = "transferring"
@@ -275,53 +243,52 @@ class aCTATLASStatus(aCTATLASProcess):
                 self.log.info("%s: Job finished so stop sending heartbeats", aj['appjobid'])
                 desc['sendhb'] = 0
 
-            # exit handling context manager
-            with self.sigdefer:
-
-                if not self.sites[aj['siteName']]['truepilot']:
-                    # Update APFmon (done by wrapper for truepilot)
-                    self.apfmon.updateJob(aj['appjobid'], 'exiting', exitcode=0)
-                try:
-                    self.dbpanda.updateJobs(select, desc)
-                except:
-                    desc['startTime'] = datetime.datetime.utcnow()
-                    desc['endTime'] = datetime.datetime.utcnow()
-                    self.dbpanda.updateJobs(select, desc)
+            if not self.sites[aj['siteName']]['truepilot']:
+                # Update APFmon (done by wrapper for truepilot)
+                self.apfmon.updateJob(aj['appjobid'], 'exiting', exitcode=0)
+            try:
+                self.dbpanda.updateJobs(select, desc)
+            except:
+                desc['startTime'] = datetime.datetime.utcnow()
+                desc['endTime'] = datetime.datetime.utcnow()
+                self.dbpanda.updateJobs(select, desc)
 
     def checkFailed(self, arcjobs):
         """
         Resubmit jobs on specific ARC errors and return the rest.
 
         Signal handling strategy:
-        - all updates are performed in one transaction which is rolled back
-          on signal
+        - exit is checked before every job update
         """
-        with self.transaction([self.dbpanda]):
+        failedjobs = []
+        #resubmitting=False
 
-            failedjobs = []
-            #resubmitting=False
+        for aj in arcjobs:
 
-            for aj in arcjobs:
-                if self.sites[aj['siteName']]['truepilot']:
-                    self.log.info('%s: No resubmission for true pilot job', aj['appjobid'])
-                    failedjobs += [aj]
-                    continue
-                resubmit=False
-                # TODO: errors part of aCTConfigARC should probably be moved to aCTConfigAPP.
-                for error in self.arcconf.errors.toresubmit.arcerrors:
-                    if aj['Error'].find(error) != -1:
-                        resubmit=True
-                if resubmit:
-                    self.log.info("%s: Resubmitting %d %s %s" % (aj['appjobid'],aj['arcjobid'],aj['JobID'],aj['Error']))
-                    select = "arcjobid='"+str(aj["arcjobid"])+"'"
-                    jd={}
-                    # Validator processes this state before setting back to starting
-                    jd['pandastatus'] = 'starting'
-                    jd['actpandastatus'] = 'toresubmit'
-                    self.dbpanda.updateJobsLazy(select,jd)
-                    #resubmitting=True
-                else:
-                    failedjobs += [aj]
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+
+            if self.sites[aj['siteName']]['truepilot']:
+                self.log.info('%s: No resubmission for true pilot job', aj['appjobid'])
+                failedjobs += [aj]
+                continue
+            resubmit=False
+            # TODO: errors part of aCTConfigARC should probably be moved to aCTConfigAPP.
+            for error in self.arcconf.errors.toresubmit.arcerrors:
+                if aj['Error'].find(error) != -1:
+                    resubmit=True
+            if resubmit:
+                self.log.info("%s: Resubmitting %d %s %s" % (aj['appjobid'],aj['arcjobid'],aj['JobID'],aj['Error']))
+                select = "arcjobid='"+str(aj["arcjobid"])+"'"
+                jd={}
+                # Validator processes this state before setting back to starting
+                jd['pandastatus'] = 'starting'
+                jd['actpandastatus'] = 'toresubmit'
+                self.dbpanda.updateJobs(select,jd)
+                #resubmitting=True
+            else:
+                failedjobs += [aj]
 
         return failedjobs
 
@@ -377,15 +344,17 @@ class aCTATLASStatus(aCTATLASProcess):
         Process jobs for which pilot failed.
 
         Such jobs have batch exit code non-zero.
-
-        TODO: Review if this can really be interrupted without any special
-              handling.
         """
         if not arcjobs:
             return
 
         self.log.info("processing %d failed jobs" % len(arcjobs))
         for aj in arcjobs:
+
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+
             jobid=aj['JobID']
             if not jobid:
                 # Job was not even submitted, there is no more information
@@ -487,18 +456,7 @@ class aCTATLASStatus(aCTATLASProcess):
         If not do post-processing and fill status in pandajobs.
 
         Signal handling strategy:
-        - setting failed jobs to tofetch can be interrupted with a rollback
-        - updating donefailed jobs is done with signals deferred for DB and
-          APFMon consistency
-          TODO: review DB and APFMon consistency requirements
-        - lost and cancelled jobs can be interrupted with a rollback
-          TODO: review if reordering of processing of job groups is OK, it used
-                to be:
-                failed -> donefailed -> lost -> cancelled
-                it now is:
-                donefailed -> lost -> cancelled -> failed
-                so that lost, cancelled and failed can be performed in a single
-                try block (but on different DBs)
+        - exit is checked before every job update
         """
         # Look for failed final states in ARC which are still starting or running in panda
         select = "(arcstate='donefailed' or arcstate='cancelled' or arcstate='lost')"
@@ -535,6 +493,9 @@ class aCTATLASStatus(aCTATLASProcess):
         self.processFailed(failedjobs)
 
         for aj in failedjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
             select = "arcjobid='"+str(aj["arcjobid"])+"'"
             desc = {}
             desc["pandastatus"] = "transferring"
@@ -547,67 +508,71 @@ class aCTATLASStatus(aCTATLASProcess):
                 self.log.info("%s: Job finished so stop sending heartbeats", aj['appjobid'])
                 desc['sendhb'] = 0
 
-            # exit handling context manager
-            with self.sigdefer:
+            if not self.sites[aj['siteName']]['truepilot']:
+                # Update APFmon (done by wrapper for truepilot)
+                self.apfmon.updateJob(aj['appjobid'], 'exiting', exitcode=aj['ExitCode'])
+            try:
+                self.dbpanda.updateJobs(select, desc)
+            except:
+                desc['startTime'] = datetime.datetime.utcnow()
+                desc['endTime'] = datetime.datetime.utcnow()
+                self.dbpanda.updateJobs(select, desc)
 
-                if not self.sites[aj['siteName']]['truepilot']:
-                    # Update APFmon (done by wrapper for truepilot)
-                    self.apfmon.updateJob(aj['appjobid'], 'exiting', exitcode=aj['ExitCode'])
-                try:
-                    self.dbpanda.updateJobs(select, desc)
-                except:
-                    desc['startTime'] = datetime.datetime.utcnow()
-                    desc['endTime'] = datetime.datetime.utcnow()
-                    self.dbpanda.updateJobs(select, desc)
+        # fetch failed jobs
+        select = "arcstate='failed'"
+        columns = ['id']
+        arcjobs = self.dbarc.getArcJobsInfo(select, columns)
+        for aj in arcjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            select = "id='"+str(aj["id"])+"'"
+            desc = {"arcstate":"tofetch", "tarcstate": self.dbarc.getTimeStamp()}
+            self.dbarc.updateArcJobs(desc, select)
 
-        with self.transaction([self.dbarc, self.dbpanda]):
+        # clean lost pilot jobs or resubmit other lost jobs
+        for aj in lostjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            select = "arcjobid='"+str(aj["arcjobid"])+"'"
+            desc={}
 
-            # fetch failed jobs
-            select = "arcstate='failed'"
-            columns = ['id']
-            arcjobs = self.dbarc.getArcJobsInfo(select, columns)
-            for aj in arcjobs:
-                select = "id='"+str(aj["id"])+"'"
-                desc = {"arcstate":"tofetch", "tarcstate": self.dbarc.getTimeStamp()}
-                self.dbarc.updateArcJobsLazy(desc, select)
+            # For truepilot, just set to clean and transferring to clean up arc job
+            if self.sites[aj['siteName']]['truepilot']:
+                self.log.info("%s: Job is lost, cleaning up arc job", aj['appjobid'])
+                desc['sendhb'] = 0
+                desc['pandastatus'] = 'transferring'
+                desc['actpandastatus'] = 'toclean'
+                desc['error'] = 'Job was lost from ARC CE'
+            else:
+                self.log.info("%s: Resubmitting lost job %d %s %s" % (aj['appjobid'], aj['arcjobid'],aj['JobID'],aj['Error']))
+                desc['pandastatus'] = 'starting'
+                desc['actpandastatus'] = 'starting'
+                desc['arcjobid'] = None
+            self.dbpanda.updateJobs(select,desc)
 
-            # clean lost pilot jobs or resubmit other lost jobs
-            for aj in lostjobs:
-                select = "arcjobid='"+str(aj["arcjobid"])+"'"
-                desc={}
-
-                # For truepilot, just set to clean and transferring to clean up arc job
-                if self.sites[aj['siteName']]['truepilot']:
-                    self.log.info("%s: Job is lost, cleaning up arc job", aj['appjobid'])
-                    desc['sendhb'] = 0
-                    desc['pandastatus'] = 'transferring'
-                    desc['actpandastatus'] = 'toclean'
-                    desc['error'] = 'Job was lost from ARC CE'
-                else:
-                    self.log.info("%s: Resubmitting lost job %d %s %s" % (aj['appjobid'], aj['arcjobid'],aj['JobID'],aj['Error']))
-                    desc['pandastatus'] = 'starting'
-                    desc['actpandastatus'] = 'starting'
-                    desc['arcjobid'] = None
-                self.dbpanda.updateJobsLazy(select,desc)
-
-            # clean cancelled pilot jobs and resubmit other cancelled jobs
-            for aj in cancelledjobs:
-                # Jobs were unexpectedly killed in arc, resubmit and clean
-                select = "arcjobid='"+str(aj["arcjobid"])+"'"
-                desc = {}
-                # For truepilot, just set to clean and transferring to clean up arc job
-                if self.sites[aj['siteName']]['truepilot']:
-                    self.log.info("%s: Job was cancelled, cleaning up arc job", aj['appjobid'])
-                    desc['sendhb'] = 0
-                    desc['pandastatus'] = 'transferring'
-                    desc['actpandastatus'] = 'toclean'
-                    desc['error'] = aj['Error']
-                else:
-                    self.log.info("%s: Resubmitting cancelled job %d %s" % (aj['appjobid'], aj['arcjobid'],aj['JobID']))
-                    desc["pandastatus"] = "starting"
-                    desc["actpandastatus"] = "starting"
-                    desc["arcjobid"] = None
-                self.dbpanda.updateJobsLazy(select, desc)
+        # clean cancelled pilot jobs and resubmit other cancelled jobs
+        for aj in cancelledjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            # Jobs were unexpectedly killed in arc, resubmit and clean
+            select = "arcjobid='"+str(aj["arcjobid"])+"'"
+            desc = {}
+            # For truepilot, just set to clean and transferring to clean up arc job
+            if self.sites[aj['siteName']]['truepilot']:
+                self.log.info("%s: Job was cancelled, cleaning up arc job", aj['appjobid'])
+                desc['sendhb'] = 0
+                desc['pandastatus'] = 'transferring'
+                desc['actpandastatus'] = 'toclean'
+                desc['error'] = aj['Error']
+            else:
+                self.log.info("%s: Resubmitting cancelled job %d %s" % (aj['appjobid'], aj['arcjobid'],aj['JobID']))
+                desc["pandastatus"] = "starting"
+                desc["actpandastatus"] = "starting"
+                desc["arcjobid"] = None
+            self.dbpanda.updateJobs(select, desc)
 
     def cleanupLeftovers(self):
         """
@@ -619,47 +584,53 @@ class aCTATLASStatus(aCTATLASProcess):
         - arcstate=cancelled and actpandastatus=cancelled/donecancelled/failed/donefailed
 
         Signal handling strategy:
-        - all updates are performed in one transaction which is rolled back
-          on signal
+        - exit is checked before every job update
         """
-        with self.transaction([self.dbarc]):
+        # Even though the transaction probably gets rolled back
+        # automatically, it is nice to handle it explicitly. Also, this
+        # simplifies the method with one nested block.
+        select = "arcstate in ('tocancel', 'cancelling', 'toclean') and (cluster='' or cluster is NULL)"
+        jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid'])
+        for job in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.info("%s: Deleting from arcjobs unsubmitted job %d", job['appjobid'], job['id'])
+            self.dbarc.deleteArcJob(job['id'])
 
-            # Even though the transaction probably gets rolled back
-            # automatically, it is nice to handle it explicitly. Also, this
-            # simplifies the method with one nested block.
-            select = "arcstate in ('tocancel', 'cancelling', 'toclean') and (cluster='' or cluster is NULL)"
-            jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid'])
-            for job in jobs:
-                self.log.info("%s: Deleting from arcjobs unsubmitted job %d", job['appjobid'], job['id'])
-                self.dbarc.deleteArcJob(job['id'])
+        select = "(arcstate='done' or arcstate='lost' or arcstate='cancelled' or arcstate='donefailed') \
+                and arcjobs.id not in (select arcjobid from pandajobs where arcjobid is not NULL)"
+        jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid', 'arcstate', 'JobID'])
+        cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+        for job in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            # done jobs should not be there, log a warning
+            if job['arcstate'] == 'done':
+                self.log.warning("%s: Removing orphaned done job %d", job['appjobid'], job['id'])
+            else:
+                self.log.info("%s: Cleaning left behind %s job %d", job['appjobid'], job['arcstate'], job['id'])
+            self.dbarc.updateArcJob(job['id'], cleandesc)
+            if job['JobID'] and job['JobID'].rfind('/') != -1:
+                sessionid = job['JobID'][job['JobID'].rfind('/'):]
+                localdir = self.tmpdir + sessionid
+                shutil.rmtree(localdir, ignore_errors=True)
 
-            select = "(arcstate='done' or arcstate='lost' or arcstate='cancelled' or arcstate='donefailed') \
-                    and arcjobs.id not in (select arcjobid from pandajobs where arcjobid is not NULL)"
-            jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid', 'arcstate', 'JobID'])
-            cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
-            for job in jobs:
-                # done jobs should not be there, log a warning
-                if job['arcstate'] == 'done':
-                    self.log.warning("%s: Removing orphaned done job %d", job['appjobid'], job['id'])
-                else:
-                    self.log.info("%s: Cleaning left behind %s job %d", job['appjobid'], job['arcstate'], job['id'])
-                self.dbarc.updateArcJobLazy(job['id'], cleandesc)
-                if job['JobID'] and job['JobID'].rfind('/') != -1:
-                    sessionid = job['JobID'][job['JobID'].rfind('/'):]
-                    localdir = self.tmpdir + sessionid
-                    shutil.rmtree(localdir, ignore_errors=True)
-
-            select = "arcstate='cancelled' and (actpandastatus in ('cancelled', 'donecancelled', 'failed', 'donefailed')) " \
-                    "and pandajobs.arcjobid = arcjobs.id and siteName in %s" % self.sitesselect
-            cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
-            jobs = self.dbarc.getArcJobsInfo(select, ['arcjobs.id', 'arcjobs.appjobid', 'arcjobs.JobID'], tables='arcjobs, pandajobs')
-            for job in jobs:
-                self.log.info("%s: Cleaning cancelled job %d", job['appjobid'], job['id'])
-                self.dbarc.updateArcJobLazy(job['id'], cleandesc)
-                if job['JobID'] and job['JobID'].rfind('/') != -1:
-                    sessionid = job['JobID'][job['JobID'].rfind('/'):]
-                    localdir = self.tmpdir + sessionid
-                    shutil.rmtree(localdir, ignore_errors=True)
+        select = "arcstate='cancelled' and (actpandastatus in ('cancelled', 'donecancelled', 'failed', 'donefailed')) " \
+                "and pandajobs.arcjobid = arcjobs.id and siteName in %s" % self.sitesselect
+        cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+        jobs = self.dbarc.getArcJobsInfo(select, ['arcjobs.id', 'arcjobs.appjobid', 'arcjobs.JobID'], tables='arcjobs, pandajobs')
+        for job in jobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.info("%s: Cleaning cancelled job %d", job['appjobid'], job['id'])
+            self.dbarc.updateArcJob(job['id'], cleandesc)
+            if job['JobID'] and job['JobID'].rfind('/') != -1:
+                sessionid = job['JobID'][job['JobID'].rfind('/'):]
+                localdir = self.tmpdir + sessionid
+                shutil.rmtree(localdir, ignore_errors=True)
 
     def process(self):
         """

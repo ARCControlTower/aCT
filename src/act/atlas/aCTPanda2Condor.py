@@ -17,16 +17,16 @@ class aCTPanda2Condor(aCTATLASProcess):
         Insert new jobs in pandajobs to condorjobs.
 
         Signal handling strategy:
-        - signals are deferred per job
-        - TODO: review: Assume that condorjobs insertion, pandajobs update and
-                APFMon desc dump need to be atomic because desc dump cannot be
-                rolled back and it might not be cleaned if job is not properly
-                inserted to condorjobs and updated in dbpanda.
+        - exit is checked before every job update
         """
         jobs = self.dbpanda.getJobs("condorjobid is NULL and siteName in %s limit 10000" % self.sitesselect)
         proxies_map = {}
 
         for job in jobs:
+
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
 
             if job['proxyid'] not in proxies_map:
                 proxies_map[job['proxyid']] = self.dbarc.getProxyPath(job['proxyid'])
@@ -48,34 +48,31 @@ class aCTPanda2Condor(aCTATLASProcess):
                 self.log.debug("%d: classad: %s" % (job['pandaid'], classad))
                 maxattempts = 0 # Never resubmit condor jobs
 
-                # exit handling context manager
-                with self.sigdefer:
+                aid = self.dbcondor.insertCondorJobDescription(classad, maxattempts=maxattempts, clusterlist=endpoints,
+                                                            proxyid=job['proxyid'], appjobid=str(job['pandaid']),
+                                                            fairshare=job['siteName'])
+                if not aid:
+                    self.log.error("%d: Failed to insert condor job description: %s" % (job['pandaid'], classad))
+                    continue
 
-                    aid = self.dbcondor.insertCondorJobDescription(classad, maxattempts=maxattempts, clusterlist=endpoints,
-                                                                proxyid=job['proxyid'], appjobid=str(job['pandaid']),
-                                                                fairshare=job['siteName'])
-                    if not aid:
-                        self.log.error("%d: Failed to insert condor job description: %s" % (job['pandaid'], classad))
-                        continue
+                jd = {}
+                jd['condorjobid'] = aid['LAST_INSERT_ID()']
+                jd['pandastatus'] = 'starting'
+                # make sure actpandastatus is really 'sent', in case of resubmitting
+                jd['actpandastatus'] = 'sent'
+                jd['corecount'] = int(classad['+xcount'])
+                self.dbpanda.updateJob(job['pandaid'], jd)
 
-                    jd = {}
-                    jd['condorjobid'] = aid['LAST_INSERT_ID()']
-                    jd['pandastatus'] = 'starting'
-                    # make sure actpandastatus is really 'sent', in case of resubmitting
-                    jd['actpandastatus'] = 'sent'
-                    jd['corecount'] = int(classad['+xcount'])
-                    self.dbpanda.updateJob(job['pandaid'], jd)
-
-                    # Dump description for APFMon
-                    if self.conf.monitor.apfmon:
-                        logdir = os.path.join(self.conf.joblog.dir,
-                                            job['created'].strftime('%Y-%m-%d'),
-                                            job['siteName'])
-                        os.makedirs(logdir, 0o755, exist_ok=True)
-                        jdlfile = os.path.join(logdir, '%s.jdl' % job['pandaid'])
-                        with open(jdlfile, 'w') as f:
-                            f.write('\n'.join(['%s = %s' % (k,v) for (k,v) in classad.items()]))
-                            self.log.debug('Wrote description to %s' % jdlfile)
+                # Dump description for APFMon
+                if self.conf.monitor.apfmon:
+                    logdir = os.path.join(self.conf.joblog.dir,
+                                        job['created'].strftime('%Y-%m-%d'),
+                                        job['siteName'])
+                    os.makedirs(logdir, 0o755, exist_ok=True)
+                    jdlfile = os.path.join(logdir, '%s.jdl' % job['pandaid'])
+                    with open(jdlfile, 'w') as f:
+                        f.write('\n'.join(['%s = %s' % (k,v) for (k,v) in classad.items()]))
+                        self.log.debug('Wrote description to %s' % jdlfile)
 
     def process(self):
         self.setSites()
