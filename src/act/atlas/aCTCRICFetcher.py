@@ -1,6 +1,8 @@
 # Handler for fetching site info from CRIC. Fetches data and stores it in json file.
 
 import os
+import signal
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -16,9 +18,22 @@ class aCTCRICFetcher(aCTATLASProcess):
         self.queues = self.conf.cric.server
         self.queuesfile = self.conf.cric.jsonfilename
 
+        # TODO: aCTCRICFetcher is the only process that sleeps a very long
+        # period of time, unacceptable for the service stop mechanism.
+        # This is currently a quick hack. What should be a more generic API
+        # for such functionality? (Especially, how could the configuration
+        # of arbitrary waiting period be exposed to the developer in the most
+        # elegant way?)
+        self.terminate = threading.Event()
+        signal.signal(signal.SIGTERM, self.exitHandler)
+
+    def exitHandler(self, signum, frame):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        self.terminate.set()
+
     def wait(self):
         # avoid too much cric fetching
-        time.sleep(600)
+        self.terminate.wait(600)
 
     def fetchFromCRIC(self, url, filename):
         try:
