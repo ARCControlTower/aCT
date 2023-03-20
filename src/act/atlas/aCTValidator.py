@@ -664,4 +664,4 @@ class aCTValidator(aCTATLASProcess):
         # Validator suffers from memory leaks in arc bindings, so exit once per day
         if time.time() - self.starttime > 60*60*24:
             self.log.info("Exiting for periodic restart")
-            self.stop()
+            self.stopWithException()
