@@ -458,6 +458,18 @@ class aCTATLASStatus(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
+        # fetch failed jobs
+        select = "arcstate='failed'"
+        columns = ['id']
+        arcjobs = self.dbarc.getArcJobsInfo(select, columns)
+        for aj in arcjobs:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            select = "id='"+str(aj["id"])+"'"
+            desc = {"arcstate":"tofetch", "tarcstate": self.dbarc.getTimeStamp()}
+            self.dbarc.updateArcJobs(desc, select)
+
         # Look for failed final states in ARC which are still starting or running in panda
         select = "(arcstate='donefailed' or arcstate='cancelled' or arcstate='lost')"
         select += " and actpandastatus in ('sent', 'starting', 'running', 'transferring')"
@@ -517,18 +529,6 @@ class aCTATLASStatus(aCTATLASProcess):
                 desc['startTime'] = datetime.datetime.utcnow()
                 desc['endTime'] = datetime.datetime.utcnow()
                 self.dbpanda.updateJobs(select, desc)
-
-        # fetch failed jobs
-        select = "arcstate='failed'"
-        columns = ['id']
-        arcjobs = self.dbarc.getArcJobsInfo(select, columns)
-        for aj in arcjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
-            select = "id='"+str(aj["id"])+"'"
-            desc = {"arcstate":"tofetch", "tarcstate": self.dbarc.getTimeStamp()}
-            self.dbarc.updateArcJobs(desc, select)
 
         # clean lost pilot jobs or resubmit other lost jobs
         for aj in lostjobs:
