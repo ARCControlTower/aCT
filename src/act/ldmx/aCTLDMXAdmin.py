@@ -47,6 +47,39 @@ def showusers(args):
     print(tabulate(users, headers='keys'))
     return 0
 
+def deleteuser(args):
+
+    dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
+    try:
+        uid = pwd.getpwnam(args.username)[2]
+    except:
+        logger.error(f'Could not find uid for user {args.username}')
+        return 1
+    user = dbldmx.getUser(uid)
+    if not user:
+        logger.error(f'No such user {args.username} registered in aCT')
+        return 1
+
+    # Check if the user still has active jobs
+    njobs = dbldmx.getNJobs(f"userid = {uid}")
+    if njobs:
+        logger.warn(f"User {args.username} still has {njobs} active jobs, please wait until they are archived")
+        return 1
+
+    response=str(input(f"Are you sure you want to delete the account {args.username}? [y/N] > "))
+    if response != "y" :
+        logger.info("Backing out!")
+        return 0
+
+    try:
+        dbldmx.deleteUser(uid)
+    except Exception as exc:
+        logger.error(f'Error deleting user {args.username}: {exc}')
+        return 1
+
+    logger.info(f"User {args.username} deleted")
+    return 0
+
 def checkAdmin():
     dbldmx = aCTDBLDMX.aCTDBLDMX(logger)
     userinfo = dbldmx.getUser(os.getuid())
@@ -74,6 +107,10 @@ def get_parser():
     show_users_parser = subparsers.add_parser('showusers', help='Show user information')
     show_users_parser.set_defaults(function=showusers)
     show_users_parser.add_argument('username', nargs='?', help='Query specific username')
+
+    delete_users_parser = subparsers.add_parser('deleteuser', help='Remove a user')
+    delete_users_parser.set_defaults(function=deleteuser)
+    delete_users_parser.add_argument('username')
 
     return oparser
 
