@@ -13,27 +13,27 @@ class aCTFetcher(aCTCondorProcess):
         Move finished and failed jobs to the next state.
 
         Signal handling strategy:
-        - All operations are done in one transaction which is rolled back
-          on signal.
+        - exit is checked before updating every job
         """
-        with self.transaction([self.dbcondor]):
+        # Get list of jobs in the right state
+        select = f"condorstate='{condorstate}' and cluster='{self.cluster}' limit 100"
+        columns = ['id', 'ClusterId', 'appjobid']
+        jobstofetch = self.db.getCondorJobsInfo(select, columns)
 
-            # Get list of jobs in the right state
-            select = f"condorstate='{condorstate}' and cluster='{self.cluster}' limit 100"
-            columns = ['id', 'ClusterId', 'appjobid']
-            jobstofetch = self.db.getCondorJobsInfo(select, columns)
+        if not jobstofetch:
+            return
 
-            if not jobstofetch:
-                return
+        self.log.info(f"Fetching {len(jobstofetch)} jobs")
 
-            self.log.info(f"Fetching {len(jobstofetch)} jobs")
-
-            for job in jobstofetch:
-                self.log.info(f"{job['appjobid']}: Finished with job {job['ClusterId']}")
-                self.db.updateCondorJobLazy(
-                    job['id'],
-                    {"condorstate": nextcondorstate, "tcondorstate": self.db.getTimeStamp()}
-                )
+        for job in jobstofetch:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
+            self.log.info(f"{job['appjobid']}: Finished with job {job['ClusterId']}")
+            self.db.updateCondorJob(
+                job['id'],
+                {"condorstate": nextcondorstate, "tcondorstate": self.db.getTimeStamp()}
+            )
 
     def process(self):
         # failed jobs

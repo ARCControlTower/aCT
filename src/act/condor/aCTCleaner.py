@@ -20,6 +20,9 @@ class aCTCleaner(aCTCondorProcess):
         self.log.info(f"Cleaning {len(jobstoclean)} jobs")
 
         for job in jobstoclean:
+            if self.mustExit:
+                self.log.info(f"Exiting early due to requested shutdown")
+                self.stopWithException()
             self.log.info(f"{job['appjobid']}: Cleaning job {job['ClusterId']}")
             self.db.deleteCondorJob(job['id'])
 
