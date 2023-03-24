@@ -124,7 +124,7 @@ class aCTProcessManager:
         # list of tuples of process and datetime of kill
         self.killing = []
 
-    def update(self, termTimeout=5, killTimeout=5):
+    def update(self, termTimeout=60, killTimeout=5):
         """Update the state of managed processes."""
         self.appconf = aCTConfigAPP()
 
