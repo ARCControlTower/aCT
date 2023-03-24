@@ -430,8 +430,6 @@ class ARCRest:
             )
             respstr = resp.read().decode()
 
-            self.logger.debug(f"Upload delegation {delegationID} response - {resp.status} {respstr}")
-
             if resp.status != 200:
                 raise ARCHTTPError(resp.status, respstr, f"Cannot upload delegated cert: {resp.status} {respstr}")
 
