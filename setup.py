@@ -12,7 +12,10 @@ setup(
     package_dir={'': 'src'},
     packages=find_packages('src'),
     install_requires=[
-        'mysql-connector-python',   # connection to MySQL database
+        # utf8 errors can be received for higher versions, should
+        # switch to mariadb connector
+        'mysql-connector-python==8.0.29',
+
         'htcondor',                 # bindings to use HTCondor to submit jobs
         'requests',                 # for APF mon calls
         'prometheus_client',        # Prometheus monitoring
@@ -24,7 +27,11 @@ setup(
         'gunicorn',
         'sqlalchemy',
         'pyjwt',
-        'cryptography',
+
+        # 38.* do not work with python 3.6, 37.* emit deprecation warnings
+        # which upset the alarm and monitoring tools
+        'cryptography==36.0.2',
+
         'pyyaml',
         'setproctitle',
     ],
