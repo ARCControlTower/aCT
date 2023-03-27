@@ -1,25 +1,25 @@
+import logging
 import os
 import shutil
-import logging
 from datetime import datetime
 from urllib.parse import urlparse
 
 import arc
 import jwt
-from act.arc.rest import isLocalInputFile
-from act.arc.x509proxy import checkRFCProxy, createProxyCSR
 from act.client.errors import (ConfigError, InvalidColumnError,
                                InvalidJobIDError, InvalidJobRangeError,
                                RESTError, UnknownClusterError)
 from act.client.jobmgr import JobManager, getIDsFromList
-from act.db.aCTDBMS import getDB
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
+from act.db.aCTDBMS import getDB
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from flask import Flask, jsonify, request, send_file
+from pyarcrest.arc import isLocalInputFile
+from pyarcrest.x509 import checkRFCProxy, createProxyCSR
 from werkzeug.exceptions import BadRequest
 
 # TODO: see if checkJobExists should be used anywhere else

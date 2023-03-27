@@ -4,8 +4,9 @@ from json import JSONDecodeError
 from ssl import SSLError
 
 from act.arc.aCTARCProcess import aCTARCProcess
-from act.arc.rest import ARCError, ARCHTTPError, ARCRest
 from act.common.aCTJob import ACTJob
+from pyarcrest.arc import ARCRest
+from pyarcrest.errors import ARCError, ARCHTTPError
 
 
 class aCTCleaner(aCTARCProcess):

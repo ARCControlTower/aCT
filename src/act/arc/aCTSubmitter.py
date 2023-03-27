@@ -8,11 +8,11 @@ from urllib.parse import urlparse
 
 from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.aCTStatus import ARC_STATE_MAPPING
-from act.arc.rest import (ARCError, ARCHTTPError, ARCRest,
-                          DescriptionParseError, DescriptionUnparseError,
-                          InputFileError, MatchmakingError, NoValueInARCResult)
 from act.common.aCTJob import ACTJob
-from act.common.aCTProcess import ExitProcessException
+from pyarcrest.arc import ARCRest
+from pyarcrest.errors import (ARCError, ARCHTTPError, DescriptionParseError,
+                              DescriptionUnparseError, InputFileError,
+                              MatchmakingError, NoValueInARCResult)
 
 
 class aCTSubmitter(aCTARCProcess):

@@ -1,4 +1,4 @@
-from act.arc.rest import ARCJob
+from pyarcrest.arc import ARCJob
 
 
 class ACTJob:
