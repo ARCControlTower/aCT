@@ -11,6 +11,10 @@ from pyarcrest.arc import ARCRest
 from pyarcrest.errors import ARCError, ARCHTTPError, MissingDiagnoseFile
 
 
+# TODO: HARDCODED
+HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
+
+
 class aCTFetcher(aCTARCProcess):
 
     def setup(self):
@@ -69,7 +73,7 @@ class aCTFetcher(aCTARCProcess):
 
                 # fetch jobs
                 # TODO: HARDCODED
-                arcrest.downloadJobFiles(self.tmpdir, tofetch, workers=10)
+                arcrest.downloadJobFiles(self.tmpdir, tofetch, workers=10, blocksize=HTTP_BUFFER_SIZE)
 
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")

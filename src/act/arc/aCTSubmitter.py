@@ -15,6 +15,10 @@ from pyarcrest.errors import (ARCError, ARCHTTPError, DescriptionParseError,
                               MatchmakingError, NoValueInARCResult)
 
 
+# TODO: HARDCODED
+HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
+
+
 class aCTSubmitter(aCTARCProcess):
 
     def setup(self):
@@ -184,11 +188,9 @@ class aCTSubmitter(aCTARCProcess):
                 self.log.error(f"Error submitting jobs to ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit")
                 continue
-            else:
-                alreadySubmitted = True
 
             # upload jobs' local input files
-            arcrest.uploadJobFiles([job for job in arcjobs if job.state == "ACCEPTING"])
+            arcrest.uploadJobFiles([job for job in arcjobs if job.state == "ACCEPTING"], blocksize=HTTP_BUFFER_SIZE)
 
             # log submission results and set job state
             for job in actjobs:
