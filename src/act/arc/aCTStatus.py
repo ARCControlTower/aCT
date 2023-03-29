@@ -566,7 +566,7 @@ class aCTStatus(aCTARCProcess):
                     self.log.debug(f"STATE MAPPING KEY ERROR: state: {arcjob.state}")
                     continue
                 if mappedState in ("Finished", "Failed", "Killed", "Deleted"):
-                    self.log.error(f"Job {job.appid} {job.arcid} is cancelled by ARC")
+                    self.log.debug(f"Job {job.appid} {job.arcid} is cancelled by ARC")
                     self.db.updateArcJob(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp, "State": mappedState, "tstate": tstamp})
 
         self.log.info('Done')
