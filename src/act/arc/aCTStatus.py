@@ -203,7 +203,7 @@ class aCTStatus(aCTARCProcess):
 
                 # cancel jobs that are stuck in tstate and not in job list anymore [1]
                 # TODO: HARDCODED
-                if arcjob.tstate + timedelta(days=7) < datetime.utcnow():
+                if job.tstate + timedelta(days=7) < datetime.utcnow():
                     if arcjob.id not in joblist:
                         self.log.error(f"Job {job.appid} {job.arcid} not in ARC anymore, cancelling")
                         jobdict.update({"arcstate": "tocancel", "tarcstate": tstamp})
@@ -503,9 +503,9 @@ class aCTStatus(aCTARCProcess):
             tocheck = []
             toGetInfo = []
             for job in totimeout:
-                if not job.tstate:
-                    job.tstate = job.tcreated
-                if job.tstate + timedelta(seconds=3600) < datetime.utcnow():
+                if not job.tarcstate:
+                    job.tarcstate = job.tcreated
+                if job.tarcstate + timedelta(seconds=3600) < datetime.utcnow():
                     self.log.error(f"Job {job.appid} {job.arcid} stuck in cancelling, setting to cancelled")
                     self.db.updateArcJob(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp})
                 else:
