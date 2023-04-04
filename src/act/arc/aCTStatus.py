@@ -170,14 +170,14 @@ class aCTStatus(aCTARCProcess):
                 self.log.error(f"Cannot create REST client for proxyid {proxyid}: {exc}")
                 continue
 
-            # For now, if the list cannot be fetched, the empty list is
+            # For now, if the list cannot be fetched, the empty set is
             # returned, which will cause jobs stuck for a long time to be
             # deleted.
             try:
-                joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
+                joblist = {job.id for job in arcrest.getJobsList()}  # set type for performance
             except Exception as exc:
                 self.log.warning(f"Cannot fetch a list of jobs for proxyid {proxyid}: {exc}")
-                joblist = []
+                joblist = set()
 
             try:
                 arcrest.getJobsInfo(tocheck)
