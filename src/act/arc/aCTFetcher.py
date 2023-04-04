@@ -73,7 +73,7 @@ class aCTFetcher(aCTARCProcess):
 
                 # fetch jobs
                 # TODO: HARDCODED
-                arcrest.downloadJobFiles(self.tmpdir, tofetch, workers=10, blocksize=HTTP_BUFFER_SIZE)
+                arcrest.downloadJobFiles(self.tmpdir, tofetch, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=60)
 
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")

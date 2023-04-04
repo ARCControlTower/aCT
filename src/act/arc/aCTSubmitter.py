@@ -17,6 +17,7 @@ from pyarcrest.errors import (ARCError, ARCHTTPError, DescriptionParseError,
 
 # TODO: HARDCODED
 HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
+HTTP_TIMEOUT = 60
 
 
 class aCTSubmitter(aCTARCProcess):
@@ -175,7 +176,7 @@ class aCTSubmitter(aCTARCProcess):
             # submit jobs to ARC
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
-                arcrest.submitJobs(self.queue, arcjobs, uploadData=False)
+                arcrest.submitJobs(self.queue, arcjobs, uploadData=False, blocksize=HTTP_BUFFER_SIZE, timeout=HTTP_TIMEOUT)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit")
@@ -190,7 +191,8 @@ class aCTSubmitter(aCTARCProcess):
                 continue
 
             # upload jobs' local input files
-            arcrest.uploadJobFiles([job for job in arcjobs if job.state == "ACCEPTING"], blocksize=HTTP_BUFFER_SIZE)
+            toupload = [job for job in arcjobs if job.state == "ACCEPTING"]
+            arcrest.uploadJobFiles(toupload, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=HTTP_TIMEOUT)
 
             # log submission results and set job state
             for job in actjobs:
@@ -228,7 +230,7 @@ class aCTSubmitter(aCTARCProcess):
                     host = self.hostname
                     if self.port is not None:
                         host = f"{host}:{self.port}"
-                    path = arcrest.getAPIPath()
+                    path = arcrest.apiPath
                     jobdict["JobID"] = f"https://{host}{path}/jobs/{job.arcjob.id}"
                 if job.arcjob.state:
                     jobdict["State"] = ARC_STATE_MAPPING[job.arcjob.state]
