@@ -517,7 +517,7 @@ class aCTStatus(aCTARCProcess):
             arcrest = None
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
-                joblist = {job["id"] for job in arcrest.getJobsList()}  # set type for performance
+                joblist = {job.id for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(toGetInfo)
             except json.JSONDecodeError as exc:
                 self.log.error(f"Error parsing returned JSON document: {exc.doc}")
