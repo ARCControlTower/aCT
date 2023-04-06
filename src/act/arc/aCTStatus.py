@@ -165,7 +165,7 @@ class aCTStatus(aCTARCProcess):
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
 
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
+                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
             except Exception as exc:
                 self.log.error(f"Cannot create REST client for proxyid {proxyid}: {exc}")
                 continue
@@ -516,7 +516,7 @@ class aCTStatus(aCTARCProcess):
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             arcrest = None
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log, version="1.0")
+                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
                 joblist = {job.id for job in arcrest.getJobsList()}  # set type for performance
                 arcrest.getJobsInfo(toGetInfo)
             except json.JSONDecodeError as exc:
