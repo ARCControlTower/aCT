@@ -3,7 +3,6 @@ import traceback
 from urllib.parse import urlparse
 
 from act.common.aCTLogger import aCTLogger
-from act.common.aCTSignal import aCTSignalDeferrer
 from setproctitle import setproctitle
 
 
@@ -43,11 +42,16 @@ class aCTProcess:
     __call__(*args, **kwargs) -> run(*args, *kwargs) -> setup(*args, **kwargs)
 
     The aCTProcess can exit in two ways:
-    - unhandled exception
-    - ExitProcessException is raised either by the process itself when it wants
-      to stop or by the signal handler when it is stopped externally by aCT
-      process manager or OS. More information on signals and exit mechanism
-      can be found in aCTSignal.py
+    - by setting the mustExit flag (stopWithFlag method); the flag is checked
+      at least once per main loop and in more involved operations it is used
+      more granularly
+    - by raising the ExitProcessException (stopWithException method); this one
+      should not be used when transaction integrity is required (e. g. between
+      modification of multiple tables and executing some operations with
+      external systems)
+
+    Process can also be terminated externally with SIGTERM. The signal handler
+    uses one of the two methods to eventually stop the process.
     """
 
     def __init__(self, cluster=''):
@@ -148,10 +152,6 @@ class aCTProcess:
         finally:
             self.finish()
 
-    def transaction(self, dbobjects):
-        """Return transaction with process' logger and signal deferrer."""
-        return aCTTransaction(self.log, self.sigdefer, dbobjects)
-
     def exitHandler(self, signum, frame):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         self.mustExit = True
@@ -163,66 +163,3 @@ class aCTProcess:
 class ExitProcessException(BaseException):
     """Exception that indicates normal process exit."""
     pass
-
-
-class aCTTransaction:
-    """
-    Encapsulates transaction handling for multiple databases.
-
-    There are two main reasons for this abstraction. Firstly, most of aCT
-    operations are performed on the batches of jobs. For better efficiency, the
-    table manipulations can be done in a single transaction for the entire
-    batch or even multiple batches instead of per job.
-
-    Secondly, the way DB operations are done in aCT is that there is a separate
-    object doing separate operations for every database table. This prevents
-    multiple tables being updated in a single DB transaction for consistency.
-    Instead, there is (at least) one transaction per table. If there is an
-    interruption between the commits of multiple transactions, the state as
-    reflected by the tables might not be consistent anymore.
-
-    Because most parts of aCT can be interrupted asynchronously with exception
-    (see aCTSignal.py for longer explanation), there needs to be a proper
-    handling of such exceptions to properly structure database transactions.
-    This is provided by an instance of this class that acts as a context
-    manager that commits transaction if no exception was raised or rolls it
-    back otherwise. The commit must not be interrupted so the signals that
-    could interrupt the process are deferred with a handler.
-    """
-
-    def __init__(self, log, sigdefer, dbobjects):
-        """
-        Initialize transaction.
-
-        Every transaction is done on one or more aCTDB objects.
-        """
-        self.log = log
-        self.sigdefer = sigdefer
-        self.dbobjects = dbobjects
-        if len(self.dbobjects) <= 0:
-            raise Exception("No database objects for transaction")
-
-    def __enter__(self):
-        """Log the beginning of transaction."""
-        self.log.debug("Starting transaction")
-
-    def __exit__(self, exc_type, exc_value, exc_tb):
-        """
-        Commit or rollback transactions based on exception parameters.
-
-        If no exceptions were raised in the context, the parameters will all be
-        None. Falsy value must be returned (None if no explicit return) to pass
-        exceptions on.
-        """
-        with self.sigdefer:
-            if exc_type is None:
-                for db in self.dbobjects:
-                    db.Commit()
-                self.log.debug("Committing transaction")
-            else:
-                if exc_type is ExitProcessException:
-                    self.log.debug("Rolling back transaction on exit")
-                else:
-                    self.log.debug(f"Rolling back transaction on unhandled exception: {exc_value}")
-                for db in self.dbobjects:
-                    db.db.conn.rollback()

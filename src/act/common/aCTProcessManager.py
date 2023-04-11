@@ -45,8 +45,8 @@ class aCTProcessManager:
     The values in the dictionary structure are classes from aCT process
     hierarchy that are used to instantiate the callable objects for
     multiprocessing.Process instances that run the OS processes. Created
-    multiprocessing.Process instances are kept in the manager's
-    attributes: processes, terminating and killing.
+    multiprocessing.Process instances are kept in the manager's attributes:
+    processes, terminating and killing.
 
     The processes dictionary structure has all instances that are required to
     be running and is designed in a way that every individual instance can
