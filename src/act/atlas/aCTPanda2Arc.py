@@ -1,10 +1,9 @@
-import http.client
-import json
 import os
 import traceback
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPanda2Xrsl import aCTPanda2Xrsl
+from pyarcrest.http import HTTPClient
 
 
 class aCTPanda2Arc(aCTATLASProcess):
@@ -105,16 +104,20 @@ class aCTPanda2Arc(aCTATLASProcess):
         self.createArcJobs()
 
     def sendTraces(self, traces, proxypath):
-        for trace in traces:
-            try:
-                conn = http.client.HTTPSConnection('rucio-lb-prod.cern.ch:443', key_file=proxypath, cert_file=proxypath, timeout=5)
-                rdata = json.dumps(trace)
-                headers = {"Content-type": "application/json"}
-                conn.request("POST", "/traces/", rdata, headers)
-                resp = conn.getresponse()
-                status = resp.status
-                if status != 201:
-                    self.log.error("Error sending trace: %s : %s" % (resp.status, resp.reason))
-                conn.close()
-            except Exception as error:
-                self.log.error("Error sending trace: %s" % error)
+        try:
+            client = HTTPClient('https://rucio-lb-prod.cern.ch:443', proxypath=proxypath)
+            for trace in traces:
+                resp = client.request(
+                    "POST",
+                    "/traces/",
+                    headers={"Content-type": "application/json"},
+                    jsonData=trace,
+                )
+                # response for http.client always has to be read to be able to
+                # send further requests
+                resp.read()
+                if resp.status != 201:
+                    self.log.error(f"Error sending trace: {resp.staus} : {resp.reason}")
+            client.close()
+        except Exception as error:
+            self.log.error(f"Error sending trace: {error}")
