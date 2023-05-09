@@ -3,12 +3,11 @@
 import os
 import signal
 import threading
-import time
 import urllib.error
-import urllib.request
 from datetime import datetime, timedelta
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
+from pyarcrest.http import HTTPClient
 
 
 class aCTCRICFetcher(aCTATLASProcess):
@@ -37,10 +36,14 @@ class aCTCRICFetcher(aCTATLASProcess):
         self.terminate.wait(600)
 
     def fetchFromCRIC(self, url, filename):
+        self.log.debug(f"Downloading from {url}")
         try:
-            self.log.debug("Downloading from %s" % url)
-            response = urllib.request.urlopen(url, timeout=60)
-        except urllib.error.URLError as e:
+            client = HTTPClient(url)
+            response = client.request("GET", url)
+            urldata = response.read().decode()
+            self.log.debug(f"Fetched {url}")
+            return urldata
+        except Exception as e:
             self.log.warning("Failed to contact CRIC: %s" % str(e))
             # Check if the cached data is getting old, if so raise a critical error
             try:
@@ -52,10 +55,6 @@ class aCTCRICFetcher(aCTATLASProcess):
                 # file may not have been created yet
                 pass
             return ''
-
-        urldata = response.read().decode('utf-8')
-        self.log.debug("Fetched %s" % url)
-        return urldata
 
     def storeToFile(self, cricjson, filename):
         if not cricjson:
