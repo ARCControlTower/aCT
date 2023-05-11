@@ -41,6 +41,8 @@ class aCTCRICFetcher(aCTATLASProcess):
             client = HTTPClient(url)
             response = client.request("GET", url)
             urldata = response.read().decode()
+            if response.status != 200:
+                raise Exception(f"Invalid response status for URL {url}: {response.status}")
             self.log.debug(f"Fetched {url}")
             return urldata
         except Exception as e:
