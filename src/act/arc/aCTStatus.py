@@ -304,7 +304,7 @@ class aCTStatus(aCTARCProcess):
                 ]
                 for key in COPY_KEYS:
                     if key in jobInfo:
-                        jobdict[key] = jobInfo
+                        jobdict[key] = jobInfo[key]
 
                 try:
                     self.db.updateArcJob(job["id"], jobdict)
