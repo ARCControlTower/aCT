@@ -47,7 +47,7 @@ class aCTCleaner(aCTARCProcess):
             arcjobs = []
             arcids = []
             for job in dbjobs:
-                if "IDFromEndpoint" in job:
+                if job.get("IDFromEndpoint", None):
                     arcjobs.append(job)
                     arcids.append(job["IDFromEndpoint"])
 

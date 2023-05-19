@@ -295,7 +295,7 @@ class aCTSubmitter(aCTARCProcess):
             arcids = []
             cancelled = []
             for dbjob in dbjobs:
-                if "IDFromEndpoint" in dbjob:
+                if dbjob.get("IDFromEndpoint", None):
                     toARCKill.append(dbjob)
                     arcids.append(dbjob["IDFromEndpoint"])
                 else:
@@ -375,7 +375,7 @@ class aCTSubmitter(aCTARCProcess):
             toARCClean = []
             arcids = []
             for dbjob in dbjobs:
-                if "IDFromEndpoint" in dbjob:
+                if dbjob.get("IDFromEndpoint", None):
                     toARCClean.append(dbjob)
                     arcids.append(dbjob["IDFromEndpoint"])
 
