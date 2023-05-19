@@ -80,10 +80,10 @@ class aCTFetcher(aCTARCProcess):
                     arcrest.close()
 
             for job, errors in zip(dbjobs, results):
+                isError = False
                 for error in errors:
                     # don't treat missing diagnose file as fail
                     if isinstance(error, MissingDiagnoseFile):
-                        isError = False
                         self.log.info(str(error))
                     else:
                         isError = True
