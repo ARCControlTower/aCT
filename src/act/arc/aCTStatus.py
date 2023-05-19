@@ -151,7 +151,6 @@ class aCTStatus(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-            arcids = [dbjob["IDFromEndpoint"] for dbjob in dbjobs]
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             try:
@@ -171,6 +170,7 @@ class aCTStatus(aCTARCProcess):
                 joblist = set()
 
             # fetch jobs' info from ARC
+            arcids = [dbjob["IDFromEndpoint"] for dbjob in dbjobs]
             try:
                 results = arcrest.getJobsInfo(arcids)
             except json.JSONDecodeError as exc:

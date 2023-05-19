@@ -52,8 +52,8 @@ class aCTCleaner(aCTARCProcess):
                     arcids.append(job["IDFromEndpoint"])
 
             # clean jobs in ARC
-            arcrest = None
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
+            arcrest = None
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
                 results = arcrest.cleanJobs(arcids)

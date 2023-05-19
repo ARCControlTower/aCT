@@ -60,9 +60,8 @@ class aCTFetcher(aCTARCProcess):
                 shutil.rmtree(resdir, True)
                 os.makedirs(resdir, exist_ok=True)
 
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-
             # fetch job results from REST
+            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             arcrest = None
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
