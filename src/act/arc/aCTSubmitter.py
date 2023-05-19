@@ -223,7 +223,7 @@ class aCTSubmitter(aCTARCProcess):
                     self.log.debug(f"Submission successfull for job {job['appjobid']}: {jobid}")
 
                 jobdict["tarcstate"] = tstamp
-                self.db.updateArcJob(job.arcid, jobdict)
+                self.db.updateArcJob(job["id"], jobdict)
 
             nsubmitted += limit
 
@@ -252,7 +252,7 @@ class aCTSubmitter(aCTARCProcess):
             # TODO: HARDCODED
             if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
                 self.log.debug(f"Cancelling job {job['appjobid']} for being too long in tosubmit")
-                self.db.updateArcJob(job.arcid, {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
+                self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
 
     # TODO: refactor to some library aCT job operation
     def processToCancel(self):
@@ -494,19 +494,19 @@ class aCTSubmitter(aCTARCProcess):
                     error = result
                     if error.status == 505 and error.text == "No more restarts allowed":
                         self.log.error(f"Restart of job {job['appjobid']} not allowed, setting to failed")
-                        self.db.updateArcJob(job.arcid, {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
+                        self.db.updateArcJob(job["id"], {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
                     elif error.status == 505 and error.text == "Job has not failed":
                         self.log.error(f"Job {job['appjobid']} has not failed, setting to submitted")
-                        self.db.updateArcJob(job.arcid, {"arcstate": "submitted", "tarcstate": tstamp})
+                        self.db.updateArcJob(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
                     elif error.status == 404:
                         self.log.error(f"Job {job['appjobid']} not found, cancelling")
-                        self.db.updateArcJob(job.arcid, {"arcstate": "tocancel", "tarcstate": tstamp})
+                        self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
                     else:
                         self.log.error(f"Error rerunning job {job['appjobid']}: {error.status} {error.text}")
-                        self.db.updateArcJob(job.arcid, {"arcstate": "torerun", "tarcstate": tstamp})
+                        self.db.updateArcJob(job["id"], {"arcstate": "torerun", "tarcstate": tstamp})
                 else:
                     self.log.info(f"Successfully rerun job {job['appjobid']}")
-                    self.db.updateArcJob(job.arcid, {"arcstate": "submitted", "tarcstate": tstamp})
+                    self.db.updateArcJob(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
 
     def process(self):
         # process jobs which have to be cancelled
