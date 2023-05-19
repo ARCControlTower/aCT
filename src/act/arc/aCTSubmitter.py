@@ -171,7 +171,7 @@ class aCTSubmitter(aCTARCProcess):
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
                 delegationID = arcrest.createDelegation()
-                results = arcrest.submitJobs(self, delegationID, descs, self.queue, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=HTTP_TIMEOUT)
+                results = arcrest.submitJobs(delegationID, descs, self.queue, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=HTTP_TIMEOUT)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit")
