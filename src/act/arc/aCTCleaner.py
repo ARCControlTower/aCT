@@ -4,7 +4,6 @@ from json import JSONDecodeError
 from ssl import SSLError
 
 from act.arc.aCTARCProcess import aCTARCProcess
-from act.common.aCTJob import ACTJob
 from pyarcrest.arc import ARCRest
 from pyarcrest.errors import ARCError, ARCHTTPError
 
@@ -42,25 +41,22 @@ class aCTCleaner(aCTARCProcess):
         for proxyid, dbjobs in jobsdict.items():
 
             if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
+                self.log.info("Exiting early due to requested shutdown")
                 self.stopWithException()
 
-            jobs = []
-            toARCClean = []
-            for dbjob in dbjobs:
-                job = ACTJob()
-                job.loadARCDBJob(dbjob)
-                jobs.append(job)
-                if job.arcjob.id:
-                    toARCClean.append(job.arcjob)
-
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
+            arcjobs = []
+            arcids = []
+            for job in dbjobs:
+                if "IDFromEndpoint" in job:
+                    arcjobs.append(job)
+                    arcids.append(job["IDFromEndpoint"])
 
             # clean jobs in ARC
             arcrest = None
+            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
-                arcrest.cleanJobs(toARCClean)
+                results = arcrest.cleanJobs(arcids)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
@@ -69,15 +65,17 @@ class aCTCleaner(aCTARCProcess):
                 if arcrest:
                     arcrest.close()
 
-            # log results and update DB
-            for job in jobs:
-                if job.arcjob.errors:
-                    for error in job.arcjob.errors:
-                        self.log.error(f"Error cleaning job {job.appid} {job.arcid}: {error}")
+            # log results
+            for job, result in zip(arcjobs, results):
+                if isinstance(result, ARCHTTPError):
+                    self.log.error(f"Error cleaning job {job['appjobid']} from ARC: {result}")
                 else:
-                    self.log.debug(f"Successfully cleaned job {job.appid} {job.arcid}")
-                self.db.deleteArcJob(job.arcid)
-            self.db.Commit()
+                    self.log.debug(f"Successfully cleaned job {job['appjobid']} from ARC")
+
+            # update DB
+            for job in dbjobs:
+                self.log.debug(f"Successfully cleaned job {job['appjobid']} arc DB")
+                self.db.deleteArcJob(job["id"])
 
         self.log.debug("Done")
 

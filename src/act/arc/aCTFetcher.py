@@ -6,10 +6,8 @@ from json import JSONDecodeError
 from ssl import SSLError
 
 from act.arc.aCTARCProcess import aCTARCProcess
-from act.common.aCTJob import ACTJob
 from pyarcrest.arc import ARCRest
 from pyarcrest.errors import ARCError, ARCHTTPError, MissingDiagnoseFile
-
 
 # TODO: HARDCODED
 HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
@@ -50,17 +48,15 @@ class aCTFetcher(aCTARCProcess):
         for proxyid, dbjobs in jobsdict.items():
 
             if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
+                self.log.info("Exiting early due to requested shutdown")
                 self.stopWithException()
 
-            jobs = []
-            tofetch = []
+            arcids = []
+            downloads = []
             for dbjob in dbjobs:
-                job = ACTJob()
-                job.loadARCDBJob(dbjob)
-                jobs.append(job)
-                tofetch.append(job.arcjob)
-                resdir = os.path.join(self.tmpdir, job.arcjob.id)
+                arcids.append(dbjob["IDFromEndpoint"])
+                downloads.append(dbjob["downloadfiles"])
+                resdir = os.path.join(self.tmpdir, dbjob["IDFromEndpoint"])
                 shutil.rmtree(resdir, True)
                 os.makedirs(resdir, exist_ok=True)
 
@@ -73,7 +69,7 @@ class aCTFetcher(aCTARCProcess):
 
                 # fetch jobs
                 # TODO: HARDCODED
-                arcrest.downloadJobFiles(self.tmpdir, tofetch, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=60)
+                results = arcrest.downloadJobFiles(self.tmpdir, arcids, downloads, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=60)
 
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -83,27 +79,27 @@ class aCTFetcher(aCTARCProcess):
                 if arcrest:
                     arcrest.close()
 
-            for job in jobs:
-                isError = False
-                for error in job.arcjob.errors:
+            for job, errors in zip(dbjobs, results):
+                for error in errors:
                     # don't treat missing diagnose file as fail
                     if isinstance(error, MissingDiagnoseFile):
+                        isError = False
                         self.log.info(str(error))
                     else:
                         isError = True
-                        self.log.error(f"Error fetching job {job.appid} {job.arcid}: {error}")
+                        self.log.error(f"Error fetching job {job['appjobid']}: {error}")
                 if isError:
                     # TODO: HARDCODED
-                    if job.tarcstate + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
-                        self.log.info(f"Fetch timeout for job {job.appid} {job.arcid}, marking job \"donefailed\"")
+                    if job['tarcstate'] + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
+                        self.log.info(f"Fetch timeout for job {job['appjobid']}, marking job \"donefailed\"")
                         jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
-                        self.db.updateArcJob(job.arcid, jobdict)
+                        self.db.updateArcJob(job["id"], jobdict)
                     else:
-                        self.log.info(f"Fetch timeout for job {job.appid} {job.arcid} not reached, will retry")
+                        self.log.info(f"Fetch timeout for job {job['appjobid']} not reached, will retry")
                 else:
-                    self.log.debug(f"Successfully fetched job {job.appid} {job.arcid}")
+                    self.log.debug(f"Successfully fetched job {job['appjobid']}")
                     jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
-                    self.db.updateArcJob(job.arcid, jobdict)
+                    self.db.updateArcJob(job["id"], jobdict)
 
         self.log.debug("Done")
 

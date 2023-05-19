@@ -82,7 +82,6 @@ from http.client import HTTPException
 from ssl import SSLError
 
 from act.arc.aCTARCProcess import aCTARCProcess
-from act.common.aCTJob import ACTJob
 from pyarcrest.arc import ARCRest
 from pyarcrest.errors import ARCError, ARCHTTPError
 
@@ -152,35 +151,28 @@ class aCTStatus(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-            jobs = []
-            tocheck = []
-            oldStates = {}
-            for dbjob in dbjobs:
-                job = ACTJob()
-                job.loadARCDBJob(dbjob)
-                jobs.append(job)
-                tocheck.append(job.arcjob)
-                oldStates[job.arcid] = job.arcjob.state
+            arcids = [dbjob["IDFromEndpoint"] for dbjob in dbjobs]
 
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
             except Exception as exc:
                 self.log.error(f"Cannot create REST client for proxyid {proxyid}: {exc}")
                 continue
 
-            # For now, if the list cannot be fetched, the empty set is
+            # For now, if the job list cannot be fetched, the empty set is
             # returned, which will cause jobs stuck for a long time to be
-            # deleted.
+            # deleted. Set type is used for performance as we can be working
+            # with a lot of jobs (limit in SQL statement).
             try:
-                joblist = {job.id for job in arcrest.getJobsList()}  # set type for performance
+                joblist = set(arcrest.getJobsList())
             except Exception as exc:
                 self.log.warning(f"Cannot fetch a list of jobs for proxyid {proxyid}: {exc}")
                 joblist = set()
 
+            # fetch jobs' info from ARC
             try:
-                arcrest.getJobsInfo(tocheck)
+                results = arcrest.getJobsInfo(arcids)
             except json.JSONDecodeError as exc:
                 self.log.error(f"Error parsing returned JSON document: {exc.doc}")
                 continue
@@ -192,196 +184,168 @@ class aCTStatus(aCTARCProcess):
 
             tstamp = self.db.getTimeStamp()
 
-            for job in jobs:
+            for job, result in zip(dbjobs, results):
 
                 if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
+                    self.log.info("Exiting early due to requested shutdown")
                     self.stopWithException()
 
-                arcjob = job.arcjob
-                jobdict = {}
+                jobdict = {"tarcstate": tstamp}
 
                 # cancel jobs that are stuck in tstate and not in job list anymore [1]
                 # TODO: HARDCODED
-                if job.tstate + timedelta(days=7) < datetime.utcnow():
-                    if arcjob.id not in joblist:
-                        self.log.error(f"Job {job.appid} {job.arcid} not in ARC anymore, cancelling")
-                        jobdict.update({"arcstate": "tocancel", "tarcstate": tstamp})
-                        self.db.updateArcJob(job.arcid, jobdict)
+                if job["tstate"] + timedelta(days=7) < datetime.utcnow():
+                    if job["IDFromEndpoint"] not in joblist:
+                        self.log.error(f"Job {job['appjobid']} not in ARC anymore, cancelling")
+                        jobdict.update({"arcstate": "tocancel"})
+                        self.db.updateArcJob(job["id"], jobdict)
                         continue
 
                 # cancel 404 jobs and log errors
-                if arcjob.errors:
-                    cancelled = False
-                    for error in arcjob.errors:
-                        if isinstance(error, ARCHTTPError):
-                            if error.status == 404:
-                                self.log.error(f"Job {job.appid} {job.arcid} not found, cancelling")
-                                jobdict.update({"arcstate": "tocancel", "tarcstate": tstamp})
-                                self.db.updateArcJob(job.arcid, jobdict)
-                                cancelled = True
-                                continue
-                        self.log.error(f"Error for job {job.appid} {job.arcid}: {error}")
-                    if cancelled:
-                        continue
+                if isinstance(result, ARCError):
+                    if isinstance(result, ARCHTTPError):
+                        if result.status == 404:
+                            self.log.error(f"Job {job['appjobid']} not found, cancelling")
+                            jobdict.update({"arcstate": "tocancel"})
+                            self.db.updateArcJob(job["id"], jobdict)
+                            continue
+                    self.log.error(f"Error fetching info for job {job['appjobid']}: {result}")
+                    continue
+
+                jobInfo = result
 
                 # process state change
-                try:
-                    mappedState = ARC_STATE_MAPPING[arcjob.state]
-                except KeyError:
-                    self.log.debug(f"STATE MAPPING KEY ERROR: state: {arcjob.state}")
-                    self.db.updateArcJob(job.arcid, jobdict)
-                    continue
-
-                # update and continue early when no state change
-                if oldStates[job.arcid] == mappedState:
-                    jobdict["tarcstate"] = tstamp
-                    self.db.updateArcJob(job.arcid, jobdict)
-                    continue
-
-                self.log.info(f"ARC status change for job {job.appid}: {oldStates[job.arcid]} -> {mappedState}")
-
-                jobdict.update({"State": mappedState, "tstate": tstamp})
-
-                if arcjob.state in ("ACCEPTING", "ACCEPTED", "PREPARING", "PREPARED", "SUBMITTING", "QUEUING"):
-                    jobdict["arcstate"] = "submitted"
-
-                elif arcjob.state in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
-                    jobdict["arcstate"] = "running"
-
-                elif arcjob.state == "HELD":
-                    jobdict["arcstate"] = "holding"
-
-                elif arcjob.state == "FINISHING":
-                    jobdict["arcstate"] = "finishing"
-
-                elif arcjob.state == "FINISHED":
-                    if arcjob.ExitCode is None:
-                        # missing exit code, but assume success
-                        self.log.warning(f"Job {job.appid} is finished but has missing exit code, setting to zero")
-                        jobdict["ExitCode"] = 0
+                state = jobInfo.get("State", None)
+                if state:
+                    try:
+                        mappedState = ARC_STATE_MAPPING[state]
+                    except KeyError:
+                        self.log.debug(f"No state mapping for state {state}")
                     else:
-                        jobdict["ExitCode"] = arcjob.ExitCode
-                    jobdict["arcstate"] = "finished"
+                        if job["State"] != mappedState:
 
-                elif arcjob.state == "FAILED":
-                    patchDict = self.processJobErrors(job)
-                    jobdict.update(patchDict)
+                            self.log.info(f"ARC status change for job {job['appjobid']}: {job['State']} -> {mappedState}")
+                            jobdict.update({"State": mappedState, "tstate": tstamp})
 
-                elif arcjob.state == "KILLED":
-                    jobdict["arcstate"] = "cancelled"
+                            if state in ("ACCEPTING", "ACCEPTED", "PREPARING", "PREPARED", "SUBMITTING", "QUEUING"):
+                                jobdict["arcstate"] = "submitted"
 
-                elif arcjob.state == "WIPED":
-                    jobdict["arcstate"] = "cancelled"
+                            elif state in ("RUNNING", "EXITINGLRMS", "EXECUTED"):
+                                jobdict["arcstate"] = "running"
 
-                jobdict["tarcstate"] = tstamp
+                            elif state == "HELD":
+                                jobdict["arcstate"] = "holding"
+
+                            elif state == "FINISHING":
+                                jobdict["arcstate"] = "finishing"
+
+                            elif state == "FINISHED":
+                                if jobInfo["ExitCode"] is None:
+                                    # missing exit code, but assume success
+                                    self.log.warning(f"Job {job['appjobid']} is finished but has missing exit code, setting to zero")
+                                    jobdict["ExitCode"] = 0
+                                else:
+                                    jobdict["ExitCode"] = jobInfo["ExitCode"]
+                                jobdict["arcstate"] = "finished"
+
+                            elif state == "FAILED":
+                                patchDict = self.processJobErrors(job, jobInfo)
+                                jobdict.update(patchDict)
+
+                            elif state == "KILLED":
+                                jobdict["arcstate"] = "cancelled"
+
+                            elif state == "WIPED":
+                                jobdict["arcstate"] = "cancelled"
 
                 # Add available job info to dict
 
                 # difference of two datetime objects yields timedelta object
                 # with seconds attribute
-                fromCreated = int((datetime.utcnow() - job.tcreated).total_seconds()) // 60
+                fromCreated = int((datetime.utcnow() - job["created"]).total_seconds()) // 60
 
-                if arcjob.UsedTotalWallTime and arcjob.RequestedSlots is not None:
-                    wallTime = arcjob.UsedTotalWallTime // arcjob.RequestedSlots
-                    if wallTime > fromCreated:
-                        self.log.warning(f"Job {job.appid}: Fixing reported walltime {wallTime} to {fromCreated}")
+                # calculate proper wall time and fix wrongly reported one
+                walltime = jobInfo.get("UsedTotalWallTime", None)
+                slots = jobInfo.get("RequestedSlots", None)
+                if walltime and slots:
+                    time = walltime // slots
+                    if time > fromCreated:
+                        self.log.warning(f"Job {job['appjobid']}: Fixing reported walltime {time} to {fromCreated}")
                         jobdict["UsedTotalWallTime"] = fromCreated
                     else:
-                        jobdict["UsedTotalWallTime"] = wallTime
+                        jobdict["UsedTotalWallTime"] = time
                 else:
-                    self.log.warning(f"Job {job.appid}: No reported walltime, using DB timestamps: {fromCreated}")
+                    self.log.warning(f"Job {job['appjobid']}: No reported walltime, using DB timestamps: {fromCreated}")
                     jobdict["UsedTotalWallTime"] = fromCreated
 
-                if arcjob.UsedTotalCPUTime:
+                # fix wrongly reported cpu time
+                cputime = jobInfo.get("UsedTotalCPUTime", None)
+                if cputime:
                     # TODO: HARDCODED
-                    if arcjob.UsedTotalCPUTime > 10 ** 7:
-                        self.log.warning(f"Job {job.appid}: Discarding reported CPUtime {arcjob.UsedTotalCPUTime}")
+                    if cputime > 10 ** 7:
+                        self.log.warning(f"Discarding reported CPU time {cputime} for job {job['appjobid']}")
                         jobdict["UsedTotalCPUTime"] = -1
                     else:
-                        jobdict["UsedTotalCPUTime"] = arcjob.UsedTotalCPUTime
+                        jobdict["UsedTotalCPUTime"] = cputime
 
-                if arcjob.Type:
-                    jobdict["Type"] = arcjob.Type
-                if arcjob.LocalIDFromManager:
-                    jobdict["LocalIDFromManager"] = arcjob.LocalIDFromManager
-                if arcjob.WaitingPosition:
-                    jobdict["WaitingPosition"] = arcjob.WaitingPosition
-                if arcjob.Owner:
-                    jobdict["Owner"] = arcjob.Owner
-                if arcjob.LocalOwner:
-                    jobdict["LocalOwner"] = arcjob.LocalOwner
-                if arcjob.RequestedTotalCPUTime:
-                    jobdict["RequestedTotalCPUTime"] = arcjob.RequestedTotalCPUTime
-                if arcjob.RequestedSlots:
-                    jobdict["RequestedSlots"] = arcjob.RequestedSlots
-                if arcjob.StdIn:
-                    jobdict["StdIn"] = arcjob.StdIn
-                if arcjob.StdOut:
-                    jobdict["StdOut"] = arcjob.StdOut
-                if arcjob.StdErr:
-                    jobdict["StdErr"] = arcjob.StdErr
-                if arcjob.LogDir:
-                    jobdict["LogDir"] = arcjob.LogDir
-                if arcjob.ExecutionNode:
-                    jobdict["ExecutionNode"] = ",".join(arcjob.ExecutionNode)
-                if arcjob.Queue:
-                    jobdict["Queue"] = arcjob.Queue
-                if arcjob.UsedMainMemory:
-                    jobdict["UsedMainMemory"] = arcjob.UsedMainMemory
-                if arcjob.SubmissionTime:
-                    jobdict["SubmissionTime"] = arcjob.SubmissionTime
-                if arcjob.EndTime:
-                    jobdict["EndTime"] = arcjob.EndTime
-                if arcjob.WorkingAreaEraseTime:
-                    jobdict["WorkingAreaEraseTime"] = arcjob.WorkingAreaEraseTime
-                if arcjob.ProxyExpirationTime:
-                    jobdict["ProxyExpirationTime"] = arcjob.ProxyExpirationTime
-                if arcjob.Error:
-                    jobdict["Error"] = ";".join(arcjob.Error)
+                # format data properly for DB
+                if "ExecutionNode" in jobInfo:
+                    jobdict["ExecutionNode"] = ",".join(jobInfo["ExecutionNode"])
+                if "Error" in jobInfo:
+                    jobdict["Error"] = ";".join(jobInfo["Error"])
 
-                # AF BUG
+                # copy values that can be copied directly
+                COPY_KEYS = [
+                    "Type", "LocalIDFromManager", "WaitingPosition", "Owner",
+                    "LocalOwner", "RequestedTotalCPUTime", "RequestedSlots",
+                    "StdIn", "StdOut", "StdErr", "LogDir", "Queue",
+                    "UsedMainMemory", "SubmissionTime", "EndTime",
+                    "WorkingAreaEraseTime", "ProxyExpirationTime"
+                ]
+                for key in COPY_KEYS:
+                    if key in jobInfo:
+                        jobdict[key] = jobInfo
+
                 try:
-                    self.db.updateArcJob(job.arcid, jobdict)
+                    self.db.updateArcJob(job["id"], jobdict)
                 except:
-                    self.log.error(f"Bad dict for job {job.appid} {job.arcid}: {jobdict}")
+                    self.log.error(f"Bad dict for job {job['appjobid']}: {jobdict}")
 
-        self.log.info('Done')
+        self.log.info("Done")
 
     # Returns a dictionary reflecting job changes that should update the
     # jobdict for DB
-    def processJobErrors(self, job):
+    def processJobErrors(self, job, jobInfo):
         """Handle failed jobs."""
-        tstamp = self.db.getTimeStamp()
-        patchDict = {"arcstate": "failed", "tarcstate": tstamp}
+        patchDict = {"arcstate": "failed"}
 
         # a list of job errors for job should be resubmission
         resub = []
-        if job.arcjob.Error:
-            errors = ";".join(job.arcjob.Error)
+        if "Error" in jobInfo:
+            errors = ";".join(jobInfo["Error"])
             resub = [err for err in self.conf.errors.toresubmit.arcerrors if err in errors]
-            self.log.info(f"Job {job.appid} {job.arcid} failed with error: {errors}")
+            self.log.info(f"Job {job['appjobid']} failed with error: {errors}")
         else:
-            self.log.info(f"Job {job.appid} {job.arcid} failed, no error given")
+            self.log.info(f"Job {job['appjobid']} failed, no error given")
 
         # restart if data staging problem but not output file list problem
         restartState = ""
-        for state in job.arcjob.RestartState:
+        for state in jobInfo.get("RestartState", []):
             if state.startswith("arcrest:"):
                 restartState = state[len("arcrest:"):]
         if restartState in ("PREPARING", "FINISHING"):
-            if "Error reading user generated output file list" not in job.arcjob.Error:
-                self.log.info(f"Will rerun {job.appid} {job.arcid}")
-                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "torerun"})
+            if "Error reading user generated output file list" not in jobInfo.get("Error", []):
+                self.log.info(f"Will rerun {job['appjobid']}")
+                patchDict.update({"State": "Undefined", "arcstate": "torerun"})
 
         # resubmit if certain errors
         elif resub:
-            if job.attemptsleft <= 0:
-                self.log.info(f"Job {job.appid} {job.arcid} out of retries")
+            if job["attemptsleft"] <= 0:
+                self.log.info(f"Job {job['appjobid']} out of retries")
             else:
-                job.attetmptsLeft -= 1
-                self.log.info(f"Job {job.appid} {job.arcid} will be resubmitted, {job.attemptsleft} attempts left")
-                patchDict.update({"State": "Undefined", "tstate": tstamp, "arcstate": "toresubmit", "attemptsleft": job.attemptsleft})
+                attempts = job["attemptsleft"] - 1
+                self.log.info(f"Job {job['appjobid']} will be resubmitted, {attempts} attempts left")
+                patchDict.update({"State": "Undefined", "arcstate": "toresubmit", "attemptsleft": attempts})
 
         return patchDict
 
@@ -399,19 +363,19 @@ class aCTStatus(aCTARCProcess):
             "arcstate='cancelling' or arcstate='finished') and "
             f"cluster='{self.cluster}' and "
             f"{self.db.timeStampLessThan('tarcstate', 172800)}",
-            ['id', 'appjobid', 'JobID', 'arcstate']
+            ["id", "appjobid", "JobID", "arcstate"]
         )
         tstamp = self.db.getTimeStamp()
         for job in jobs:
             if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
+                self.log.info("Exiting early due to requested shutdown")
                 self.stopWithException()
-            if job['arcstate'] == 'cancelling':
-                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in cancelling, marking as cancelled")
-                self.db.updateArcJob(job['id'], {'arcstate': 'cancelled', 'tarcstate': tstamp})
+            if job["arcstate"] == "cancelling":
+                self.log.warning(f"Job {job['appjobid']} too long in cancelling, marking as cancelled")
+                self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
             else:
-                self.log.warning(f"Job {job['appjobid']} {job['id']} too long in {job['arcstate']}, marking as lost")
-                self.db.updateArcJob(job['id'], {'arcstate': 'lost', 'tarcstate': tstamp})
+                self.log.warning(f"Job {job['appjobid']} too long in {job['arcstate']}, marking as lost")
+                self.db.updateArcJob(job["id"], {"arcstate": "lost", "tarcstate": tstamp})
 
     # TODO: refactor to some library aCT job operation
     def checkStuckJobs(self):
@@ -437,19 +401,19 @@ class aCTStatus(aCTARCProcess):
 
             # be careful not to cancel jobs that are stuck in cleaning
             select = f"state='{jobstate}' and {self.db.timeStampLessThan('tstate', maxtime)}"
-            jobs = self.db.getArcJobsInfo(select, columns=['id', 'JobID', 'appjobid', 'arcstate'])
+            jobs = self.db.getArcJobsInfo(select, columns=["id", "JobID", "appjobid", "arcstate"])
 
             for job in jobs:
                 if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
+                    self.log.info("Exiting early due to requested shutdown")
                     self.stopWithException()
                 if job["arcstate"] == "toclean":
                     # delete jobs stuck in toclean
-                    self.log.info(f"Job {job['appjobid']} {job['id']} stuck in toclean for too long, deleting")
+                    self.log.info(f"Job {job['appjobid']} stuck in toclean for too long, deleting")
                     self.db.deleteArcJob(job["id"])
                 else:
                     # cancel other stuck jobs
-                    self.log.warning(f"Job {job['appjobid']} {job['id']} too long in state {jobstate}, cancelling")
+                    self.log.warning(f"Job {job['appjobid']} too long in state {jobstate}, cancelling")
                     if job["JobID"]:
                         # if jobid is defined, cancel
                         self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp, "tstate": tstamp})
@@ -490,35 +454,26 @@ class aCTStatus(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-            # construct job objects from DB rows
-            totimeout = []
-            for dbjob in dbjobs:
-                job = ACTJob()
-                job.loadARCDBJob(dbjob)
-                totimeout.append(job)
-
             tstamp = self.db.getTimeStamp()
 
             # jobs too long in cancelling are considered to be cancelled
             tocheck = []
-            toGetInfo = []
-            for job in totimeout:
-                if not job.tarcstate:
-                    job.tarcstate = job.tcreated
-                if job.tarcstate + timedelta(seconds=3600) < datetime.utcnow():
-                    self.log.error(f"Job {job.appid} {job.arcid} stuck in cancelling, setting to cancelled")
-                    self.db.updateArcJob(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp})
+            for job in dbjobs:
+                if not job["tarcstate"]:
+                    job["tarcstate"] = job["tcreated"]
+                if job["tarcstate"] + timedelta(seconds=3600) < datetime.utcnow():
+                    self.log.error(f"Job {job['appjobid']} stuck in cancelling, setting to cancelled")
+                    self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
                 else:
                     tocheck.append(job)
-                    toGetInfo.append(job.arcjob)
 
             # get job info from ARC
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             arcrest = None
             try:
                 arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
-                joblist = {job.id for job in arcrest.getJobsList()}  # set type for performance
-                arcrest.getJobsInfo(toGetInfo)
+                joblist = set(arcrest.getJobsList())  # set type for performance
+                results = arcrest.getJobsInfo([job["IDFromEndpoint"] for job in tocheck])
             except json.JSONDecodeError as exc:
                 self.log.error(f"Error parsing returned JSON document: {exc.doc}")
                 continue
@@ -530,46 +485,42 @@ class aCTStatus(aCTARCProcess):
                     arcrest.close()
 
             # update DB
-            for job in tocheck:
+            for job, result in zip(tocheck, results):
 
                 if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
+                    self.log.info("Exiting early due to requested shutdown")
                     self.stopWithException()
-
-                arcjob = job.arcjob
 
                 # jobs that are not on the list anymore are considered to
                 # be cancelled [1]
-                if arcjob.id not in joblist:
-                    self.log.error(f"Job {job.appid} {job.arcid} not in ARC job list anymore, setting to cancelled")
-                    self.db.updateArcJob(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp})
+                if job["id"] not in joblist:
+                    self.log.error(f"Job {job['appjobid']} not in ARC job list anymore, setting to cancelled")
+                    self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
                     continue
 
-                # set 404 jobs to cancelled
-                if arcjob.errors:
-                    cancelled = False
-                    for error in arcjob.errors:
-                        if isinstance(error, ARCHTTPError):
-                            if error.status == 404:
-                                self.log.error(f"Job {job.appid} {job.arcid} not found in ARC, setting to cancelled")
-                                self.db.updateArcJob(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp})
-                                cancelled = True
-                                continue
-                        self.log.error(f"Error for job {job.appid} {job.arcid}: {error}")
-                    if cancelled:
-                        continue
+                # cancel 404 jobs and log errors
+                if isinstance(result, ARCError):
+                    if isinstance(result, ARCHTTPError):
+                        if result.status == 404:
+                            self.log.error(f"Job {job['appjobid']} not found, cancelling")
+                            self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                            continue
+                    self.log.error(f"Error fetching info for job {job['appjobid']}: {result}")
+                    continue
 
                 # set to cancelled if in terminal state
-                try:
-                    mappedState = ARC_STATE_MAPPING[arcjob.state]
-                except KeyError:
-                    self.log.debug(f"STATE MAPPING KEY ERROR: state: {arcjob.state}")
-                    continue
-                if mappedState in ("Finished", "Failed", "Killed", "Deleted"):
-                    self.log.debug(f"Job {job.appid} {job.arcid} is cancelled by ARC")
-                    self.db.updateArcJob(job.arcid, {"arcstate": "cancelled", "tarcstate": tstamp, "State": mappedState, "tstate": tstamp})
+                state = result.get("State", None)
+                if state:
+                    try:
+                        mappedState = ARC_STATE_MAPPING[state]
+                    except KeyError:
+                        self.log.debug(f"STATE MAPPING ERROR: state: {state}")
+                    else:
+                        if mappedState in ("Finished", "Failed", "Killed", "Deleted"):
+                            self.log.debug(f"Job {job['appjobid']} is cancelled by ARC")
+                            self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "State": mappedState, "tstate": tstamp})
 
-        self.log.info('Done')
+        self.log.info("Done")
 
     def process(self):
         # minimum time between checks
