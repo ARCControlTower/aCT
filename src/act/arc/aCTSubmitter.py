@@ -309,8 +309,10 @@ class aCTSubmitter(aCTARCProcess):
                 results = arcrest.killJobs(arcids)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
+                continue
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
+                continue
             finally:
                 if arcrest:
                     arcrest.close()
@@ -387,8 +389,10 @@ class aCTSubmitter(aCTARCProcess):
                 results = arcrest.cleanJobs(arcids)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
+                continue
             except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
+                continue
             finally:
                 if arcrest:
                     arcrest.close()
