@@ -169,6 +169,7 @@ class aCTSubmitter(aCTARCProcess):
             try:
                 arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
             except Exception as exc:
+                self.setJobsArcstate(jobs, "tosubmit")
                 self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
                 continue
 
