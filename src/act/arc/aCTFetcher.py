@@ -7,6 +7,7 @@ from act.arc.aCTARCProcess import aCTARCProcess
 from pyarcrest.arc import ARCRest
 from pyarcrest.errors import MissingDiagnoseFile, MissingResultFile
 
+# TODO: document downloadfiles syntax
 # TODO: HARDCODED
 HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
 
@@ -59,16 +60,30 @@ class aCTFetcher(aCTARCProcess):
                 arcids.append(arcid)
                 downloadfiles = dbjob.get("downloadfiles", None)
                 if downloadfiles:
+                    # If there are multiple conflicting diagnose= entries,
+                    # weird things can happen. Since this is internal to
+                    # aCT, we don't bother to improve this for now.
                     for pattern in downloadfiles.split(";"):
                         if pattern.startswith("diagnose="):
                             path = pattern[len("diagnose="):]
                             parts = path.rsplit("/", 1)
+
+                            # no subdir for diagnose file
+                            # e. g. diagnose=errors
                             if len(parts) == 1:
                                 diagnoseDirs[arcid] = ""
+                            # all diagnose files in subdir
+                            # e. g. diagnose=gmlog/
+                            elif parts[1] == "":
+                                diagnoseDirs[arcid] = parts[0]
+                                diagnoseFiles.pop(arcid, None)
+                                continue
+                            # a diagnose file in subdir
+                            # e. g. diagnose=gmlog/errors
                             else:
                                 diagnoseDirs[arcid] = parts[0]
-                            diagFile = parts[-1]
-                            diagnoseFiles.setdefault(arcid, []).append(diagFile)
+
+                            diagnoseFiles.setdefault(arcid, []).append(parts[-1])
                         else:
                             outputFilters.setdefault(arcid, []).append(pattern)
 
