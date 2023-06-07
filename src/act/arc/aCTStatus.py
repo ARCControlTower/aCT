@@ -216,7 +216,7 @@ class aCTStatus(aCTARCProcess):
                 jobInfo = result
 
                 # process state change
-                state = jobInfo.get("State", None)
+                state = jobInfo.get("state", None)
                 if state:
                     try:
                         mappedState = ARC_STATE_MAPPING[state]
