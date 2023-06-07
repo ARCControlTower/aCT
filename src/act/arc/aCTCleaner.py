@@ -78,8 +78,8 @@ class aCTCleaner(aCTARCProcess):
 
             # update DB
             for job in dbjobs:
-                self.log.debug(f"Successfully cleaned job {job['appjobid']} in arc DB")
                 self.db.deleteArcJob(job["id"])
+                self.log.debug(f"Successfully cleaned job {job['appjobid']} in arc DB")
 
         self.log.debug("Done")
 

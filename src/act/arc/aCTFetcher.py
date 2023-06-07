@@ -114,18 +114,19 @@ class aCTFetcher(aCTARCProcess):
                     else:
                         isError = True
                         self.log.error(f"Error fetching job {job['appjobid']}: {error}")
+
                 if isError:
                     # TODO: HARDCODED
                     if job['tarcstate'] + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
-                        self.log.info(f"Fetch timeout for job {job['appjobid']}, marking job \"donefailed\"")
                         jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
                         self.db.updateArcJob(job["id"], jobdict)
+                        self.log.info(f"Fetch timeout for job {job['appjobid']}, marking job \"donefailed\"")
                     else:
                         self.log.info(f"Fetch timeout for job {job['appjobid']} not reached, will retry")
                 else:
-                    self.log.debug(f"Successfully fetched job {job['appjobid']}")
                     jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
                     self.db.updateArcJob(job["id"], jobdict)
+                    self.log.debug(f"Successfully fetched job {job['appjobid']}")
 
         self.log.debug("Done")
 
