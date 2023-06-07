@@ -31,7 +31,6 @@ class aCTSubmitter(aCTARCProcess):
         self.hostname = url.hostname
         self.port = url.port
 
-    # TODO: refactor to some library aCT job operation
     def submit(self):
         """
         Submit a batch of jobs to the ARC cluster.
@@ -255,7 +254,6 @@ class aCTSubmitter(aCTARCProcess):
             updateDict = {"arcstate": arcstate, "tarcstate": tstamp}
             self.db.updateArcJob(job["id"], updateDict)
 
-    # TODO: refactor to some library aCT job operation
     def checkFailedSubmissions(self):
         """
         Cancel jobs that are too long in submitting.
@@ -273,7 +271,6 @@ class aCTSubmitter(aCTARCProcess):
                 self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
                 self.log.debug(f"Cancelling job {job['appjobid']} for being too long in tosubmit")
 
-    # TODO: refactor to some library aCT job operation
     def processToCancel(self):
         """
         Cancel jobs in ARC.
@@ -360,7 +357,6 @@ class aCTSubmitter(aCTARCProcess):
                 self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
                 self.log.debug(f"Job {job['appjobid']} not in ARC, setting to cancelled directly")
 
-    # TODO: refactor to some library aCT job operation
     def processToResubmit(self):
         """
         Resubmit jobs to ARC.
@@ -440,7 +436,6 @@ class aCTSubmitter(aCTARCProcess):
                 jobdict = {"arcstate": "tosubmit", "tarcstate": tstamp, "created": tstamp}
                 self.db.updateArcJob(job["id"], jobdict)
 
-    # TODO: refactor to some library aCT job operation
     def processToRerun(self):
         """
         Rerun jobs in ARC.
