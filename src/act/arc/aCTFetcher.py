@@ -84,7 +84,14 @@ class aCTFetcher(aCTARCProcess):
                 for error in errors:
                     # don't treat missing diagnose file as fail
                     if isinstance(error, MissingDiagnoseFile):
-                        self.log.info(str(error))
+                        self.log.info(f"Skipping the missing diagnose file \"{error.filename}\" for job {job['appjobid']}")
+
+                    # missing result file -> error
+                    elif isinstance(error, MissingResultFile):
+                        isError = True
+                        self.log.error(f"Error fetching job {job['appjobid']}: missing file {error.filename}")
+
+                    # all other errors are fails as well
                     else:
                         isError = True
                         self.log.error(f"Error fetching job {job['appjobid']}: {error}")

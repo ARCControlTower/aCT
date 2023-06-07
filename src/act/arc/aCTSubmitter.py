@@ -348,7 +348,7 @@ class aCTSubmitter(aCTARCProcess):
                     if result.status == 404:
                         self.log.error(f"Job {job['appjobid']} missing in ARC, setting to cancelled")
                     else:
-                        self.log.error(f"Error killing job {job['appjobid']}: {result}")
+                        self.log.error(f"Error killing job {job['appjobid']}: {result.status} {result.text}")
                     state = "cancelled"
                 else:
                     self.log.debug(f"ARC will cancel job {job['appjobid']}")
@@ -427,7 +427,7 @@ class aCTSubmitter(aCTARCProcess):
             # log results
             for job, result in zip(toARCClean, results):
                 if isinstance(result, ARCHTTPError):
-                    self.log.error(f"Error cleaning job {job['appjobid']}: {result}")
+                    self.log.error(f"Error cleaning job {job['appjobid']}: {result.status} {result.text}")
                 else:
                     self.log.debug(f"Successfully cleaned job {job['appjobid']}")
 

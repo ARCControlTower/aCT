@@ -201,14 +201,16 @@ class aCTStatus(aCTARCProcess):
                         continue
 
                 # cancel 404 jobs and log errors
-                if isinstance(result, ARCError):
-                    if isinstance(result, ARCHTTPError):
-                        if result.status == 404:
-                            self.log.error(f"Job {job['appjobid']} not found, cancelling")
-                            jobdict.update({"arcstate": "tocancel"})
-                            self.db.updateArcJob(job["id"], jobdict)
-                            continue
-                    self.log.error(f"Error fetching info for job {job['appjobid']}: {result}")
+                if isinstance(result, ARCHTTPError):
+                    if result.status == 404:
+                        self.log.error(f"Job {job['appjobid']} not found, cancelling")
+                        jobdict.update({"arcstate": "tocancel"})
+                        self.db.updateArcJob(job["id"], jobdict)
+                    else:
+                        self.log.error(f"Error fetching info for job {job['appjobid']}: {result.status} {result.text}")
+                    continue
+                elif isinstance(result, NoValueInARCResult):
+                    self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF INFO FOR JOB {job['appjobid']}")
                     continue
 
                 jobInfo = result
