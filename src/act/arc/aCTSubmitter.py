@@ -15,6 +15,7 @@ from pyarcrest.errors import (ARCHTTPError, DescriptionParseError,
 # TODO: HARDCODED
 HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
 HTTP_TIMEOUT = 60
+UPLOAD_WORKERS = 10
 
 
 class aCTSubmitter(aCTARCProcess):
