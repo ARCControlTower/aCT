@@ -49,12 +49,31 @@ class aCTFetcher(aCTARCProcess):
                 self.log.info("Exiting early due to requested shutdown")
                 self.stopWithException()
 
+            # create parameters for download from ARC
             arcids = []
-            downloads = []
+            outputFilters = {}
+            diagnoseFiles = {}
+            diagnoseDirs = {}
             for dbjob in dbjobs:
-                arcids.append(dbjob["IDFromEndpoint"])
-                downloads.append(dbjob["downloadfiles"])
-                resdir = os.path.join(self.tmpdir, dbjob["IDFromEndpoint"])
+                arcid = dbjob["IDFromEndpoint"]
+                arcids.append(arcid)
+                downloadfiles = dbjob.get("downloadfiles", None)
+                if downloadfiles:
+                    for pattern in downloadfiles.split(";"):
+                        if pattern.startswith("diagnose="):
+                            path = pattern[len("diagnose="):]
+                            parts = path.rsplit("/", 1)
+                            if len(parts) == 1:
+                                diagnoseDirs[arcid] = ""
+                            else:
+                                diagnoseDirs[arcid] = parts[0]
+                            diagFile = parts[-1]
+                            diagnoseFiles.setdefault(arcid, []).append(diagFile)
+                        else:
+                            outputFilters.setdefault(arcid, []).append(pattern)
+
+                # remove existing downloads (if previous failed)
+                resdir = os.path.join(self.tmpdir, arcid)
                 shutil.rmtree(resdir, True)
                 os.makedirs(resdir, exist_ok=True)
 
