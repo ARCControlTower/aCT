@@ -1,11 +1,9 @@
 import os
-from http.client import HTTPException
 from json import JSONDecodeError
-from ssl import SSLError
 
 from act.arc.aCTARCProcess import aCTARCProcess
 from pyarcrest.arc import ARCRest
-from pyarcrest.errors import ARCError, ARCHTTPError
+from pyarcrest.errors import ARCHTTPError
 
 
 class aCTCleaner(aCTARCProcess):
@@ -51,19 +49,25 @@ class aCTCleaner(aCTARCProcess):
                     arcjobs.append(job)
                     arcids.append(job["IDFromEndpoint"])
 
-            # clean jobs in ARC
+            # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            arcrest = None
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+            except Exception as exc:
+                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+                continue
+
+            # clean jobs in ARC
+            try:
                 results = arcrest.cleanJobs(arcids)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error killing jobs in ARC: {exc}")
+                continue
+            except Exception as exc:
+                self.log.error(f"Error cleaning jobs in ARC: {exc}")
+                continue
             finally:
-                if arcrest:
-                    arcrest.close()
+                arcrest.close()
 
             # log results
             for job, result in zip(arcjobs, results):

@@ -1,18 +1,16 @@
 import datetime
 import os
-from http.client import HTTPException
 from json import JSONDecodeError
 from random import shuffle
-from ssl import SSLError
 from urllib.parse import urlparse
 
 from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.aCTStatus import ARC_STATE_MAPPING
 from pyarcrest.arc import ARCRest
-from pyarcrest.errors import (ARCError, ARCHTTPError, DescriptionParseError,
+from pyarcrest.errors import (ARCHTTPError, DescriptionParseError,
                               DescriptionUnparseError, InputFileError,
-                              InputUploadError, MatchmakingError)
-
+                              InputUploadError, MatchmakingError,
+                              NoValueInARCResult)
 
 # TODO: HARDCODED
 HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
@@ -166,12 +164,18 @@ class aCTSubmitter(aCTARCProcess):
             for job in jobs:
                 descs.append(str(self.db.getArcJobDescription(str(job["jobdesc"]))))
 
-            # submit jobs to ARC
+            # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+            except Exception as exc:
+                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+                continue
+
+            # submit jobs to ARC
+            try:
                 delegationID = arcrest.createDelegation()
-                results = arcrest.submitJobs(delegationID, descs, self.queue, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=HTTP_TIMEOUT)
+                results = arcrest.submitJobs(descs, self.queue, delegationID, workers=UPLOAD_WORKERS, blocksize=HTTP_BUFFER_SIZE, timeout=HTTP_TIMEOUT)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit")
@@ -180,26 +184,41 @@ class aCTSubmitter(aCTARCProcess):
                 self.log.error(str(exc))
                 self.setJobsArcstate(jobs, "cancelled")
                 continue
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+            except Exception as exc:
                 self.log.error(f"Error submitting jobs to ARC: {exc}")
                 self.setJobsArcstate(jobs, "tosubmit")
                 continue
+            finally:
+                arcrest.close()
 
             # log submission results and set job state
             for job, result in zip(jobs, results):
                 jobdict = {}
                 if isinstance(result, list):  # a list of errors
                     for error in result:
-                        self.log.debug(f"Error submitting job {job['appjobid']}: {error}")
                         if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError, MatchmakingError):
                             jobdict["arcstate"] = "cancelled"
+                            self.log.debug(f"Error submitting job {job['appjobid']}: {error}")
                             break
                         elif isinstance(error, InputUploadError):
                             jobdict["arcstate"] = "tocancel"
                             jobdict["IDFromEndpoint"] = error.jobid
+                            for exc in error.errors:
+                                self.log.debug(f"Error uploading input files for job {job['appjobid']}: {exc}")
+                            self.log.debug(f"Cancelling job {job['appjobid']} due to upload errors")
                             break
+                        # Errors covered in else branch are not a reason to
+                        # cancel the job which is why else does not break from
+                        # the for loop. if and elif branches above do because
+                        # they cancel the job properly (and differently one
+                        # from another!) and exit the loop early, which does
+                        # not print all potential errors of the job. Creating
+                        # boolean flags or enums to avoid breaks from loop to
+                        # print every error is currently decided to not be
+                        # worth the effort.
                         else:
                             jobdict["arcstate"] = "tosubmit"
+                            self.log.debug(f"Error submitting job {job['appjobid']}: {error}")
                 else:
                     jobid, state = result
                     jobdict["arcstate"] = "submitted"
@@ -301,21 +320,25 @@ class aCTSubmitter(aCTARCProcess):
                 else:
                     cancelled.append(dbjob)
 
-            # kill jobs in ARC
+            # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            arcrest = None
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+            except Exception as exc:
+                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+                continue
+
+            # kill jobs in ARC
+            try:
                 results = arcrest.killJobs(arcids)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
                 continue
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+            except Exception as exc:
                 self.log.error(f"Error killing jobs in ARC: {exc}")
                 continue
             finally:
-                if arcrest:
-                    arcrest.close()
+                arcrest.close()
 
             tstamp = self.db.getTimeStamp()
 
@@ -381,21 +404,25 @@ class aCTSubmitter(aCTARCProcess):
                     toARCClean.append(dbjob)
                     arcids.append(dbjob["IDFromEndpoint"])
 
-            # clean jobs from ARC
+            # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            arcrest = None
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+            except Exception as exc:
+                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+                continue
+
+            # clean jobs from ARC
+            try:
                 results = arcrest.cleanJobs(arcids)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
                 continue
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
-                self.log.error(f"Error killing jobs in ARC: {exc}")
+            except Exception as exc:
+                self.log.error(f"Error cleaning jobs to resubmit in ARC: {exc}")
                 continue
             finally:
-                if arcrest:
-                    arcrest.close()
+                arcrest.close()
 
             # log results
             for job, result in zip(toARCClean, results):
@@ -446,49 +473,54 @@ class aCTSubmitter(aCTARCProcess):
                 self.log.info("Exiting early due to requested shutdown")
                 self.stopWithException()
 
+            # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            arcrest = None
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+            except Exception as exc:
+                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+                continue
 
-                # get delegations for jobs
-                arcids = [job["IDFromEndpoint"] for job in dbjobs]
-                try:
-                    results = arcrest.getJobsDelegations(arcids)
-                except Exception as exc:
-                    self.log.error(f"Error getting delegations for jobs: {exc}")
-                    continue
+            # get job delegations
+            arcids = [job["IDFromEndpoint"] for job in dbjobs]
+            try:
+                results = arcrest.getJobsDelegations(arcids)
+            except Exception as exc:
+                self.log.error(f"Error getting delegations for jobs: {exc}")
+                arcrest.close()
+                continue
 
-                # renew delegations
-                torestart = []
-                arcids = []
-                for job, result in zip(dbjobs, results):
-                    if isinstance(result, ARCError):
-                        self.log.error(f"Error getting delegations for job {job['appjobid']}: {result}")
+            # renew successfully fetched delegations
+            torestart = []
+            arcids = []
+            for job, result in zip(dbjobs, results):
+                if isinstance(result, ARCHTTPError):
+                    self.log.error(f"Error getting delegations for job {job['appjobid']}: {result.status} {result.text}")
+                elif isinstance(result, NoValueInARCResult):
+                    self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF DELEGATIONS FOR JOB {job['appjobid']}")
+                else:
+                    try:
+                        # renewing the first delegation from the list works
+                        # for aCT use case
+                        arcrest.renewDelegation(result[0])
+                    except Exception as exc:
+                        self.log.error(f"Failed to renew delegation for job {job['appjobid']}: {exc}")
                     else:
-                        try:
-                            # renewing the first delegation from the list works
-                            # for aCT use case
-                            arcrest.renewDelegation(result[0])
-                        except Exception as exc:
-                            self.log.error(f"Failed to renew delegation for job {job['appjobid']}: {exc}")
-                        else:
-                            self.log.debug(f"Successfully renewed delegation {result[0]} for job {job['appjobid']}")
-                            torestart.append(job)
-                            arcids.append(job["IDFromEndpoint"])
+                        self.log.debug(f"Successfully renewed delegation {result[0]} for job {job['appjobid']}")
+                        torestart.append(job)
+                        arcids.append(job["IDFromEndpoint"])
 
-                # restart jobs
+            # restart jobs
+            try:
                 results = arcrest.restartJobs(arcids)
-
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
                 continue
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+            except Exception as exc:
                 self.log.error(f"Error rerunning jobs in ARC: {exc}")
                 continue
             finally:
-                if arcrest:
-                    arcrest.close()
+                arcrest.close()
 
             tstamp = self.db.getTimeStamp()
 

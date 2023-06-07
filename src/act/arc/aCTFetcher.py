@@ -1,13 +1,11 @@
 import datetime
 import os
 import shutil
-from http.client import HTTPException
 from json import JSONDecodeError
-from ssl import SSLError
 
 from act.arc.aCTARCProcess import aCTARCProcess
 from pyarcrest.arc import ARCRest
-from pyarcrest.errors import ARCError, ARCHTTPError, MissingDiagnoseFile
+from pyarcrest.errors import MissingDiagnoseFile, MissingResultFile
 
 # TODO: HARDCODED
 HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
@@ -60,23 +58,26 @@ class aCTFetcher(aCTARCProcess):
                 shutil.rmtree(resdir, True)
                 os.makedirs(resdir, exist_ok=True)
 
-            # fetch job results from REST
+            # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            arcrest = None
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+            except Exception as exc:
+                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+                continue
 
-                # fetch jobs
+            # fetch job results from REST
+            try:
                 # TODO: HARDCODED
-                results = arcrest.downloadJobFiles(self.tmpdir, arcids, downloads, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=60)
-
+                results = arcrest.downloadJobFiles(self.tmpdir, arcids, outputFilters, diagnoseFiles, diagnoseDirs, workers=10, blocksize=HTTP_BUFFER_SIZE, timeout=60)
             except JSONDecodeError as exc:
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as exc:
+                continue
+            except Exception as exc:
                 self.log.error(f"Error fetching jobs in ARC: {exc}")
+                continue
             finally:
-                if arcrest:
-                    arcrest.close()
+                arcrest.close()
 
             for job, errors in zip(dbjobs, results):
                 isError = False

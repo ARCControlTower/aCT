@@ -78,12 +78,10 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
-from http.client import HTTPException
-from ssl import SSLError
 
 from act.arc.aCTARCProcess import aCTARCProcess
 from pyarcrest.arc import ARCRest
-from pyarcrest.errors import ARCError, ARCHTTPError
+from pyarcrest.errors import ARCError, ARCHTTPError, NoValueInARCResult
 
 ARC_STATE_MAPPING = {
     "ACCEPTING": "Accepted",
@@ -152,11 +150,12 @@ class aCTStatus(aCTARCProcess):
 
         for proxyid, dbjobs in jobsdict.items():
 
+            # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
             except Exception as exc:
-                self.log.error(f"Cannot create REST client for proxyid {proxyid}: {exc}")
+                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
                 continue
 
             # For now, if the job list cannot be fetched, the empty set is
@@ -176,8 +175,8 @@ class aCTStatus(aCTARCProcess):
             except json.JSONDecodeError as exc:
                 self.log.error(f"Error parsing returned JSON document: {exc.doc}")
                 continue
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as e:
-                self.log.error(f"Error fetching job info from ARC: {e}")
+            except Exception as exc:
+                self.log.error(f"Error fetching job info from ARC: {exc}")
                 continue
             finally:
                 arcrest.close()
@@ -467,22 +466,35 @@ class aCTStatus(aCTARCProcess):
                 else:
                     tocheck.append(job)
 
-            # get job info from ARC
+            # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            arcrest = None
             try:
-                arcrest = ARCRest.getClient(self.cluster, proxypath=proxypath, logger=self.log)
-                joblist = set(arcrest.getJobsList())  # set type for performance
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+            except Exception as exc:
+                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+                continue
+
+            # For now, if the job list cannot be fetched, the empty set is
+            # returned, which will cause jobs stuck for a long time to be
+            # deleted. Set type is used for performance as we can be working
+            # with a lot of jobs (limit in SQL statement).
+            try:
+                joblist = set(arcrest.getJobsList())
+            except Exception as exc:
+                self.log.warning(f"Cannot fetch a list of jobs for proxyid {proxyid}: {exc}")
+                joblist = set()
+
+            # get job info from ARC
+            try:
                 results = arcrest.getJobsInfo([job["IDFromEndpoint"] for job in tocheck])
             except json.JSONDecodeError as exc:
-                self.log.error(f"Error parsing returned JSON document: {exc.doc}")
+                self.log.error(f"Invalid JSON response from ARC: {exc}")
                 continue
-            except (HTTPException, ConnectionError, SSLError, ARCError, ARCHTTPError, TimeoutError, OSError, ValueError) as e:
-                self.log.error(f"Error fetching job info from ARC: {e}")
+            except Exception as exc:
+                self.log.error(f"Error fetching job info from ARC: {exc}")
                 continue
             finally:
-                if arcrest:
-                    arcrest.close()
+                arcrest.close()
 
             # update DB
             for job, result in zip(tocheck, results):
