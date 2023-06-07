@@ -203,6 +203,7 @@ class aCTSubmitter(aCTARCProcess):
                             break
                         elif isinstance(error, InputUploadError):
                             jobdict["arcstate"] = "tocancel"
+                            jobdict["cluster"] = self.cluster
                             jobdict["IDFromEndpoint"] = error.jobid
                             for exc in error.errors:
                                 self.log.debug(f"Error uploading input files for job {job['appjobid']}: {exc}")
@@ -224,7 +225,6 @@ class aCTSubmitter(aCTARCProcess):
                     jobid, state = result
                     jobdict["arcstate"] = "submitted"
                     jobdict["tstate"] = tstamp
-                    jobdict["cluster"] = self.cluster
                     jobdict["ExecutionNode"] = ""
                     jobdict["UsedTotalWallTime"] = 0
                     jobdict["UsedTotalCPUTime"] = 0
