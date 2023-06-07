@@ -517,14 +517,14 @@ class aCTStatus(aCTARCProcess):
                     self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
                     continue
 
-                # cancel 404 jobs and log errors
+                # process errors
                 if isinstance(result, ARCError):
                     if isinstance(result, ARCHTTPError):
                         if result.status == 404:
-                            self.log.error(f"Job {job['appjobid']} not found, cancelling")
-                            self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
+                            self.log.error(f"Job {job['appjobid']} not found, considering cancelled")
+                            self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
                             continue
-                    self.log.error(f"Error fetching info for job {job['appjobid']}: {result}")
+                    self.log.error(f"Error fetching info of cancelling job {job['appjobid']}: {result}")
                     continue
 
                 # set to cancelled if in terminal state
