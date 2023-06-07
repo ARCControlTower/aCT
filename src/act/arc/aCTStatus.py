@@ -289,9 +289,14 @@ class aCTStatus(aCTARCProcess):
                     else:
                         jobdict["UsedTotalCPUTime"] = cputime
 
-                # format data properly for DB
+                # remove non ascii from nodes and format in comma separated list
                 if "ExecutionNode" in jobInfo:
-                    jobdict["ExecutionNode"] = ",".join(jobInfo["ExecutionNode"])
+                    nodes = []
+                    for node in jobInfo["ExecutionNode"]:
+                        nodes.append(''.join(c for c in node if ord(c) < 128))
+                    jobdict["ExecutionNode"] = ",".join(nodes)
+
+                # format errors in semicolon separated list
                 if "Error" in jobInfo:
                     jobdict["Error"] = ";".join(jobInfo["Error"])
 
