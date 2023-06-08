@@ -60,8 +60,11 @@ class aCTClient2Arc(aCTProcess):
         for job in jobs:
             # create downloads list
             arc.JobDescription_Parse(job['jobdesc'], jobdescs)
+
+            # TODO: this should be done according to the xRSL output files
             # all files from session dir
             downloads = ['/']
+
             # all diagnose files if log dir is specified
             logdir = jobdescs[-1].Application.LogDir
             if logdir:
