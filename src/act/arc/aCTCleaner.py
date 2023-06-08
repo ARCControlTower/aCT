@@ -1,4 +1,5 @@
 import os
+import datetime
 from json import JSONDecodeError
 
 from act.arc.aCTARCProcess import aCTARCProcess
@@ -16,7 +17,7 @@ class aCTCleaner(aCTARCProcess):
         Signal handling strategy:
         - method checks termination before job batch for every proxyid
         """
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate"]
 
         # Fetch all jobs that can be cleaned from database.
         # TODO: HARDCODED
@@ -27,11 +28,22 @@ class aCTCleaner(aCTARCProcess):
         if not jobstoclean:
             return
 
+        now = datetime.datetime.utcnow()
+        # TODO: HARDCODED
+        limit = datetime.timedelta(hours=1)
+        toclean = []
+        for job in jobstoclean:
+            if job["tarcstate"] + limit < now:
+                self.db.deleteArcJob(job["id"])
+                self.log.debug(f"Could clean job {job['appjobid']} in time, removing from DB")
+            else:
+                toclean.append(job)
+
         self.log.info(f"Cleaning {len(jobstoclean)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
-        for row in jobstoclean:
+        for row in toclean:
             if not row["proxyid"] in jobsdict:
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)

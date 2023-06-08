@@ -280,7 +280,7 @@ class aCTSubmitter(aCTARCProcess):
         Signal handling strategy:
         - termination is checked before handling every proxyid job batch
         """
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate"]
 
         # fetch jobs from DB for this cluster and also jobs that
         # don't have cluster assigned
@@ -291,11 +291,23 @@ class aCTSubmitter(aCTARCProcess):
         if not jobstocancel:
             return
 
+        now = datetime.datetime.utcnow()
+        tstamp = self.db.getTimeStamp()
+        # TODO: HARDCODED
+        limit = datetime.timedelta(hours=1)
+        tocancel = []
+        for job in jobstocancel:
+            if job["tarcstate"] + limit < now:
+                self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
+                self.log.debug(f"Could not cancel job {job['appjobid']} in time, setting to cancelled")
+            else:
+                tocancel.append(job)
+
         self.log.info(f"Cancelling {len(jobstocancel)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
-        for row in jobstocancel:
+        for row in tocancel:
             if not row["proxyid"] in jobsdict:
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)
@@ -369,7 +381,7 @@ class aCTSubmitter(aCTARCProcess):
         Signal handling strategy:
         - termination is checked before handling every proxyid job batch
         """
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate"]
 
         # fetch jobs from DB
         jobstoresubmit = self.db.getArcJobsInfo(
@@ -379,11 +391,23 @@ class aCTSubmitter(aCTARCProcess):
         if not jobstoresubmit:
             return
 
+        now = datetime.datetime.utcnow()
+        tstamp = self.db.getTimeStamp()
+        # TODO: HARDCODED
+        limit = datetime.timedelta(hours=1)
+        toresubmit = []
+        for job in jobstoresubmit:
+            if job["tarcstate"] + limit < now:
+                self.db.updateArcJob(job["id"], {"arcstate": "failed", "tarcstate": tstamp, "attemptsleft": 0})
+                self.log.debug(f"Could not resubmit job {job['appjobid']} in time, setting to failed")
+            else:
+                toresubmit.append(job)
+
         self.log.info(f"Resubmitting {len(jobstoresubmit)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
-        for row in jobstoresubmit:
+        for row in toresubmit:
             if not row["proxyid"] in jobsdict:
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)
@@ -445,7 +469,7 @@ class aCTSubmitter(aCTARCProcess):
         Signal handling strategy:
         - termination is checked before handling every proxyid job batch
         """
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint"]
+        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate"]
 
         # fetch jobs from DB
         jobstorerun = self.db.getArcJobsInfo(
@@ -455,11 +479,23 @@ class aCTSubmitter(aCTARCProcess):
         if not jobstorerun:
             return
 
+        now = datetime.datetime.utcnow()
+        tstamp = self.db.getTimeStamp()
+        # TODO: HARDCODED
+        limit = datetime.timedelta(hours=1)
+        torerun = []
+        for job in jobstorerun:
+            if job["tarcstate"] + limit < now:
+                self.db.updateArcJob(job["id"], {"arcstate": "failed", "tarcstate": tstamp})
+                self.log.debug(f"Could not restart job {job['appjobid']} in time, setting to failed")
+            else:
+                torerun.append(job)
+
         self.log.info(f"Resuming {len(jobstorerun)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
-        for row in jobstorerun:
+        for row in torerun:
             if not row["proxyid"] in jobsdict:
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)

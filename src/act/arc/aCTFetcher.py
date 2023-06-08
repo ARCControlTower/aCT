@@ -35,11 +35,27 @@ class aCTFetcher(aCTARCProcess):
 
         if not jobstofetch:
             return
+
+        now = datetime.datetime.utcnow()
+        tstamp = self.db.getTimeStamp()
+        # TODO: HARDCODED
+        if arcstate == "tofetch":
+            limit = datetime.timedelta(hours=1)
+        elif arcstate == "finished":
+            limit = datetime.timedelta(hours=24)
+        tofetch = []
+        for job in jobstofetch:
+            if job["tarcstate"] + limit < now:
+                self.db.updateArcJob(job["id"], {"arcstate": "donefailed", "tarcstate": tstamp})
+                self.log.debug(f"Could fetch job {job['appjobid']} in time, setting to donefailed")
+            else:
+                tofetch.append(job)
+
         self.log.info(f"Fetching {len(jobstofetch)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
-        for row in jobstofetch:
+        for row in tofetch:
             if not row["proxyid"] in jobsdict:
                 jobsdict[row["proxyid"]] = []
             jobsdict[row["proxyid"]].append(row)
@@ -130,15 +146,7 @@ class aCTFetcher(aCTARCProcess):
                         isError = True
                         self.log.error(f"Error fetching job {job['appjobid']}: {error}")
 
-                if isError:
-                    # TODO: HARDCODED
-                    if job['tarcstate'] + datetime.timedelta(hours=24) < datetime.datetime.utcnow():
-                        jobdict = {"arcstate": "donefailed", "tarcstate": self.db.getTimeStamp()}
-                        self.db.updateArcJob(job["id"], jobdict)
-                        self.log.info(f"Fetch timeout for job {job['appjobid']}, marking job \"donefailed\"")
-                    else:
-                        self.log.info(f"Fetch timeout for job {job['appjobid']} not reached, will retry")
-                else:
+                if not isError:
                     jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
                     self.db.updateArcJob(job["id"], jobdict)
                     self.log.debug(f"Successfully fetched job {job['appjobid']}")
