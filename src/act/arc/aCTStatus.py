@@ -241,12 +241,13 @@ class aCTStatus(aCTARCProcess):
                                 jobdict["arcstate"] = "finishing"
 
                             elif state == "FINISHED":
-                                if jobInfo["ExitCode"] is None:
+                                exitCode = jobInfo.get("ExitCode", None)
+                                if exitCode is None:
                                     # missing exit code, but assume success
                                     jobdict["ExitCode"] = 0
                                     self.log.warning(f"Job {job['appjobid']} is finished but has missing exit code, setting to zero")
                                 else:
-                                    jobdict["ExitCode"] = jobInfo["ExitCode"]
+                                    jobdict["ExitCode"] = exitCode
                                 jobdict["arcstate"] = "finished"
 
                             elif state == "FAILED":
@@ -335,10 +336,7 @@ class aCTStatus(aCTARCProcess):
             self.log.info(f"Job {job['appjobid']} failed, no error given")
 
         # restart if data staging problem but not output file list problem
-        restartState = ""
-        for state in jobInfo.get("RestartState", []):
-            if state.startswith("arcrest:"):
-                restartState = state[len("arcrest:"):]
+        restartState = jobInfo.get("restartState", None)
         if restartState in ("PREPARING", "FINISHING"):
             if "Error reading user generated output file list" not in jobInfo.get("Error", []):
                 patchDict.update({"State": "Undefined", "arcstate": "torerun"})
@@ -528,7 +526,7 @@ class aCTStatus(aCTARCProcess):
                     continue
 
                 # set to cancelled if in terminal state
-                state = result.get("State", None)
+                state = result.get("state", None)
                 if state:
                     try:
                         mappedState = ARC_STATE_MAPPING[state]
