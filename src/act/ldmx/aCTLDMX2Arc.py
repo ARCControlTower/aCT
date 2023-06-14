@@ -22,9 +22,7 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         newjobs = self.dbldmx.getJobs(select, columns=columns, tables='ldmxjobs, ldmxbatches')
         for job in newjobs:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             with open(job['description']) as f:
                 config = {l.split('=')[0]: l.split('=')[1].strip() for l in f}

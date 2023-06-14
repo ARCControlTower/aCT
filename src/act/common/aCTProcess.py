@@ -1,4 +1,5 @@
 import signal
+import threading
 import traceback
 from urllib.parse import urlparse
 
@@ -42,9 +43,9 @@ class aCTProcess:
     __call__(*args, **kwargs) -> run(*args, *kwargs) -> setup(*args, **kwargs)
 
     The aCTProcess can exit in two ways:
-    - by setting the mustExit flag (stopWithFlag method); the flag is checked
-      at least once per main loop and in more involved operations it is used
-      more granularly
+    - by setting the self.terminate flag (setStopFlag method); the flag is
+      checked at least once per main loop and in more involved operations it is
+      used more granularly
     - by raising the ExitProcessException (stopWithException method); this one
       should not be used when transaction integrity is required (e. g. between
       modification of multiple tables and executing some operations with
@@ -58,7 +59,7 @@ class aCTProcess:
         """Set up attributes needed for setup() in spawned OS process."""
         self.name = self.__class__.__name__
         self.cluster = cluster
-        self.mustExit = False
+        self.terminate = threading.Event()
 
     def __call__(self, *args, **kwargs):
         """Call the method implementing the process code."""
@@ -109,9 +110,9 @@ class aCTProcess:
         """
         pass
 
-    def wait(self):
+    def wait(self, limit=10):
         """Wait before next iteration of the main loop."""
-        pass
+        self.terminate.wait(limit)
 
     def process(self):
         """Execute the process' main loop functionality."""
@@ -124,24 +125,33 @@ class aCTProcess:
             msg += f' for cluster {self.cluster}'
         self.log.info(msg)
 
-    def stopWithFlag(self):
+    def setStopFlag(self):
         """Set flag for process termination."""
-        self.mustExit = True
+        self.terminate.set()
 
     def stopWithException(self):
         """Raise exception for process termination."""
-        self.stopWithFlag()
+        self.setStopFlag()
         raise ExitProcessException()
+
+    def isStopFlagSet(self):
+        """Return the state of termination flag."""
+        return self.terminate.is_set()
+
+    def stopOnFlag(self):
+        """Exit with exception on termination flag."""
+        if self.isStopFlagSet():
+            raise ExitProcessException()
 
     def run(self):
         """Run the process code."""
         try:
             self.setup()
-            while not self.mustExit:
+            while True:
                 self.loadConf()
                 self.process()
                 self.wait()
-            self.log.info("*** Process exiting normally ***")
+                self.exitOnFlag()
         except ExitProcessException:
             self.log.info("*** Process exiting normally ***")
         except:
@@ -154,7 +164,7 @@ class aCTProcess:
 
     def exitHandler(self, signum, frame):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        self.mustExit = True
+        self.setStopFlag()
 
 
 # The reason for inheriting from BaseException instead of recommended Exception

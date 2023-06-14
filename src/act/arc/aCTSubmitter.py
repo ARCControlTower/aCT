@@ -78,9 +78,7 @@ class aCTSubmitter(aCTARCProcess):
 
         for fairshare, proxyid in fairshares:
 
-            if self.mustExit:
-                self.log.info("Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             # Exit loop if above limit
             if nsubmitted >= clustermaxjobs:
@@ -265,9 +263,7 @@ class aCTSubmitter(aCTARCProcess):
         """
         dbjobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "created"])
         for job in dbjobs:
-            if self.mustExit:
-                self.log.info("Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # TODO: HARDCODED
             if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
                 self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
@@ -314,9 +310,7 @@ class aCTSubmitter(aCTARCProcess):
 
         for proxyid, dbjobs in jobsdict.items():
 
-            if self.mustExit:
-                self.log.info("Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             # partition the jobs based on whether they are in ARC; ARC jobs
             # need to be killed in ARC first, others can be set to cancelled
@@ -414,9 +408,7 @@ class aCTSubmitter(aCTARCProcess):
 
         for proxyid, dbjobs in jobsdict.items():
 
-            if self.mustExit:
-                self.log.info("Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             # create a list of jobs that need to be cleaned in ARC
             toARCClean = []
@@ -502,9 +494,7 @@ class aCTSubmitter(aCTARCProcess):
 
         for proxyid, dbjobs in jobsdict.items():
 
-            if self.mustExit:
-                self.log.info("Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")

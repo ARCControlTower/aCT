@@ -1,5 +1,5 @@
-import os
 import datetime
+import os
 from json import JSONDecodeError
 
 from act.arc.aCTARCProcess import aCTARCProcess
@@ -50,9 +50,7 @@ class aCTCleaner(aCTARCProcess):
 
         for proxyid, dbjobs in jobsdict.items():
 
-            if self.mustExit:
-                self.log.info("Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             arcjobs = []
             arcids = []

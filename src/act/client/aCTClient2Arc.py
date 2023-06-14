@@ -17,9 +17,6 @@ class aCTClient2Arc(aCTProcess):
     def loadConf(self):
         self.conf = aCTConfigARC()
 
-    def wait(self):
-        time.sleep(10)
-
     def setup(self):
         super().setup()
         self.clidb = ClientDB(self.log)
@@ -34,9 +31,7 @@ class aCTClient2Arc(aCTProcess):
         """
         proxies = self.clidb.getProxies()
         for proxyid in proxies:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.insertNewJobs(proxyid, 1000)
 
     def insertNewJobs(self, proxyid, num):

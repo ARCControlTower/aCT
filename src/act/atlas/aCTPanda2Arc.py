@@ -23,9 +23,7 @@ class aCTPanda2Arc(aCTATLASProcess):
 
         for job in jobs:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             if job['proxyid'] not in proxies_map:
                 proxies_map[job['proxyid']] = self.dbarc.getProxyPath(job['proxyid'])

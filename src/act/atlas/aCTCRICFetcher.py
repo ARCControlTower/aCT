@@ -2,8 +2,6 @@
 
 import os
 import signal
-import threading
-import urllib.error
 from datetime import datetime, timedelta
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
@@ -16,24 +14,11 @@ class aCTCRICFetcher(aCTATLASProcess):
         super().setup()
         self.queues = self.conf.cric.server
         self.queuesfile = self.conf.cric.jsonfilename
-
-        # TODO: aCTCRICFetcher is the only process that sleeps a very long
-        # period of time, unacceptable for the service stop mechanism.
-        # This is currently a quick hack. What should be a more generic API
-        # for such functionality? (Especially, how could the configuration
-        # of arbitrary waiting period be exposed to the developer in the most
-        # elegant way?)
-        self.terminate = threading.Event()
         signal.signal(signal.SIGTERM, self.exitHandler)
 
-    def exitHandler(self, signum, frame):
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        self.mustExit = True
-        self.terminate.set()
-
-    def wait(self):
-        # avoid too much cric fetching
-        self.terminate.wait(600)
+    # avoid too much cric fetching
+    def wait(self, limit=600):
+        super().wait(limit)
 
     def fetchFromCRIC(self, url, filename):
         self.log.debug(f"Downloading from {url}")

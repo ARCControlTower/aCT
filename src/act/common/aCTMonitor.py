@@ -1,6 +1,5 @@
 import importlib
 import random
-import time
 
 from act.arc.aCTARCProcess import aCTProcess
 from act.arc.aCTDBArc import aCTDBArc
@@ -75,8 +74,8 @@ class aCTMonitor(aCTProcess):
     def loadConf(self):
         self.conf = aCTConfigARC()
 
-    def wait(self):
-        time.sleep(random.randint(5, 11))
+    def wait(self, limit=random.randint(5, 11)):
+        super().wait(limit)
 
     def setup(self):
         super().setup()

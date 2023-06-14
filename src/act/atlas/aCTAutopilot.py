@@ -103,9 +103,7 @@ class aCTAutopilot(aCTATLASProcess):
         - everything is executed without checking for exit to do heartbeats
           and their result processing uninterrupted
         """
-        if self.mustExit:
-            self.log.info(f"Exiting early due to requested shutdown")
-            self.stopWithException()
+        self.stopOnFlag()
 
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
         jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
@@ -189,9 +187,7 @@ class aCTAutopilot(aCTATLASProcess):
         - everything is executed without checking for exit to do heartbeats
           and their result processing uninterrupted
         """
-        if self.mustExit:
-            self.log.info(f"Exiting early due to requested shutdown")
-            self.stopWithException()
+        self.stopOnFlag()
 
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
         jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
@@ -289,9 +285,7 @@ class aCTAutopilot(aCTATLASProcess):
         - everything is executed without checking for exit to do heartbeats
           and their result processing uninterrupted
         """
-        if self.mustExit:
-            self.log.info(f"Exiting early due to requested shutdown")
-            self.stopWithException()
+        self.stopOnFlag()
 
         jobs=self.dbpanda.getJobs("actpandastatus='finished' or actpandastatus='failed' or actpandastatus='cancelled' limit 1000")
 
@@ -400,9 +394,7 @@ class aCTAutopilot(aCTATLASProcess):
         jobs=self.dbpanda.getJobs("pandastatus like '%'")
 
         for j in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info("%d" % j['pandaid'])
             if j['pandaid'] in pjids:
                 pass
@@ -416,9 +408,7 @@ class aCTAutopilot(aCTATLASProcess):
         # check db for jobs in Panda but not in aCT
         count=0
         for j in pjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.debug("checking job %d" % j['PandaID'])
             job=self.dbpanda.getJob(j['PandaID'])
             if job is None and ( j['pandastatus'] == 'running' or j['pandastatus'] == 'transferring' or j['pandastatus'] == 'starting') :
@@ -445,9 +435,7 @@ class aCTAutopilot(aCTATLASProcess):
 
         self.log.info('Archiving %d jobs' % len(jobs))
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.debug('Archiving panda job %d' % job['pandaid'])
             # Fill out empty start/end time
             if job['starttime']:

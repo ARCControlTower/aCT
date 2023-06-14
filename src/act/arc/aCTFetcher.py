@@ -62,9 +62,7 @@ class aCTFetcher(aCTARCProcess):
 
         for proxyid, dbjobs in jobsdict.items():
 
-            if self.mustExit:
-                self.log.info("Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             # create parameters for download from ARC
             arcids = []

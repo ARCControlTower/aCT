@@ -20,8 +20,8 @@ class aCTLDMXProcess(aCTProcess):
         self.conf = aCTConfigAPP()
         self.arcconf = aCTConfigARC()
 
-    def wait(self):
-        time.sleep(2)
+    def wait(self, limit=2):
+        super().wait(limit)
 
     def setup(self):
         super().setup()

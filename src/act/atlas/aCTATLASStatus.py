@@ -31,9 +31,7 @@ class aCTATLASStatus(aCTATLASProcess):
             jobs = self.dbpanda.getJobs("(actpandastatus='starting' or actpandastatus='sent') and sitename in %s" % offlinesitesselect,
                                         ['pandaid', 'arcjobid', 'siteName', 'id'])
             for job in jobs:
-                if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
-                    self.stopWithException()
+                self.stopOnFlag()
                 self.log.info("Cancelling starting job for %d for offline site %s" % (job['pandaid'], job['siteName']))
                 select = 'id=%s' % job['id']
                 self.dbpanda.updateJobs(select, {'actpandastatus': 'failed', 'pandastatus': 'failed',
@@ -49,9 +47,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         for job in jobs:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             self.log.info("Cancelling arc job for %d", job['pandaid'])
             select = 'id=%s' % job['id']
@@ -120,9 +116,7 @@ class aCTATLASStatus(aCTATLASProcess):
             self.log.debug("Found %d submitted jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
 
         for aj in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = "arcjobid='"+str(aj["id"])+"'"
             desc = {}
             desc["pandastatus"] = "starting"
@@ -164,9 +158,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         for aj in jobstoupdate:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             select = "arcjobid='"+str(aj["id"])+"'"
             desc = {}
@@ -228,9 +220,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         for aj in jobstoupdate:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             select = "arcjobid='"+str(aj["id"])+"'"
             desc = {}
@@ -265,9 +255,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         for aj in arcjobs:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             if self.sites[aj['siteName']]['truepilot']:
                 self.log.info('%s: No resubmission for true pilot job', aj['appjobid'])
@@ -351,9 +339,7 @@ class aCTATLASStatus(aCTATLASProcess):
         self.log.info("processing %d failed jobs" % len(arcjobs))
         for aj in arcjobs:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             jobid=aj['JobID']
             if not jobid:
@@ -463,9 +449,7 @@ class aCTATLASStatus(aCTATLASProcess):
         columns = ['id']
         arcjobs = self.dbarc.getArcJobsInfo(select, columns)
         for aj in arcjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = "id='"+str(aj["id"])+"'"
             desc = {"arcstate":"tofetch", "tarcstate": self.dbarc.getTimeStamp()}
             self.dbarc.updateArcJobs(desc, select)
@@ -505,9 +489,7 @@ class aCTATLASStatus(aCTATLASProcess):
         self.processFailed(failedjobs)
 
         for aj in failedjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = "arcjobid='"+str(aj["arcjobid"])+"'"
             desc = {}
             desc["pandastatus"] = "transferring"
@@ -532,9 +514,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         # clean lost pilot jobs or resubmit other lost jobs
         for aj in lostjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = "arcjobid='"+str(aj["arcjobid"])+"'"
             desc={}
 
@@ -554,9 +534,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         # clean cancelled pilot jobs and resubmit other cancelled jobs
         for aj in cancelledjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # Jobs were unexpectedly killed in arc, resubmit and clean
             select = "arcjobid='"+str(aj["arcjobid"])+"'"
             desc = {}
@@ -592,9 +570,7 @@ class aCTATLASStatus(aCTATLASProcess):
         select = "arcstate in ('tocancel', 'cancelling', 'toclean') and (cluster='' or cluster is NULL)"
         jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid'])
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info("%s: Deleting from arcjobs unsubmitted job %d", job['appjobid'], job['id'])
             self.dbarc.deleteArcJob(job['id'])
 
@@ -603,9 +579,7 @@ class aCTATLASStatus(aCTATLASProcess):
         jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid', 'arcstate', 'JobID'])
         cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # done jobs should not be there, log a warning
             if job['arcstate'] == 'done':
                 self.log.warning("%s: Removing orphaned done job %d", job['appjobid'], job['id'])
@@ -622,9 +596,7 @@ class aCTATLASStatus(aCTATLASProcess):
         cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
         jobs = self.dbarc.getArcJobsInfo(select, ['arcjobs.id', 'arcjobs.appjobid', 'arcjobs.JobID'], tables='arcjobs, pandajobs')
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info("%s: Cleaning cancelled job %d", job['appjobid'], job['id'])
             self.dbarc.updateArcJob(job['id'], cleandesc)
             if job['JobID'] and job['JobID'].rfind('/') != -1:

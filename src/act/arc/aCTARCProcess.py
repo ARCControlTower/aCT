@@ -1,5 +1,4 @@
 import random
-import time
 
 from act.arc.aCTDBArc import aCTDBArc
 from act.common.aCTConfig import aCTConfigARC
@@ -15,8 +14,8 @@ class aCTARCProcess(aCTProcess):
     def loadConf(self):
         self.conf = aCTConfigARC()
 
-    def wait(self):
-        time.sleep(random.randint(5, 11))
+    def wait(self, limit=random.randint(5, 11)):
+        super().wait(limit)
 
     def setup(self):
         super().setup()

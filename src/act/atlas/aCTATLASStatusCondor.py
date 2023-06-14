@@ -30,9 +30,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                                         ['pandaid', 'condorjobid', 'siteName', 'id'])
             for job in jobs:
 
-                if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
-                    self.stopWithException()
+                self.stopOnFlag()
 
                 continue  # TODO: does this make sense?
                 self.log.info("Cancelling starting job for %d for offline site %s" % (job['pandaid'], job['siteName']))
@@ -50,9 +48,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
 
         for job in jobs:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             self.log.info("Cancelling Condor job for %d", job['pandaid'])
             select = 'id=%s' % job['id']
@@ -111,9 +107,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             self.log.debug("Found %d submitted jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
 
         for job in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = "condorjobid='"+str(job["id"])+"'"
             desc = {}
             desc["pandastatus"] = "starting"
@@ -147,9 +141,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             self.log.debug("Found %d running jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
 
         for cj in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = "condorjobid='"+str(cj["id"])+"'"
             desc = {}
             desc["pandastatus"] = "running"
@@ -192,9 +184,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             self.log.debug("Found %d finished jobs (%s)" % (len(jobstoupdate), ','.join([j['appjobid'] for j in jobstoupdate])))
 
         for cj in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = "condorjobid='"+str(cj["id"])+"'"
             desc = {}
             desc["pandastatus"] = "transferring"
@@ -246,17 +236,13 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         condorjobs = self.dbcondor.getCondorJobsInfo(select, columns)
 
         for cj in condorjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = "id='"+str(cj["id"])+"'"
             desc = {"condorstate":"tofetch", "tcondorstate": self.dbcondor.getTimeStamp()}
             self.dbcondor.updateCondorJobs(desc, select)
 
         for cj in failedjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info("%s: Job failed so stop sending heartbeats", cj['appjobid'])
             select = "condorjobid='"+str(cj["condorjobid"])+"'"
             desc = {}
@@ -269,9 +255,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             self.dbpanda.updateJobs(select, desc)
 
         for cj in lostjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # For truepilot, just set to clean and transferring to clean up condor job
             self.log.info("%s: Job is lost, cleaning up condor job", cj['appjobid'])
             select = "condorjobid='"+str(cj["condorjobid"])+"'"
@@ -282,9 +266,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             self.dbpanda.updateJobs(select,desc)
 
         for cj in cancelledjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # Only applies to manually cancelled jobs, simply clean them
             self.log.info("%s: Job was cancelled, cleaning up condor job", cj['appjobid'])
             select = "condorjobid='%s'" % str(cj["condorjobid"])
@@ -312,9 +294,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         select = "(condorstate='tocancel' or condorstate='cancelling') and (cluster='' or cluster is NULL)"
         jobs = self.dbcondor.getCondorJobsInfo(select, ['id', 'appjobid'])
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info("%s: Deleting from condorjobs unsubmitted job %d", job['appjobid'], job['id'])
             self.dbcondor.deleteCondorJob(job['id'])
 
@@ -323,9 +303,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         jobs = self.dbcondor.getCondorJobsInfo(select, ['id', 'appjobid', 'condorstate'])
         cleandesc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # done jobs should not be there, log a warning
             if job['condorstate'] == 'done':
                 self.log.warning("%s: Removing orphaned done job %d", job['appjobid'], job['id'])
@@ -338,9 +316,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         cleandesc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
         jobs = self.dbcondor.getCondorJobsInfo(select, ['condorjobs.id', 'condorjobs.appjobid'], tables='condorjobs, pandajobs')
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info("%s: Cleaning cancelled job %d", job['appjobid'], job['id'])
             self.dbcondor.updateCondorJob(job['id'], cleandesc)
 

@@ -185,9 +185,7 @@ class aCTStatus(aCTARCProcess):
 
             for job, result in zip(dbjobs, results):
 
-                if self.mustExit:
-                    self.log.info("Exiting early due to requested shutdown")
-                    self.stopWithException()
+                self.stopOnFlag()
 
                 jobdict = {"tarcstate": tstamp}
 
@@ -371,9 +369,7 @@ class aCTStatus(aCTARCProcess):
         )
         tstamp = self.db.getTimeStamp()
         for job in jobs:
-            if self.mustExit:
-                self.log.info("Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             if job["arcstate"] == "cancelling":
                 self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
                 self.log.warning(f"Job {job['appjobid']} too long in cancelling, marking as cancelled")
@@ -408,9 +404,7 @@ class aCTStatus(aCTARCProcess):
             jobs = self.db.getArcJobsInfo(select, columns=["id", "JobID", "appjobid", "arcstate"])
 
             for job in jobs:
-                if self.mustExit:
-                    self.log.info("Exiting early due to requested shutdown")
-                    self.stopWithException()
+                self.stopOnFlag()
                 if job["arcstate"] == "toclean":
                     # delete jobs stuck in toclean
                     self.db.deleteArcJob(job["id"])
@@ -504,9 +498,7 @@ class aCTStatus(aCTARCProcess):
             # update DB
             for job, result in zip(tocheck, results):
 
-                if self.mustExit:
-                    self.log.info("Exiting early due to requested shutdown")
-                    self.stopWithException()
+                self.stopOnFlag()
 
                 # jobs that are not on the list anymore are considered to
                 # be cancelled [1]

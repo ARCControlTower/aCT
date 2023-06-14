@@ -1,7 +1,6 @@
 # Prometheus exporter of Rucio RSE information
 # Should eventually move to Rucio probes
 
-import time
 
 from act.ldmx.aCTLDMXProcess import aCTLDMXProcess
 from prometheus_client import start_http_server
@@ -53,8 +52,8 @@ class aCTRucioMonitor(aCTLDMXProcess):
         else:
             self.log.info('Prometheus monitoring not enabled')
 
-    def wait(self):
-        time.sleep(120)
+    def wait(self, limit=120):
+        super().wait(limit)
 
     def process(self):
         '''Actual metric gathering from Rucio is done at a low frequency here'''

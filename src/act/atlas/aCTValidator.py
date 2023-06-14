@@ -387,9 +387,7 @@ class aCTValidator(aCTATLASProcess):
 
         # Skip validation for the true pilot jobs, just copy logs, set to done and clean arc job
         for job in jobstoupdate[:]:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             if self.sites[job['siteName']]['truepilot']:
                 self.log.info('%s: Skip validation' % job['pandaid'])
                 if not self.copyFinishedFiles(job["arcjobid"], False):
@@ -407,9 +405,7 @@ class aCTValidator(aCTATLASProcess):
         # pull out output file info from pilot heartbeat json into dict, order by SE
         surls = {}
         for job in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
             if not jobsurls:
                 # Problem extracting files, fail the job
@@ -435,9 +431,7 @@ class aCTValidator(aCTATLASProcess):
         # check if surls valid, update pandastatus accordingly
         checkedsurls = self.checkOutputFiles(surls)
         for id, result in checkedsurls.items():
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             if result == self.ok:
                 select = "arcjobid='"+str(id)+"'"
                 desc = {"pandastatus": "finished", "actpandastatus": "finished"}
@@ -468,9 +462,7 @@ class aCTValidator(aCTATLASProcess):
         - exit is only checked in the beginning to prevent interruption of
           updates (as some appear to depend on others)
         '''
-        if self.mustExit:
-            self.log.info(f"Exiting early due to requested shutdown")
-            self.stopWithException()
+        self.stopOnFlag()
 
         # get all jobs with pandastatus transferring and actpandastatus toclean
         select = "(pandastatus='transferring' and actpandastatus='toclean') and siteName in %s limit 1000" % self.sitesselect
@@ -553,9 +545,7 @@ class aCTValidator(aCTATLASProcess):
         jobstoupdate=self.dbpanda.getJobs(select, columns=columns)
 
         for job in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info('%s: resubmitting' % job['pandaid'])
             select = "id="+str(job['id'])
             desc = {"actpandastatus": "starting", "arcjobid": None}

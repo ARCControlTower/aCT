@@ -35,9 +35,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         columns = ['arcstate', 'cluster', 'state', 'ldmxjobs.id']
         submittedjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
         for job in submittedjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info(f"Job {job['id']}: waiting -> {STATE_MAP[job['arcstate']]} (ARC state {job['state']})")
             desc = {'ldmxstatus': STATE_MAP[job['arcstate']],
                     'computingelement': job['cluster'] or 'None',
@@ -47,9 +45,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         select = "ldmxstatus='queueing' and arcstate in ('running', 'finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
         queueingjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
         for job in queueingjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info(f"Job {job['id']}: queueing -> {STATE_MAP[job['arcstate']]} (ARC state {job['state']})")
             desc = {'ldmxstatus': STATE_MAP[job['arcstate']],
                     'computingelement': job['cluster'] or 'None',
@@ -60,9 +56,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         select = "ldmxstatus='running' and arcstate in ('finishing', 'finished', 'done') and arcjobs.id=ldmxjobs.arcjobid"
         finishingjobs = self.dbarc.getArcJobsInfo(select, columns, tables='arcjobs,ldmxjobs')
         for job in finishingjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info(f"Job {job['id']}: running -> finishing (ARC state {job['state']})")
             desc = {'ldmxstatus': 'finishing',
                     'computingelement': job['cluster'] or 'None',
@@ -85,9 +79,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
 
         for job in cancelledjobs:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             self.log.info(f"Job {job['id']} requested to cancel, killing arc job")
 
@@ -128,9 +120,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
 
         for job in toresubmitjobs:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             self.log.info(f"Job {job['id']} requested to resubmit, killing arc job")
 
@@ -164,9 +154,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         arcjobs = self.dbarc.getArcJobsInfo(select, columns)
         if arcjobs:
             for aj in arcjobs:
-                if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
-                    self.stopWithException()
+                self.stopOnFlag()
                 select = "id='{}'".format(str(aj["id"]))
                 desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
                 self.dbarc.updateArcJobs(desc, select)
@@ -194,9 +182,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         desc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
 
         for aj in failedjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.copyOutputFiles(aj)
             self.checkForResubmission(aj)
             select = f"id={aj['id']}"
@@ -206,9 +192,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
                                                             'sitename': self.endpoints.get(aj.get('cluster'))})
 
         for aj in lostjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = f"id={aj['id']}"
             self.dbarc.updateArcJobs(desc, select)
             self.dbldmx.updateJobs(f"arcjobid={aj['id']}", {'ldmxstatus': 'failed',
@@ -217,9 +201,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
             self.cleanInputFiles(aj)
 
         for aj in cancelledjobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             select = f"id={aj['id']}"
             if aj['JobID']:
                 self.dbarc.updateArcJobs(desc, select)
@@ -253,9 +235,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         select = "arcstate in ('tocancel', 'cancelling', 'toclean') and (cluster='' or cluster is NULL)"
         jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid'])
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info(f"{job['appjobid']}: Deleting from arcjobs unsubmitted job {job['id']}")
             self.dbarc.deleteArcJob(job['id'])
 
@@ -264,9 +244,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid', 'arcstate', 'JobID'])
         cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # done jobs should not be there, log a warning
             if job['arcstate'] == 'done':
                 self.log.warning(f"{job['appjobid']}: Removing orphaned done job {job['id']}")
@@ -281,18 +259,14 @@ class aCTLDMXStatus(aCTLDMXProcess):
         select = "arcstate='done' and ldmxstatus='cancelling' and arcjobs.id=ldmxjobs.arcjobid"
         jobs = self.dbarc.getArcJobsInfo(select, ['arcjobs.id', 'appjobid'], tables='arcjobs,ldmxjobs')
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info(f"{job['appjobid']}: Cleaning finished job which was already cancelled")
             self.dbarc.updateArcJob(job['id'], {'arcstate': 'cancelled'})
 
         select = "ldmxstatus='cancelling' and arcjobid not in (select id from arcjobs)"
         jobs = self.dbldmx.getJobs(select, ['id'])
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info(f"{job['id']}: Cleaning cancelling job which was never submitted")
             self.dbldmx.updateJobs(f"id={job['id']}", {'ldmxstatus': 'cancelled'})
 

@@ -26,9 +26,7 @@ class aCTFetcher(aCTCondorProcess):
         self.log.info(f"Fetching {len(jobstofetch)} jobs")
 
         for job in jobstofetch:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info(f"{job['appjobid']}: Finished with job {job['ClusterId']}")
             self.db.updateCondorJob(
                 job['id'],

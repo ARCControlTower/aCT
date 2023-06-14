@@ -111,9 +111,7 @@ class aCTSubmitter(aCTCondorProcess):
 
         for fairshare in fairshares:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             try:
                 # catch any exceptions here to avoid leaving lock
@@ -237,9 +235,7 @@ class aCTSubmitter(aCTCondorProcess):
         jobs = self.db.getCondorJobsInfo(f"condorstate='submitting' and cluster='{self.cluster}'", ["id"])
 
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # set to toresubmit and the application should figure out what to do
             self.db.updateCondorJob(
                 job['id'],
@@ -262,9 +258,7 @@ class aCTSubmitter(aCTCondorProcess):
 
         for job in jobstocancel:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             self.log.info(f"{job['appjobid']}: Cancelling condor job")
 
@@ -298,9 +292,7 @@ class aCTSubmitter(aCTCondorProcess):
             ['id', 'appjobid', 'ClusterId']
         )
         for job in jobstoresubmit:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # Clean up jobs which were submitted
             if job['ClusterId']:
                 try:

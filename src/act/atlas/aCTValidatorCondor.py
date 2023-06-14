@@ -37,9 +37,7 @@ class aCTValidatorCondor(aCTATLASProcess):
 
         # Skip validation for the true pilot jobs, just copy logs, set to done and clean condor job
         for job in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info('%s: Skip validation' % job['pandaid'])
             select = "condorjobid='"+str(job["condorjobid"])+"'"
             desc = {"pandastatus": None, "actpandastatus": "finished"}
@@ -68,9 +66,7 @@ class aCTValidatorCondor(aCTATLASProcess):
 
         # For truepilot jobs, don't try to clean outputs (too dangerous), just clean condor job
         for job in jobstoupdate[:]:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info("%s: Skip cleanup of output files" % job['pandaid'])
             select = "condorjobid='"+str(job["condorjobid"])+"'"
             desc = {"pandastatus": None, "actpandastatus": "failed"}
@@ -97,9 +93,7 @@ class aCTValidatorCondor(aCTATLASProcess):
         jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
 
         for job in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             self.log.info('%s: resubmitting' % job['pandaid'])
             select = "id="+str(job['id'])
             desc = {"actpandastatus": "starting", "condorjobid": None}
@@ -115,9 +109,7 @@ class aCTValidatorCondor(aCTATLASProcess):
             return
 
         for job in jobstoupdate:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             # Only try to cancel jobs which are not finished
             if job['condorstate'] not in ('donefailed', 'done', 'lost', 'cancelled'):
                 self.log.info('%s: manually asked to resubmit, cancelling condor job %s' %

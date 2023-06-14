@@ -233,9 +233,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
         for batch in batches:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             self.log.info(f"New batch {batch['batchname']}")
             configfile = batch['description']
@@ -354,9 +352,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
         for batchid, statuses in batchdict.items():
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             if [s for s in statuses if s not in ['finished', 'failed', 'cancelled']]:
                 continue

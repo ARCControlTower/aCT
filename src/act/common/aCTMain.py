@@ -3,7 +3,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from act.common.aCTProcess import aCTProcess
@@ -75,9 +74,6 @@ class aCTMain(aCTProcess):
                 subprocess.run(command, check=True)
             except (FileNotFoundError, subprocess.CalledProcessError) as e:
                 self.log.warning(f'Failed to run logrotate: {e}')
-
-    def wait(self):
-        time.sleep(10)
 
     def process(self):
         self.log.debug("Rotating logs ...")

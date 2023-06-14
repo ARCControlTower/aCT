@@ -84,9 +84,7 @@ class aCTStatus(aCTCondorProcess):
         # Loop over jobs
         for job in jobstocheck:
 
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
 
             appjobid = job['appjobid']
             oldstatus = job['JobStatus']
@@ -174,9 +172,7 @@ class aCTStatus(aCTCondorProcess):
         )
 
         for job in jobs:
-            if self.mustExit:
-                self.log.info(f"Exiting early due to requested shutdown")
-                self.stopWithException()
+            self.stopOnFlag()
             if job['condorstate'] == 'cancelling':
                 self.log.warning(f"{job['appjobid']}: Job {job['ClusterId']} lost from information system, marking as cancelled")
                 self.db.updateCondorJob(
@@ -211,9 +207,7 @@ class aCTStatus(aCTCondorProcess):
             jobs = self.db.getCondorJobsInfo(select, columns=['id', 'ClusterId', 'appjobid', 'condorstate'])
 
             for job in jobs:
-                if self.mustExit:
-                    self.log.info(f"Exiting early due to requested shutdown")
-                    self.stopWithException()
+                self.stopOnFlag()
                 if job['condorstate'] == 'toclean' or job['condorstate'] == 'cancelling':
                     # mark as cancelled jobs stuck in toclean/cancelling
                     self.log.info(f"{job['appjobid']}: Job stuck in toclean/cancelling for too long, marking cancelled")
