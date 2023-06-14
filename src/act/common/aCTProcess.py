@@ -151,7 +151,7 @@ class aCTProcess:
                 self.loadConf()
                 self.process()
                 self.wait()
-                self.exitOnFlag()
+                self.stopOnFlag()
         except ExitProcessException:
             self.log.info("*** Process exiting normally ***")
         except:
