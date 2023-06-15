@@ -40,7 +40,7 @@ class aCTCleaner(aCTARCProcess):
             else:
                 toclean.append(job)
 
-        self.log.info(f"Cleaning {len(jobstoclean)} jobs")
+        self.log.info(f"Cleaning {len(toclean)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}

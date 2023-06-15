@@ -52,7 +52,7 @@ class aCTFetcher(aCTARCProcess):
             else:
                 tofetch.append(job)
 
-        self.log.info(f"Fetching {len(jobstofetch)} jobs")
+        self.log.info(f"Fetching {len(tofetch)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}

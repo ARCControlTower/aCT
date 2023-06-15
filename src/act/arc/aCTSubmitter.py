@@ -297,7 +297,7 @@ class aCTSubmitter(aCTARCProcess):
             else:
                 tocancel.append(job)
 
-        self.log.info(f"Cancelling {len(jobstocancel)} jobs")
+        self.log.info(f"Cancelling {len(tocancel)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
@@ -396,7 +396,7 @@ class aCTSubmitter(aCTARCProcess):
             else:
                 toresubmit.append(job)
 
-        self.log.info(f"Resubmitting {len(jobstoresubmit)} jobs")
+        self.log.info(f"Resubmitting {len(toresubmit)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
@@ -483,7 +483,7 @@ class aCTSubmitter(aCTARCProcess):
             else:
                 torerun.append(job)
 
-        self.log.info(f"Resuming {len(jobstorerun)} jobs")
+        self.log.info(f"Resuming {len(torerun)} jobs")
 
         # aggregate jobs by proxyid
         jobsdict = {}
