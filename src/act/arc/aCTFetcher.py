@@ -36,6 +36,7 @@ class aCTFetcher(aCTARCProcess):
         if not jobstofetch:
             return
 
+        # fail jobs that are taking too long
         now = datetime.datetime.utcnow()
         tstamp = self.db.getTimeStamp()
         # TODO: HARDCODED
@@ -127,6 +128,7 @@ class aCTFetcher(aCTARCProcess):
             finally:
                 arcrest.close()
 
+            # process results
             for job, errors in zip(dbjobs, results):
                 isError = False
                 for error in errors:

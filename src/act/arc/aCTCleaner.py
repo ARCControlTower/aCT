@@ -28,6 +28,7 @@ class aCTCleaner(aCTARCProcess):
         if not jobstoclean:
             return
 
+        # delete jobs that are taking too long
         now = datetime.datetime.utcnow()
         # TODO: HARDCODED
         limit = datetime.timedelta(hours=1)
@@ -52,6 +53,7 @@ class aCTCleaner(aCTARCProcess):
 
             self.stopOnFlag()
 
+            # get parameters for ARC
             arcjobs = []
             arcids = []
             for job in dbjobs:

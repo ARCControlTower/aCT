@@ -189,7 +189,7 @@ class aCTStatus(aCTARCProcess):
 
                 jobdict = {"tarcstate": tstamp}
 
-                # cancel jobs that are stuck in tstate and not in job list anymore [1]
+                # cancel jobs that are stuck in ARC state and not in job list anymore [1]
                 # TODO: HARDCODED
                 if job["tstate"] + timedelta(days=7) < datetime.utcnow():
                     if job["IDFromEndpoint"] not in joblist:

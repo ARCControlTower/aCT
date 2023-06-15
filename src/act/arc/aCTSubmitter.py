@@ -277,9 +277,6 @@ class aCTSubmitter(aCTARCProcess):
         - termination is checked before handling every proxyid job batch
         """
         COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate"]
-
-        # fetch jobs from DB for this cluster and also jobs that
-        # don't have cluster assigned
         jobstocancel = self.db.getArcJobsInfo(
             f"arcstate='tocancel' and cluster='{self.cluster}'",
             COLUMNS
@@ -287,6 +284,7 @@ class aCTSubmitter(aCTARCProcess):
         if not jobstocancel:
             return
 
+        # make jobs that are taking too long cancelled
         now = datetime.datetime.utcnow()
         tstamp = self.db.getTimeStamp()
         # TODO: HARDCODED
@@ -385,6 +383,7 @@ class aCTSubmitter(aCTARCProcess):
         if not jobstoresubmit:
             return
 
+        # fail jobs that are taking too long
         now = datetime.datetime.utcnow()
         tstamp = self.db.getTimeStamp()
         # TODO: HARDCODED
@@ -471,6 +470,7 @@ class aCTSubmitter(aCTARCProcess):
         if not jobstorerun:
             return
 
+        # fail jobs that are taking too long
         now = datetime.datetime.utcnow()
         tstamp = self.db.getTimeStamp()
         # TODO: HARDCODED
