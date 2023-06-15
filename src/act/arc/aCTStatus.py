@@ -153,7 +153,7 @@ class aCTStatus(aCTARCProcess):
             # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
             except Exception as exc:
                 self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
                 continue
@@ -466,7 +466,7 @@ class aCTStatus(aCTARCProcess):
             # get REST client
             proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
             try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, logger=self.log)
+                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
             except Exception as exc:
                 self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
                 continue
