@@ -1,4 +1,3 @@
-import time
 
 import arc
 from act.arc.aCTDBArc import aCTDBArc
