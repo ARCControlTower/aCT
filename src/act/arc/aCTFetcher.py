@@ -4,7 +4,6 @@ import shutil
 from json import JSONDecodeError
 
 from act.arc.aCTARCProcess import aCTARCProcess
-from pyarcrest.arc import ARCRest
 from pyarcrest.errors import MissingDiagnoseFile, MissingResultFile
 
 # TODO: document downloadfiles syntax
@@ -107,11 +106,8 @@ class aCTFetcher(aCTARCProcess):
                 os.makedirs(resdir, exist_ok=True)
 
             # get REST client
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
-            except Exception as exc:
-                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+            arcrest = self.getARCClient(proxyid)
+            if not arcrest:
                 continue
 
             # fetch job results from REST

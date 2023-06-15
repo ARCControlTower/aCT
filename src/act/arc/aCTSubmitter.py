@@ -1,12 +1,10 @@
 import datetime
-import os
 from json import JSONDecodeError
 from random import shuffle
 from urllib.parse import urlparse
 
 from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.aCTStatus import ARC_STATE_MAPPING
-from pyarcrest.arc import ARCRest
 from pyarcrest.errors import (ARCHTTPError, DescriptionParseError,
                               DescriptionUnparseError, InputFileError,
                               InputUploadError, MatchmakingError,
@@ -161,12 +159,9 @@ class aCTSubmitter(aCTARCProcess):
                 descs.append(str(self.db.getArcJobDescription(str(job["jobdesc"]))))
 
             # get REST client
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
-            except Exception as exc:
+            arcrest = self.getARCClient(proxyid)
+            if not arcrest:
                 self.setJobsArcstate(jobs, "tosubmit")
-                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
                 continue
 
             # submit jobs to ARC
@@ -324,11 +319,8 @@ class aCTSubmitter(aCTARCProcess):
                     cancelled.append(dbjob)
 
             # get REST client
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
-            except Exception as exc:
-                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+            arcrest = self.getARCClient(proxyid)
+            if not arcrest:
                 continue
 
             # kill jobs in ARC
@@ -417,11 +409,8 @@ class aCTSubmitter(aCTARCProcess):
                     arcids.append(dbjob["IDFromEndpoint"])
 
             # get REST client
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
-            except Exception as exc:
-                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+            arcrest = self.getARCClient(proxyid)
+            if not arcrest:
                 continue
 
             # clean jobs from ARC
@@ -495,11 +484,8 @@ class aCTSubmitter(aCTARCProcess):
             self.stopOnFlag()
 
             # get REST client
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
-            except Exception as exc:
-                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+            arcrest = self.getARCClient(proxyid)
+            if not arcrest:
                 continue
 
             # get job delegations

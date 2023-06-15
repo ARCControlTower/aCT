@@ -1,9 +1,7 @@
 import datetime
-import os
 from json import JSONDecodeError
 
 from act.arc.aCTARCProcess import aCTARCProcess
-from pyarcrest.arc import ARCRest
 from pyarcrest.errors import ARCHTTPError
 
 
@@ -61,11 +59,8 @@ class aCTCleaner(aCTARCProcess):
                     arcids.append(job["IDFromEndpoint"])
 
             # get REST client
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
-            except Exception as exc:
-                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+            arcrest = self.getARCClient(proxyid)
+            if not arcrest:
                 continue
 
             # clean jobs in ARC

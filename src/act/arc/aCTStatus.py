@@ -75,12 +75,10 @@
 
 
 import json
-import os
 import time
 from datetime import datetime, timedelta
 
 from act.arc.aCTARCProcess import aCTARCProcess
-from pyarcrest.arc import ARCRest
 from pyarcrest.errors import ARCError, ARCHTTPError, NoValueInARCResult
 
 ARC_STATE_MAPPING = {
@@ -151,11 +149,8 @@ class aCTStatus(aCTARCProcess):
         for proxyid, dbjobs in jobsdict.items():
 
             # get REST client
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
-            except Exception as exc:
-                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+            arcrest = self.getARCClient(proxyid)
+            if not arcrest:
                 continue
 
             # For now, if the job list cannot be fetched, the empty set is
@@ -464,11 +459,8 @@ class aCTStatus(aCTARCProcess):
                     tocheck.append(job)
 
             # get REST client
-            proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
-            try:
-                arcrest = ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
-            except Exception as exc:
-                self.log.error(f"Error creating REST client for proxy ID {proxyid} stored in {proxypath}: {exc}")
+            arcrest = self.getARCClient(proxyid)
+            if not arcrest:
                 continue
 
             # For now, if the job list cannot be fetched, the empty set is
