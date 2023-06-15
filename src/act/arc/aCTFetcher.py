@@ -62,7 +62,6 @@ class aCTFetcher(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-
             self.stopOnFlag()
 
             # create parameters for download from ARC
@@ -129,6 +128,7 @@ class aCTFetcher(aCTARCProcess):
                 arcrest.close()
 
             # process results
+            tstamp = self.db.getTimeStamp()
             for job, errors in zip(dbjobs, results):
                 isError = False
                 for error in errors:

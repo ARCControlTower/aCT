@@ -184,7 +184,6 @@ class aCTStatus(aCTARCProcess):
             tstamp = self.db.getTimeStamp()
 
             for job, result in zip(dbjobs, results):
-
                 self.stopOnFlag()
 
                 jobdict = {"tarcstate": tstamp}
@@ -388,8 +387,6 @@ class aCTStatus(aCTARCProcess):
         Signal handling strategy:
         - termination is checked before handling every job
         """
-        tstamp = self.db.getTimeStamp()
-
         # Loop over possible states
         # Note: MySQL is case-insensitive. Need to watch out with other DBs
 
@@ -403,6 +400,7 @@ class aCTStatus(aCTARCProcess):
             select = f"state='{jobstate}' and {self.db.timeStampLessThan('tstate', maxtime)}"
             jobs = self.db.getArcJobsInfo(select, columns=["id", "JobID", "appjobid", "arcstate"])
 
+            tstamp = self.db.getTimeStamp()
             for job in jobs:
                 self.stopOnFlag()
                 if job["arcstate"] == "toclean":
@@ -452,9 +450,9 @@ class aCTStatus(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-            tstamp = self.db.getTimeStamp()
 
             # jobs too long in cancelling are considered to be cancelled
+            tstamp = self.db.getTimeStamp()
             tocheck = []
             for job in dbjobs:
                 if not job["tarcstate"]:
@@ -495,9 +493,10 @@ class aCTStatus(aCTARCProcess):
             finally:
                 arcrest.close()
 
+            tstamp = self.db.getTimeStamp()
+
             # update DB
             for job, result in zip(tocheck, results):
-
                 self.stopOnFlag()
 
                 # jobs that are not on the list anymore are considered to

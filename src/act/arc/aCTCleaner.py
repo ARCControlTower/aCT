@@ -50,7 +50,6 @@ class aCTCleaner(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-
             self.stopOnFlag()
 
             # get parameters for ARC

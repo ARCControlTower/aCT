@@ -77,7 +77,6 @@ class aCTSubmitter(aCTARCProcess):
             limit = max(limit // len(fairshares), 1)
 
         for fairshare, proxyid in fairshares:
-
             self.stopOnFlag()
 
             # Exit loop if above limit
@@ -102,9 +101,10 @@ class aCTSubmitter(aCTARCProcess):
                         columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"]
                     )
                 # mark submitting in db
+                tstamp = self.db.getTimeStamp()
                 jobs_taken = []
                 for j in jobs:
-                    jd = {'cluster': self.cluster, 'arcstate': 'submitting', 'tarcstate': self.db.getTimeStamp()}
+                    jd = {'cluster': self.cluster, 'arcstate': 'submitting', 'tarcstate': tstamp}
                     self.db.updateArcJob(j['id'], jd)
                     jobs_taken.append(j)
                 jobs = jobs_taken
@@ -155,8 +155,6 @@ class aCTSubmitter(aCTARCProcess):
             #
             ##################################################################
 
-            tstamp = self.db.getTimeStamp()
-
             # read job descriptions from DB
             descs = []
             for job in jobs:
@@ -189,6 +187,8 @@ class aCTSubmitter(aCTARCProcess):
                 continue
             finally:
                 arcrest.close()
+
+            tstamp = self.db.getTimeStamp()
 
             # log submission results and set job state
             for job, result in zip(jobs, results):
@@ -262,11 +262,12 @@ class aCTSubmitter(aCTARCProcess):
         - termination is checked before handling every job
         """
         dbjobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "created"])
+        tstamp = self.db.getTimeStamp()
         for job in dbjobs:
             self.stopOnFlag()
             # TODO: HARDCODED
             if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
-                self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": self.db.getTimeStamp()})
+                self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
                 self.log.debug(f"Cancelling job {job['appjobid']} for being too long in tosubmit")
 
     def processToCancel(self):
@@ -307,7 +308,6 @@ class aCTSubmitter(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-
             self.stopOnFlag()
 
             # partition the jobs based on whether they are in ARC; ARC jobs
@@ -406,7 +406,6 @@ class aCTSubmitter(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-
             self.stopOnFlag()
 
             # create a list of jobs that need to be cleaned in ARC
@@ -493,7 +492,6 @@ class aCTSubmitter(aCTARCProcess):
             jobsdict[row["proxyid"]].append(row)
 
         for proxyid, dbjobs in jobsdict.items():
-
             self.stopOnFlag()
 
             # get REST client
