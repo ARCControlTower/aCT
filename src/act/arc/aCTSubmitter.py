@@ -514,6 +514,7 @@ class aCTSubmitter(aCTARCProcess):
             # renew successfully fetched delegations
             torestart = []
             arcids = []
+            renewed = set()  # performance and duplicate prevention
             for job, result in zip(dbjobs, results):
                 if isinstance(result, ARCHTTPError):
                     self.log.error(f"Error getting delegations for job {job['appjobid']}: {result.status} {result.text}")
@@ -523,7 +524,9 @@ class aCTSubmitter(aCTARCProcess):
                     try:
                         # renewing the first delegation from the list works
                         # for aCT use case
-                        arcrest.renewDelegation(result[0])
+                        if result[0] not in renewed:
+                            arcrest.renewDelegation(result[0])
+                            renewed.add(result[0])
                     except Exception as exc:
                         self.log.error(f"Failed to renew delegation for job {job['appjobid']}: {exc}")
                     else:
