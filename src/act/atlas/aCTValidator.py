@@ -53,16 +53,24 @@ class aCTValidator(aCTATLASProcess):
     def finish(self):
         """Properly handle all threads and job states."""
         # signal threads to terminate
+        self.log.debug("Terminating OutputCheckManager")
         self.checkManager.terminate.set()
+        self.log.debug("Terminating FileRemoveManager for jobs to clean")
         self.failedRemmgr.terminate.set()
+        self.log.debug("Terminating FileRemoveManager for jobs to resubmit")
         self.resubRemmgr.terminate.set()
+        self.log.debug("Terminating HeartbeatDownloader")
         self.heartbeatDownloader.terminate.set()
 
         # wait for threads to finish
         self.checkManager.thread.join()
+        self.log.debug("OutputCheckManager joined")
         self.failedRemmgr.thread.join()
+        self.log.debug("FileRemoveManager for jobs to clean joined")
         self.resubRemmgr.thread.join()
+        self.log.debug("FileRemoveManager for jobs to resubmit joined")
         self.heartbeatDownloader.thread.join()
+        self.log.debug("HeartbeatDownloader joined")
 
         self.recoverIntermediateStates()
 
@@ -306,15 +314,18 @@ class aCTValidator(aCTATLASProcess):
         if surls:
             self.checkManager.taskQueue.put(surls)
         if not self.checkManager.thread.is_alive():
+            self.log.debug("OutputCheckManager not alive, starting")
+            self.checkManager.terminate.clear()
             self.checkManager.start()
 
         # process results from checker
         while not self.checkManager.resultQueue.empty():
             self.stopOnFlag()
-            jobid, surl, status = self.checkManager.resultQueue.get()
+            jobid, status = self.checkManager.resultQueue.get()
             if status == JobStatus.OK:
+                self.log.info(f"Successful output file check for arcjob {jobid}")
                 if not self.copyFinishedFiles(jobid, True):
-                    self.log.warning(f"{job['pandaid']}: Failed to copy log files")
+                    self.log.warning(f"Failed to copy log files for arcjob {jobid}, skipping")
                     # TODO: should we short circuit here? What is wrong with setting toclean?
                     ## id was gone already
                     #continue
@@ -325,11 +336,13 @@ class aCTValidator(aCTATLASProcess):
                 self.dbpanda.updateJobs(select, desc)
             elif status == JobStatus.FAILED:
                 # output file failed, set toresubmit to clean up output and resubmit
+                self.log.info(f"Failed output file check for arcjob {jobid}, resubmitting")
                 select = f"arcjobid={jobid}"
                 desc = {"pandastatus": "starting", "actpandastatus": "toresubmit"}
                 self.dbpanda.updateJobs(select, desc)
             else:
                 # Retry next time
+                self.log.info(f"Failed output file check for arcjob {jobid}, will retry")
                 select = f"arcjobid={jobid}"
                 desc = {"actpandastatus": "tovalidate"}
                 self.dbpanda.updateJobs(select, desc)
@@ -390,6 +403,8 @@ class aCTValidator(aCTATLASProcess):
         if surls:
             self.failedRemmgr.taskQueue.put(surls)
         if not self.failedRemmgr.thread.is_alive():
+            self.log.debug("FileRemoveManager for jobs to clean not alive, starting")
+            self.failedRemmgr.terminate.clear()
             self.failedRemmgr.start()
 
         # process results from remover
@@ -397,13 +412,19 @@ class aCTValidator(aCTATLASProcess):
             self.stopOnFlag()
             jobid, surl, status = self.failedRemmgr.resultQueue.get()
             if status in (JobStatus.OK, JobStatus.FAILED):
-                # If failed, not much we can do except continue
+                if status == JobStatus.OK:
+                    self.log.info(f"Successfuly removed output files for failed arcjob {jobid}")
+                else:
+                    # If unretriably failed, there is not much we can do except
+                    # continue
+                    self.log.info(f"Output file removal failed for arcjob {jobid}, skipping")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
                 select = f"arcjobid={jobid}"
                 self.dbpanda.updateJobs(select, pandaFailDesc)
             else:
                 # Retry next time
+                self.log.info(f"Output file removal failed for arcjob {jobid}, will retry")
                 select = f"arcjobid={jobid}"
                 desc = {"actpandastatus": "toclean"}
                 self.dbpanda.updateJobs(select, desc)
@@ -466,11 +487,11 @@ class aCTValidator(aCTATLASProcess):
             self.stopOnFlag()
             jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
             if not jobsurls:
-                self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {job['arcjobid']}")
                 if job in downloaded or job["restartstate"] != "Finishing" and job["arcstate"] != "done":
                     # Clean job files and ARC job, finish resubmission if
                     # resubmitted manually or job failed before finishing,
                     # since there are likely no output files.
+                    self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {job['arcjobid']}, resubmit finished")
                     self.cleanDownloadedJob(job["arcjobid"])
                     self.dbarc.updateArcJob(job['arcjobid'], arcdesc)
                     select = f"arcjobid={job['arcjobid']}"
@@ -478,6 +499,7 @@ class aCTValidator(aCTATLASProcess):
                     self.dbpanda.updateJobs(select, desc)
                 else:
                     # Otherwise fail job whose outputs cannot be cleaned.
+                    self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {job['arcjobid']}, setting to failed")
                     self.cleanDownloadedJob(job["arcjobid"])
                     self.dbarc.updateArcJob(job['arcjobid'], arcdesc)
                     select = f"arcjobid={job['arcjobid']}"
@@ -491,6 +513,8 @@ class aCTValidator(aCTATLASProcess):
         if surls:
             self.resubRemmgr.taskQueue.put(surls)
         if not self.resubRemmgr.thread.is_alive():
+            self.log.debug("FileRemoveManager for jobs to resubmit not alive, starting")
+            self.resubRemmgr.terminate.clear()
             self.resubRemmgr.start()
 
         # process results from remover
@@ -507,7 +531,7 @@ class aCTValidator(aCTATLASProcess):
                 if jobid in manualIDs and status != JobStatus.OK:
                     self.log.info(f"Failed deleting outputs for manually resubmitted arcjob {jobid}, will clean arcjob and finish resubmit")
                 else:
-                    self.log.info(f"Successfully deleted outputs for arcjob {jobid}")
+                    self.log.info(f"Successfully deleted outputs for arcjob {jobid}, resubmit finished")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, arcdesc)
                 desc = {"actpandastatus": "starting", "arcjobid": None}
@@ -517,6 +541,7 @@ class aCTValidator(aCTATLASProcess):
                 # If we couldn't clean outputs the next try of the job will
                 # also fail. Better to return to panda for an increased attempt
                 # no.
+                self.log.info(f"Failed deleting outputs for arcjob {jobid}, setting to failed")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, arcdesc)
                 desc = {"actpandastatus": "failed", "pandastatus": "failed"}
@@ -525,6 +550,7 @@ class aCTValidator(aCTATLASProcess):
 
             else:
                 # set back to toresubmit to retry
+                self.log.info(f"Failed deleting outputs for arcjob {jobid}, will retry")
                 select = f"arcjobid={job['arcjobid']}"
                 desc = {"actpandastatus": "toresubmit"}
                 self.dbpanda.updateJobs(select, desc)
@@ -533,8 +559,10 @@ class aCTValidator(aCTATLASProcess):
         # send jobs to heartbeat downloader and start it if not active
         if jobs:
             self.heartbeatDownloader.taskQueue.put(jobs)
-        if not self.heartbeatDownloader.thread.is_alive():
-            self.heartbeatDownloader.start()
+            if not self.heartbeatDownloader.thread.is_alive():
+                self.log.debug("HeartbeatDownloader not alive, starting")
+                self.heartbeatDownloader.terminate.clear()
+                self.heartbeatDownloader.start()
 
         # process results from remover
         downloaded = []
@@ -565,7 +593,97 @@ class JobStatus(Enum):
     FAILED = 3
 
 
-class WorkerThread:
+# there are 2 use cases for waiting:
+# - ARCWorker: wait on exit event or task queue
+# - SEWorkManager: wait on exit event, task queue or worker results queue
+#
+# exit events are always set by managing thread
+# taskQueue is always filled by managing thread
+# worker results are filled by multiple workers
+#
+# Selector class with cooperating data structures
+#
+# cooperating data structures implement a uniform API that selector requires and register with the selector
+# the thing is, once the selector is supposed to notify, it should be determined if it should be reset.
+# In case of event data structure, it should be reset. In case of queue with multiple values or semaphore
+# with multiple acquires, it should be kept asserted.
+
+
+class SEvent(threading.Event):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.select = None
+
+    def register(self, select):
+        self.select = select
+
+    def asserted(self):
+        return self.is_set()
+
+    def set(self):
+        super().set()
+        if not self.select:
+            raise Exception("No selector registered")
+        self.select.notify()
+
+
+class SQueue(queue.Queue):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.select = None
+
+    def register(self, select):
+        self.select = select
+
+    def asserted(self):
+        return self.qsize() > 0
+
+    def put(self, *args, **kwargs):
+        super().put(*args, **kwargs)
+        if not self.select:
+            raise Exception("No selector registered")
+        self.select.notify()
+
+    def put_nowait(self, *args, **kwargs):
+        super().put_nowait(*args, **kwargs)
+        if not self.select:
+            raise Exception("No selector registered")
+        self.select.notify()
+
+
+class Selector:
+
+    def __init__(self):
+        self.event = threading.Event()
+        self.lock = threading.Lock()
+        self.resources = []
+
+    def register(self, resource):
+        resource.register(self)
+        self.resources.append(resource)
+
+    def notify(self):
+        with self.lock:
+            self.event.set()
+
+    def update(self):
+        with self.lock:
+            shouldAssert = False
+            for resource in self.resources:
+                if resource.asserted():
+                    shouldAssert = True
+                    break
+            if not shouldAssert:
+                self.event.clear()
+
+    def wait(self, timeout=None):
+        self.update()
+        return self.event.wait(timeout=timeout)
+
+
+class ThreadWorker:
 
     # TODO: There should be some form of null logger. For now, we rely on
     #       aCT always providing the logger.
@@ -593,23 +711,40 @@ class WorkerThread:
     def run(*args, **kwargs):
         pass
 
+    def finish(self):
+        self.log.debug(f"{self.__class__.__name__}: exited")
 
-class ARCWorker(WorkerThread):
 
-    def __init__(self, log, credential, timeout=60, **kwargs):
-        super().__init__(log, **kwargs)
+class ARCWorker(ThreadWorker):
+
+    def __init__(self, log, credential, timeout=60, terminate=None, taskQueue=None, **kwargs):
+        # terminate and task queue have to be "selectable" by default
+        super().__init__(
+            log,
+            terminate=terminate if terminate else SEvent(),
+            taskQueue=taskQueue if taskQueue else SQueue(),
+            **kwargs
+        )
         self.credential = credential
         self.timeout = timeout
+        self.selector = Selector()
+        self.selector.register(self.terminate)
+        self.selector.register(self.taskQueue)
 
     def run(self, *args, **kwargs):
         while not self.terminate.is_set():
-            self.terminate.wait(self.timeout)
+            self.log.debug(f"{self.__class__.__name__}: Termination flag not set, waiting on selector")
+            if not self.selector.wait(timeout=self.timeout):
+                self.log.debug(f"{self.__class__.__name__}: Selector timeout ({self.timeout}), exiting")
+                self.terminate.set()
+                continue
             try:
                 task = self.taskQueue.get_nowait()
             except queue.Empty:
-                self.terminate.set()
+                self.log.debug(f"{self.__class__.__name__}: ARCWorker empty queue??? What activated the selector???")
             else:
                 self.processTask(task)
+        self.log.debug(f"{self.__class__.__name__}: Termination flag set, exiting")
 
     def processTask(self, task):
         pass
@@ -625,6 +760,7 @@ class OutputChecker(ARCWorker):
         BULK_LIMIT = 100
         count = 0
         for surl in surls:
+            self.log.debug(f"{self.__class__.__name__}: count: {count}, surl: {surl}")
             if self.terminate.is_set():
                 return
             dp = aCTUtils.DataPoint(str(surl['surl']), self.credential)
@@ -721,6 +857,7 @@ class FileRemover(ARCWorker):
 
     def processTask(self, surls):
         for surl in surls:
+            self.log.debug(f"FILE REMOVER: surl: {surl}")
             if self.terminate.is_set():
                 return
             jobid, url = surl["arcjobid"], surl["surl"]
@@ -753,6 +890,7 @@ class HeartbeatDownloader(ARCWorker):
 
     def processTask(self, jobs):
         for job in jobs:
+            self.log.debug(f"{self.__class__.__name__}: job: {job}")
             if self.terminate.is_set():
                 return
             if 'JobID' not in job or not job['JobID']:
@@ -774,27 +912,43 @@ class HeartbeatDownloader(ARCWorker):
                 self.resultQueue.put(job)
 
 
-class SEWorkManager(WorkerThread):
+class SEWorkManager(ThreadWorker):
 
-    def __init__(self, log, credential, timeout=2, workerResults=None, **kwargs):
-        super().__init__(log, **kwargs)
+    def __init__(self, log, credential, terminate=None, taskQueue=None, workerResults=None, **kwargs):
+        super().__init__(
+            log,
+            terminate=terminate if terminate else SEvent(),
+            taskQueue=taskQueue if taskQueue else SQueue(),
+            **kwargs
+        )
         self.credential = credential
-        self.timeout = timeout
         self.jobSurls = {}
         self.jobStatus = {}
         self.workers = {}
-        self.workerResults = workerResults if workerResults else queue.Queue()
+        self.workerResults = workerResults if workerResults else SQueue()
+        self.selector = Selector()
+        self.selector.register(self.terminate)
+        self.selector.register(self.taskQueue)
+        self.selector.register(self.workerResults)
 
     def run(self, *args, **kwargs):
         while not self.terminate.is_set():
-            self.terminate.wait(self.timeout)
+            self.log.debug(f"{self.__class__.__name__}: Termination flag not set, waiting on selector")
+            if not self.selector.wait():
+                self.log.debug(f"{self.__class__.__name__}: Selector timeout ({self.timeout}), exiting")
+                self.terminate.set()
+                continue
+            self.log.debug(f"{self.__class__.__name__}: Selector activated on taskQueue or workerResults queue")
             try:
                 task = self.taskQueue.get_nowait()
             except queue.Empty:
                 pass
             else:
+                self.log.debug(f"{self.__class__.__name__}: Got task {task}")
                 self.processTask(task)
             self.processWorkerResults()
+
+        self.log.debug(f"{self.__class__.__name__}: Termination flag set, exiting")
 
     def processTask(self, task):
         pass
@@ -803,8 +957,10 @@ class SEWorkManager(WorkerThread):
         # process result queue
         while not self.workerResults.empty():
             if self.terminate.is_set():
+                self.log.debug(f"{self.__class__.__name__}: Exiting early on terminate flag")
                 return
             jobid, surl, status = self.workerResults.get()
+            self.log.debug(f"{self.__class__.__name__} RESULT: {jobid} {surl} {status}")
             self.jobSurls[jobid].discard(surl)
             # OK should not overwrite existing status
             if status == JobStatus.OK:
@@ -824,28 +980,35 @@ class SEWorkManager(WorkerThread):
         for jobid, surls in self.jobSurls.items():
             if len(surls) == 0:
                 removeIDs.append(jobid)
-                self.resultQueue.put(jobid, self.jobStatus[jobid])
+                self.resultQueue.put((jobid, self.jobStatus[jobid]))
         for jobid in removeIDs:
             del self.jobSurls[jobid]
             del self.jobStatus[jobid]
 
     def finish(self):
         """Set terminate event for workers and wait for them to finish."""
-        for worker in self.workers.values():
+        for se, worker in self.workers.items():
+            self.log.debug(f"{self.__class__.__name__}: Terminating worker for SE {se}")
             worker.terminate.set()
         for worker in self.workers.values():
             worker.thread.join()
+            self.log.debug(f"{self.__class__.__name__}: Worker for SE {se} terminated")
+        super().finish()
 
 
 class OutputCheckManager(SEWorkManager):
 
     def processTask(self, surlDict):
+        self.log.debug(f"{self.__class__.__name__}: surlDict: {surlDict}")
         for se, jobchecks in surlDict.items():
             if self.terminate.is_set():
+                self.log.debug(f"{self.__class__.__name__}:  Exiting early on terminate flag")
                 return
             if se not in self.workers:
                 self.workers[se] = OutputChecker(self.log, self.credential, resultQueue=self.workerResults, terminate=self.terminate)
             if not self.workers[se].thread.is_alive():
+                self.log.debug(f"OutputChecker for SE {se} not alive, starting")
+                self.workers[se].terminate.clear()
                 self.workers[se].start()
             tocheck = []
             for jobcheck in jobchecks:
@@ -863,11 +1026,15 @@ class OutputCheckManager(SEWorkManager):
 class FileRemoveManager(SEWorkManager):
 
     def processTask(self, surlDict):
+        self.log.debug(f"{self.__class__.__name__}: surlDict: {surlDict}")
         for se, removeDicts in surlDict.items():
             if self.terminate.is_set():
+                self.log.debug(f"{self.__class__.__name__}: Exiting early on terminate flag")
                 return
             if se not in self.workers:
                 self.workers[se] = FileRemover(self.log, self.credential, resultQueue=self.workerResults, terminate=self.terminate)
             if not self.workers[se].thread.is_alive():
+                self.log.debug(f"FileRemover for SE {se} not alive, starting")
+                self.workers[se].terminate.clear()
                 self.workers[se].start()
             self.workers[se].taskQueue.put(removeDicts)
