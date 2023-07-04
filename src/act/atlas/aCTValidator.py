@@ -37,7 +37,7 @@ class aCTValidator(aCTATLASProcess):
         proxyfile = actp.path(dn, '/atlas/Role=production')
         if not proxyfile:
             raise Exception('Could not find proxy with production role in proxy table')
-        self.log.info('set proxy path to %s' % proxyfile)
+        self.log.info(f'set proxy path to {proxyfile}')
 
         self.uc = arc.UserConfig(cred_type)
         self.uc.ProxyPath(str(proxyfile))
@@ -124,10 +124,10 @@ class aCTValidator(aCTATLASProcess):
 
         columns = ['JobID', 'appjobid', 'cluster', 'UsedTotalWallTime', 'arcjobs.EndTime',
                    'ExecutionNode', 'stdout', 'fairshare', 'pandajobs.created', 'metadata']
-        select = "arcjobs.id=%d AND arcjobs.id=pandajobs.arcjobid" % arcjobid
+        select = f"arcjobs.id={arcjobid} AND arcjobs.id=pandajobs.arcjobid"
         aj = self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs,pandajobs')
         if not aj or 'JobID' not in aj[0] or not aj[0]['JobID']:
-            self.log.error('No JobID in arcjob %s: %s'%(str(arcjobid), str(aj)))
+            self.log.error(f'No JobID in arcjob {arcjobid}: {aj}')
             return False
         aj = aj[0]
         jobid = aj['JobID']
@@ -137,7 +137,7 @@ class aCTValidator(aCTATLASProcess):
             try:
                 jobinfo = aCTPandaJob(filename=os.path.join(self.tmpdir, sessionid, 'heartbeat.json'))
             except Exception as x:
-                self.log.error("%s: failed to load heartbeat file for arcjob %s: %s" %(aj['appjobid'], jobid, x))
+                self.log.error(f"{aj['appjobid']}: failed to load heartbeat file for arcjob {jobid}: {x}")
                 jobinfo = aCTPandaJob(jobinfo={'jobId': aj['appjobid'], 'state': 'finished'})
 
             # update heartbeat and dump to tmp/heartbeats
@@ -155,14 +155,13 @@ class aCTValidator(aCTATLASProcess):
                     # Sanity check for efficiency > 100%
                     cputimepercore = getattr(jobinfo, 'cpuConsumptionTime', 0) / getattr(jobinfo, 'coreCount', 1)
                     if aj['UsedTotalWallTime'] < cputimepercore:
-                        self.log.warning('%s: Adjusting reported walltime %d to CPU time %d' %
-                                          (aj['appjobid'], aj['UsedTotalWallTime'], cputimepercore))
+                        self.log.warning(f'{aj["appjobid"]}: Adjusting reported walltime {aj["UsedTotalWallTime"]} to CPU time {cputimepercore}')
                         jobinfo.startTime = (aj['EndTime'] - datetime.timedelta(0, cputimepercore)).strftime('%Y-%m-%d %H:%M:%S')
                 else:
-                    self.log.warning('%s: no endtime found' % aj['appjobid'])
+                    self.log.warning(f'{aj["appjobid"]}: no endtime found')
             if len(aj["ExecutionNode"]) > 255:
                 jobinfo.node = aj["ExecutionNode"][:254]
-                self.log.warning("%s: Truncating wn hostname from %s to %s" % (aj['appjobid'], aj['ExecutionNode'], jobinfo.node))
+                self.log.warning(f"{aj['appjobid']}: Truncating wn hostname from {aj['ExecutionNode']} to {jobinfo.node}")
             else:
                 jobinfo.node = aj["ExecutionNode"]
 
@@ -176,10 +175,10 @@ class aCTValidator(aCTATLASProcess):
                 try:
                     jobinfo.metaData = json.loads(jobinfo.metaData)
                 except Exception as e:
-                    self.log.warning("%s: no metaData in pilot metadata: %s" % (aj['appjobid'], str(e)))
+                    self.log.warning(f"{aj['appjobid']}: no metaData in pilot metadata: {e}")
                 jobinfo.writeToFile(os.path.join(smeta['harvesteraccesspoint'], 'jobReport.json'))
             else:
-                jobinfo.writeToFile(os.path.join(self.tmpdir, "heartbeats", "%s.json" % aj['appjobid']))
+                jobinfo.writeToFile(os.path.join(self.tmpdir, "heartbeats", f"{aj['appjobid']}.json"))
 
         # copy to joblog dir files downloaded for the job: gmlog errors and pilot log
         outd = os.path.join(self.conf.joblog.dir, date, aj['fairshare'])
@@ -187,13 +186,13 @@ class aCTValidator(aCTATLASProcess):
 
         localdir = os.path.join(self.tmpdir, sessionid)
         gmlogerrors = os.path.join(localdir, "gmlog", "errors")
-        arcjoblog = os.path.join(outd, "%s.log" % aj['appjobid'])
+        arcjoblog = os.path.join(outd, f"{aj['appjobid']}.log")
         if not os.path.exists(arcjoblog):
             try:
                 shutil.move(gmlogerrors, arcjoblog)
                 os.chmod(arcjoblog, 0o644)
             except:
-                self.log.error("Failed to copy %s" % gmlogerrors)
+                self.log.error(f"Failed to copy {gmlogerrors}")
 
         pilotlog = aj['stdout']
         if not pilotlog and os.path.exists(localdir):
@@ -204,10 +203,10 @@ class aCTValidator(aCTATLASProcess):
         if pilotlog:
             try:
                 shutil.move(os.path.join(localdir, pilotlog),
-                            os.path.join(outd, '%s.out' % aj['appjobid']))
-                os.chmod(os.path.join(outd, '%s.out' % aj['appjobid']), 0o644)
+                            os.path.join(outd, f'{aj["appjobid"]}.out'))
+                os.chmod(os.path.join(outd, f'{aj["appjobid"]}.out'), 0o644)
             except Exception as e:
-                self.log.error("Failed to copy file %s: %s" % (os.path.join(localdir,pilotlog), str(e)))
+                self.log.error(f"Failed to copy file {os.path.join(localdir,pilotlog)}: {e}")
                 return False
 
         return True
@@ -215,7 +214,7 @@ class aCTValidator(aCTATLASProcess):
     def extractOutputFilesFromMetadata(self, arcjobid):
         aj = self.dbarc.getArcJobInfo(arcjobid, columns=["JobID", "appjobid"])
         if not aj or 'JobID' not in aj or not aj['JobID']:
-            self.log.error("failed to find arcjobid %s in database" % arcjobid)
+            self.log.error(f"failed to find arcjobid {arcjobid} in database")
             return {}
 
         jobid=aj['JobID']
@@ -224,13 +223,13 @@ class aCTValidator(aCTATLASProcess):
             jobinfo = aCTPandaJob(filename=os.path.join(self.tmpdir, sessionid, 'heartbeat.json'))
             metadata = getattr(jobinfo, 'xml') # travis doesn't like jobinfo.xml
         except Exception as x:
-            self.log.error("%s: failed to extract metadata for arcjob %s: %s" %(aj['appjobid'], sessionid, x))
+            self.log.error(f"{aj['appjobid']}: failed to extract metadata for arcjob {sessionid}: {x}")
             return {}
 
         try:
             outputfiles = json.loads(metadata)
         except Exception as e:
-            self.log.error("%s: failed to load output file info for arcjob %s: %s" % (aj['appjobid'], sessionid, str(e)))
+            self.log.error(f"{aj['appjobid']}: failed to load output file info for arcjob {sessionid}: {e}")
             return {}
 
         surls = {}
@@ -245,7 +244,7 @@ class aCTValidator(aCTATLASProcess):
                     surl = 'srm://srm.ndgf.org:8443/'+res.group(1)
                 se = arc.URL(str(surl)).Host()
             except Exception as x:
-                self.log.error('%s: %s' % (aj['appjobid'], x))
+                self.log.error(f'{aj["appjobid"]}: {x}')
             else:
                 checksum = "adler32:"+ (adler32 or '00000001')
                 if se not in surls:
@@ -282,9 +281,9 @@ class aCTValidator(aCTATLASProcess):
         """
         # TODO: HARDCODED limit
         # get all jobs with pandastatus running and actpandastatus tovalidate
-        select = "(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in %s limit 1000" % self.sitesselect
+        select = f"(pandastatus='transferring' and actpandastatus='tovalidate') and siteName in {self.sitesselect} limit 1000"
         columns = ["arcjobid", "pandaid", "siteName", "metadata"]
-        jobstoupdate=self.dbpanda.getJobs(select, columns=columns)
+        jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
 
         arcdesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
 
