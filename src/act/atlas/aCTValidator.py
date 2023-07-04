@@ -289,7 +289,6 @@ class aCTValidator(aCTATLASProcess):
 
         # Skip validation for the true pilot jobs, just copy logs, set to done and clean arc job
         toremove = []
-        pandadesc = {"pandastatus": None, "actpandastatus": "done"}
         for job in jobstoupdate:
             self.stopOnFlag()
             if self.sites[job['siteName']]['truepilot']:
@@ -299,24 +298,25 @@ class aCTValidator(aCTATLASProcess):
                 self.cleanDownloadedJob(job['arcjobid'])
                 self.dbarc.updateArcJob(job['arcjobid'], arcdesc)
                 select = f"arcjobid={job['arcjobid']}"
-                self.dbpanda.updateJobs(select, pandadesc)
+                desc = {"pandastatus": None, "actpandastatus": "done"}
+                self.dbpanda.updateJobs(select, desc)
             else:
                 toremove.append(job)
 
         # pull out output file info from pilot heartbeat json into dict, order by SE
         surls = {}
-        pandadesc = {"actpandastatus": "failed", "pandastatus": "failed"}
         for job in toremove:
             self.stopOnFlag()
             jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
             if not jobsurls:
                 # Problem extracting files, fail job, clean ARC job
                 # and job files.
-                self.log.error(f"{job['pandaid']}: Cannot validate output of arcjob {job['arcjobid']}")
+                self.log.error(f"{job['pandaid']}: Cannot validate output of arcjob {job['arcjobid']}, setting to failed")
                 self.cleanDownloadedJob(job['arcjobid'])
                 self.dbarc.updateArcJob(job['arcjobid'], arcdesc)
                 select = f"arcjobid={job['arcjobid']}"
-                self.dbpanda.updateJobs(select, pandadesc)
+                desc = {"actpandastatus": "failed", "pandastatus": "failed"}
+                self.dbpanda.updateJobs(select, desc)
             else:
                 select = f"arcjobid={job['arcjobid']}"
                 desc = {"actpandastatus": "validating"}
@@ -342,17 +342,13 @@ class aCTValidator(aCTATLASProcess):
             elif status == JobStatus.FAILED:
                 # output file failed, set toresubmit to clean up output and resubmit
                 self.log.info(f"Failed output file check for arcjob {jobid}, resubmitting")
-                select = f"arcjobid={jobid}"
                 desc = {"pandastatus": "starting", "actpandastatus": "toresubmit"}
-                # TODO: inline select
-                self.dbpanda.updateJobs(select, desc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
             else:
                 # Retry next time
                 self.log.info(f"Failed output file check for arcjob {jobid}, will retry")
-                select = f"arcjobid={jobid}"
                 desc = {"actpandastatus": "tovalidate"}
-                # TODO: inline select
-                self.dbpanda.updateJobs(select, desc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
 
     def checkOutputFiles(self, surls):
         for se, checks in surls.items():
@@ -442,7 +438,7 @@ class aCTValidator(aCTATLASProcess):
         jobstoupdate = self.dbpanda.getJobs(select, columns=columns)
 
         cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
-        pandaFailDesc = {"actpandastatus": "failed", "pandastatus": "failed"}
+        faildesc = {"actpandastatus": "failed", "pandastatus": "failed"}
 
         # For truepilot jobs, don't try to clean outputs (too dangerous), just clean arc job
         toremove = []
@@ -456,25 +452,25 @@ class aCTValidator(aCTATLASProcess):
                 self.cleanDownloadedJob(job["arcjobid"])
                 self.dbarc.updateArcJob(job["arcjobid"], cleandesc)
                 select = f"arcjobid={job['arcjobid']}"
-                self.dbpanda.updateJobs(select, pandaFailDesc)
+                self.dbpanda.updateJobs(select, faildesc)
+            else:
                 toremove.append(job)
 
         # pull out output file info from pilot heartbeat json into dict, order by SE
         surls = {}
         for job in toremove:
             self.stopOnFlag()
-            jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
+            jobid = job["arcjobid"]
+            jobsurls = self.extractOutputFilesFromMetadata(jobid)
             if not jobsurls:
                 # Problem extracting files, fail job, clean ARC job and files.
-                self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {job['arcjobid']}")
-                self.cleanDownloadedJob(job["arcjobid"])
-                self.dbarc.updateArcJob(job["arcjobid"], cleandesc)
-                select = f"arcjobid={job['arcjobid']}"
-                self.dbpanda.updateJobs(select, pandaFailDesc)
+                self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {jobid}, skipping")
+                self.cleanDownloadedJob(jobid)
+                self.dbarc.updateArcJob(jobid, cleandesc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", faildesc)
             else:
-                select = f"arcjobid={job['arcjobid']}"
                 desc = {"actpandastatus": "cleaning"}
-                self.dbpanda.updateJobs(select, desc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
                 for se in jobsurls:
                     surls.setdefault(se, []).extend(jobsurls[se])
 
@@ -493,16 +489,12 @@ class aCTValidator(aCTATLASProcess):
                     self.log.info(f"Output file removal failed for arcjob {jobid}, skipping")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
-                select = f"arcjobid={jobid}"
-                # TODO: inline select
-                self.dbpanda.updateJobs(select, pandaFailDesc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", faildesc)
             else:
                 # Retry next time
                 self.log.info(f"Output file removal failed for arcjob {jobid}, will retry")
-                select = f"arcjobid={jobid}"
                 desc = {"actpandastatus": "toclean"}
-                # TODO: inline select
-                self.dbpanda.updateJobs(select, desc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
 
     def resubmitNonARCJobs(self):
         """Resubmit jobs with no ARC job ID."""
@@ -555,6 +547,8 @@ class aCTValidator(aCTATLASProcess):
 
         # arcjobs db table update dict to clean ARC job
         arcdesc = {'arcstate': 'toclean', 'tarcstate': self.dbarc.getTimeStamp()}
+        faildesc = {"actpandastatus": "failed", "pandastatus": "failed"}
+        resubdesc = {"actpandastatus": "starting", "arcjobid": None}
 
         # pull out output file info from pilot heartbeat json into dict, order by SE
         surls = {}
@@ -562,26 +556,21 @@ class aCTValidator(aCTATLASProcess):
             self.stopOnFlag()
             jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
             if not jobsurls:
+                jobid = job["arcjobid"]
                 if job in downloaded or job["restartstate"] != "Finishing" and job["arcstate"] != "done":
                     # Clean job files and ARC job, finish resubmission if
                     # resubmitted manually or job failed before finishing,
                     # since there are likely no output files.
-                    self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {job['arcjobid']}, resubmit finished")
-                    self.cleanDownloadedJob(job["arcjobid"])
-                    self.dbarc.updateArcJob(job['arcjobid'], arcdesc)
-                    select = f"arcjobid={job['arcjobid']}"
-                    # TODO: common dict for panda resubmit
-                    desc = {"actpandastatus": "starting", "arcjobid": None}
-                    self.dbpanda.updateJobs(select, desc)
+                    self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {jobid}, resubmit finished")
+                    self.cleanDownloadedJob(jobid)
+                    self.dbarc.updateArcJob(jobid, arcdesc)
+                    self.dbpanda.updateJobs(f"arcjobid={jobid}", resubdesc)
                 else:
                     # Otherwise fail job whose outputs cannot be cleaned.
-                    self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {job['arcjobid']}, skipping")
-                    self.cleanDownloadedJob(job["arcjobid"])
-                    self.dbarc.updateArcJob(job['arcjobid'], arcdesc)
-                    select = f"arcjobid={job['arcjobid']}"
-                    # TODO: common dict for failed panda job
-                    desc = {"actpandastatus": "failed", "pandastatus": "failed"}
-                    self.dbpanda.updateJobs(select, desc)
+                    self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {jobid}, skipping")
+                    self.cleanDownloadedJob(jobid)
+                    self.dbarc.updateArcJob(jobid, arcdesc)
+                    self.dbpanda.updateJobs(f"arcjobid={jobid}", faildesc)
             else:
                 for se in jobsurls:
                     surls.setdefault(se, []).extend(jobsurls[se])
@@ -592,8 +581,6 @@ class aCTValidator(aCTATLASProcess):
         # process results from remover
         for jobid, status in removeResults:
             self.stopOnFlag()
-            select = f"arcjobid={jobid}"
-
             if jobid in manualIDs or status == JobStatus.OK:
                 # clean ARC job and finish resubmission for manually
                 # resubmitted jobs or jobs whose files were successfully
@@ -604,9 +591,7 @@ class aCTValidator(aCTATLASProcess):
                     self.log.info(f"Successfully deleted outputs for arcjob {jobid}, resubmit finished")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, arcdesc)
-                desc = {"actpandastatus": "starting", "arcjobid": None}
-                # TODO: inline select, common dict for panda resubmit
-                self.dbpanda.updateJobs(select, desc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", resubdesc)
 
             elif status == JobStatus.FAILED:
                 # If we couldn't clean outputs the next try of the job will
@@ -616,17 +601,14 @@ class aCTValidator(aCTATLASProcess):
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, arcdesc)
                 desc = {"actpandastatus": "failed", "pandastatus": "failed"}
-                # TODO: inline select and pandaFailDesc var
-                self.dbpanda.updateJobs(select, desc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", faildesc)
                 self.cleanDownloadedJob(jobid)
 
             else:
                 # set back to toresubmit to retry
                 self.log.info(f"Failed deleting outputs for arcjob {jobid}, will retry")
-                # TODO: inline select
-                select = f"arcjobid={job['arcjobid']}"
                 desc = {"actpandastatus": "toresubmit"}
-                self.dbpanda.updateJobs(select, desc)
+                self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
 
     def downloadHeartbeats(self, jobs):
         # send jobs to heartbeat downloader and start it if not active
