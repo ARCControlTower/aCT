@@ -209,6 +209,9 @@ class aCTATLASStatus(aCTATLASProcess):
         select += " and pandajobs.actpandastatus != 'toresubmit'"
         select += " and pandajobs.actpandastatus != 'toclean'"
         select += " and pandajobs.actpandastatus != 'finished'"
+        select += " and pandajobs.actpandastatus != 'validating'"
+        select += " and pandajobs.actpandastatus != 'cleaning'"
+        select += " and pandajobs.actpandastatus != 'resubmitting'"
         select += " and pandajobs.sitename in %s limit 100000" % self.sitesselect
         columns = ["arcjobs.id", "arcjobs.UsedTotalWallTime", "arcjobs.EndTime", "arcjobs.appjobid", "pandajobs.sendhb", "pandajobs.siteName"]
         jobstoupdate = self.dbarc.getArcJobsInfo(select, tables="arcjobs,pandajobs", columns=columns)
