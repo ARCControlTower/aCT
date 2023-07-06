@@ -418,6 +418,9 @@ class aCTValidator(aCTATLASProcess):
             if not removerDict[se].thread.is_alive():
                 self.log.debug(f"FileRemover for SE {se} not alive, starting")
                 removerDict[se].start()
+            for d in removeDicts:
+                jobSurls = removeSurls.setdefault(d["arcjobid"], set())
+                jobSurls.add(d["surl"])
             removerDict[se].taskQueue.put(ValueMsg(removeDicts))
 
         return self.processJobsResults(removeResults, removeStatus, removeSurls)
