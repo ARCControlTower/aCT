@@ -411,7 +411,7 @@ class aCTValidator(aCTATLASProcess):
         return finished
 
     def removeOutputFiles(self, surls, removerDict, removeResults, removeStatus, removeSurls):
-        for se, removeDicts in surls:
+        for se, removeDicts in surls.items():
             self.stopOnFlag()
             if se not in removerDict:
                 removerDict[se] = FileRemover(self.log, self.credential, resultQueue=removeResults)
