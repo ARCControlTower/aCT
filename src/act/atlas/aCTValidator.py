@@ -414,7 +414,7 @@ class aCTValidator(aCTATLASProcess):
         for se, removeDicts in surls.items():
             self.stopOnFlag()
             if se not in removerDict:
-                removerDict[se] = FileRemover(self.log, self.credential, resultQueue=removeResults)
+                removerDict[se] = FileRemover(self.log, self.uc, resultQueue=removeResults)
             if not removerDict[se].thread.is_alive():
                 self.log.debug(f"FileRemover for SE {se} not alive, starting")
                 removerDict[se].start()
