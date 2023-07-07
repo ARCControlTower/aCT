@@ -1,3 +1,6 @@
+"""Module implements output file validation and cleaning for ATLAS jobs."""
+
+
 import datetime
 import errno
 import json
@@ -17,11 +20,44 @@ from act.common.aCTProxy import aCTProxy
 
 
 class aCTValidator(aCTATLASProcess):
-    '''
-    Validate output files for finished jobs, cleanup output files for failed jobs.
-    '''
+    """
+    Process for validating or cleaning output files of ATLAS jobs.
+
+    The output files of an ATLAS job are specified in its heartbeat.json output
+    file along with metadata like size, checksum and modification timestamp.
+
+    The process handles 3 types of ATLAS jobs:
+    - finished jobs: the output files of finished jobs should be validated
+      before they are considered successful using the metadata
+    - failed jobs: it is required that the output files should be removed for
+      some of the jobs that failed and cannot be resubmitted or recovered
+      otherwise
+    - jobs to resubmit: before ATLAS jobs are resubmitted their output files
+      and their ARC jobs should be cleaned
+
+    The output files can reside on different storage sites. One storage site
+    being slow or down should not block or slow down handling of jobs that use
+    other storage sites. Because of that, the interaction with storage is done
+    in a separate thread per storage site and operation. For each storage site
+    there is one thread worker for validating the output files, one worker for
+    cleaning the output files of failed jobs and one worker for cleaning the
+    output files of jobs to be resubmitted. The main thread aggregates results
+    from workers to make final updates to jobs. Another worker is used to
+    download heartbeat.json files of certain jobs that weren't fetched yet.
+
+    Because of asynchronous nature of thread worker processing, some
+    intermediate states are used in the ATLAS job state machine, namely
+    "validating", "cleaning" and "resubmitting".
+
+    Stopping the validation or cleaning operation is not a problem as it can be
+    repeated later. Therefore, there is no permanent state kept to resume the
+    operation. It has to be restarted. Even if the process cannot exit cleanly
+    (SIGKILL, kernel panic) the jobs left in intermediate state can be reset
+    back to retry the operation when the validator process starts.
+    """
 
     def setup(self):
+        """Set up the validator."""
         super().setup()
 
         # Use production role proxy for checking and removing files
@@ -39,26 +75,33 @@ class aCTValidator(aCTATLASProcess):
             raise Exception('Could not find proxy with production role in proxy table')
         self.log.info(f'set proxy path to {proxyfile}')
 
+        # aCT's proxy cert used for authentication on SEs
         self.uc = arc.UserConfig(cred_type)
         self.uc.ProxyPath(str(proxyfile))
         self.uc.UtilsDirPath(str(arc.UserConfig.ARCUSERDIRECTORY))
 
+        # result queues for worker threads
         self.checkResults = queue.Queue()
         self.cleanRemoves = queue.Queue()
         self.resubRemoves = queue.Queue()
 
+        # dictionaries of (jobid: URL set) to track the processing of URLs
         self.checkSurls = {}
         self.cleanSurls = {}
         self.resubSurls = {}
 
+        # dictionaries of (jobid: status) to aggregate results into final job
+        # status
         self.checkStatus = {}
         self.cleanStatus = {}
         self.resubStatus = {}
 
+        # dictionaries of (SE URL: worker object) to manage worker threads
         self.checkers = {}
         self.cleaners = {}
         self.resubers = {}
 
+        # worker object for heartbeat downloads
         self.heartbeatDownloader = HeartbeatDownloader(self.tmpdir, self.log, self.uc)
 
         self.recoverIntermediateStates()
@@ -271,13 +314,14 @@ class aCTValidator(aCTATLASProcess):
 
     def validateFinishedJobs(self):
         """
-        Check for jobs with actpandastatus tovalidate and pandastatus running
-        Check if the output files in pilot heartbeat json are valid.
-        If yes, move to actpandastatus to finished, if not, move pandastatus
-        and actpandastatus to failed.
+        Validate finished jobs.
 
-        Signal handling strategy:
-        - exit is checked before every job update
+        Finished jobs that are to be validated have pandastatus "transferring"
+        and actpandastatus "tovalidate". Validation means checking output
+        files specified in job's heartbeat.json output file. Each specified
+        output file is queried for its size and checksum and compared to the
+        values in heartbeat.json. If everything matches, the job is marked
+        finished, otherwise it is failed.
         """
         # TODO: HARDCODED limit
         # get all jobs with pandastatus running and actpandastatus tovalidate
@@ -287,7 +331,8 @@ class aCTValidator(aCTATLASProcess):
 
         cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
 
-        # Skip validation for the true pilot jobs, just copy logs, set to done and clean arc job
+        # skip validation for the true pilot jobs, just copy logs, set to done
+        # and clean arc job
         toremove = []
         for job in jobstoupdate:
             self.stopOnFlag()
@@ -303,14 +348,15 @@ class aCTValidator(aCTATLASProcess):
             else:
                 toremove.append(job)
 
-        # pull out output file info from pilot heartbeat json into dict, order by SE
+        # pull out output file info from pilot heartbeat json into dict, order
+        # by SE
         surls = {}
         for job in toremove:
             self.stopOnFlag()
             jobsurls = self.extractOutputFilesFromMetadata(job["arcjobid"])
             if not jobsurls:
-                # Problem extracting files, fail job, clean ARC job
-                # and job files.
+                # problem extracting files, fail job, clean ARC job
+                # and job files
                 self.log.error(f"{job['pandaid']}: Cannot validate output of arcjob {job['arcjobid']}, setting to failed")
                 self.cleanDownloadedJob(job['arcjobid'])
                 self.dbarc.updateArcJob(job['arcjobid'], cleandesc)
@@ -335,7 +381,7 @@ class aCTValidator(aCTATLASProcess):
                 desc = {"pandastatus": "finished", "actpandastatus": "finished"}
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
                 if not self.copyFinishedFiles(jobid, True):
-                    # id was gone already
+                    # id was gone already, skip cleaning
                     continue
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
@@ -351,6 +397,14 @@ class aCTValidator(aCTATLASProcess):
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
 
     def checkOutputFiles(self, surls):
+        """
+        Send URLs to workers and return final status for jobs.
+
+        There is one worker for each SE. URLs are grouped by SE and sent to the
+        corresponding worker. The worker results are processed to the final
+        status for the corresponding job. The return value is a list of tuples
+        of job ID and its final status.
+        """
         for se, checks in surls.items():
             self.stopOnFlag()
 
@@ -369,6 +423,7 @@ class aCTValidator(aCTATLASProcess):
                 jobid, surl = check["arcjobid"], check["surl"]
                 jobSurls = self.checkSurls.setdefault(jobid, set())
                 if not surl:
+                    # job fails immediately if one of the URLs is missing
                     self.log.error(f"Missing surl for {surl['arcjobid']}, cannot validate")
                     self.checkStatus[jobid] = JobStatus.FAILED
                 elif jobid not in self.checkStatus:
@@ -379,6 +434,21 @@ class aCTValidator(aCTATLASProcess):
         return self.processJobsResults(self.checkResults, self.checkStatus, self.checkSurls)
 
     def processJobsResults(self, resultsQueue, statusDict, surlDict):
+        """
+        Process worker results and return final status for jobs.
+
+        The result of every operation and also final job status is classified
+        in 3 ways which are defined in JobStatus enum class: OK, RETRY and
+        FAILED. Operations on job's output URLs have to be aggregated into the
+        final job status. All OK results aggregate into final status OK. Any
+        RETRY result overrides OK status to RETRY and any FAILED overrides
+        both OK and RETRY to FAILED.
+
+        Final status is tracked per job in statusDict and the list of URLs that
+        have to be processed per job are handled in surlDict. Once all the URLs
+        are processed for a job, its final status is returned in a tuple along
+        with its ID.
+        """
         while not resultsQueue.empty():
             self.stopOnFlag()
             jobid, surl, status = resultsQueue.get()
@@ -399,7 +469,8 @@ class aCTValidator(aCTATLASProcess):
             elif status == JobStatus.FAILED:
                 statusDict[jobid] = status
 
-        # remove job from status and surl dicts
+        # gather all jobs that are done and remove them from status and surl
+        # dicts
         finished = []
         for jobid, surls in surlDict.items():
             if len(surls) == 0:
@@ -411,6 +482,12 @@ class aCTValidator(aCTATLASProcess):
         return finished
 
     def removeOutputFiles(self, surls, removerDict, removeResults, removeStatus, removeSurls):
+        """
+        See checkOutputFiles.
+
+        The only difference is in the handling of empty URLs which is done by
+        checkOutputFiles.
+        """
         for se, removeDicts in surls.items():
             self.stopOnFlag()
             if se not in removerDict:
@@ -426,14 +503,16 @@ class aCTValidator(aCTATLASProcess):
         return self.processJobsResults(removeResults, removeStatus, removeSurls)
 
     def cleanFailedJobs(self):
-        '''
-        Check for jobs with actpandastatus toclean and pandastatus transferring.
-        Delete the output files in pilot heartbeat json
-        Move actpandastatus to failed.
+        """
+        Delete output files of failed jobs.
 
-        Signal handling strategy:
-        - exit is checked before every job update
-        '''
+        Output files of some of the failed jobs should be cleaned first before
+        processing them further. Such jobs have pandastatus "transferring" and
+        actpandastatus "toclean". The job's output files that have to be
+        cleaned are specified in its heartbeat.json file (see
+        validateFinishedJobs). Regardless of the success or failure of the
+        cleaning operations the jobs are marked as failed.
+        """
         # TODO: HARDCODED limit
         # get all jobs with pandastatus transferring and actpandastatus toclean
         select = f"(pandastatus='transferring' and actpandastatus='toclean') and siteName in {self.sitesselect} limit 1000"
@@ -443,13 +522,11 @@ class aCTValidator(aCTATLASProcess):
         cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
         faildesc = {"actpandastatus": "failed", "pandastatus": "failed"}
 
-        # For truepilot jobs, don't try to clean outputs (too dangerous), just clean arc job
+        # for truepilot jobs, don't try to clean outputs (too dangerous), just
+        # clean arc job
         toremove = []
         for job in jobstoupdate:
             self.stopOnFlag()
-            # TODO: should we restore previous true pilot behaviour?
-            ## Cleaning a bad storage can block the validator, so skip cleaning in all cases
-            #if True:
             if self.sites[job['siteName']]['truepilot']:
                 self.log.info(f"{job['pandaid']}: Skip cleanup of output files")
                 self.cleanDownloadedJob(job["arcjobid"])
@@ -459,14 +536,15 @@ class aCTValidator(aCTATLASProcess):
             else:
                 toremove.append(job)
 
-        # pull out output file info from pilot heartbeat json into dict, order by SE
+        # pull out output file info from pilot heartbeat json into dict, order
+        # by SE
         surls = {}
         for job in toremove:
             self.stopOnFlag()
             jobid = job["arcjobid"]
             jobsurls = self.extractOutputFilesFromMetadata(jobid)
             if not jobsurls:
-                # Problem extracting files, fail job, clean ARC job and files.
+                # problem extracting files, fail job, clean ARC job and files
                 self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {jobid}, skipping")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
@@ -515,14 +593,15 @@ class aCTValidator(aCTATLASProcess):
             self.dbpanda.updateJobs(select, desc)
 
     def cleanResubmittingJobs(self):
-        '''
-        Check for jobs with actpandastatus toresubmit and pandastatus starting.
-        Delete the output files in pilot heartbeat json
-        Move actpandastatus to starting.
+        """
+        Clean output files of resubmitting jobs.
 
-        Signal handling strategy:
-        - exit is checked before every job update
-        '''
+        Output files and ARC jobs of jobs that are to be resubmitted should be
+        cleaned. Such jobs have actpandastatus "toresubmit". The output files
+        to be cleaned are specified in job's heartbeat.json (see
+        validateFinishedJobs). If the cleaning is successful, the job is marked
+        to be resubmitted. Otherwise, the jobs is marked failed.
+        """
         # TODO: HARDCODED limit
         select = "actpandastatus='toresubmit' and arcjobs.id=pandajobs.arcjobid limit 100"
         columns = ["pandajobs.arcjobid", "pandajobs.pandaid", "arcjobs.JobID", "arcjobs.arcstate", "arcjobs.restartstate"]
@@ -542,7 +621,7 @@ class aCTValidator(aCTATLASProcess):
             else:
                 toremove.append(job)
 
-        # Queue heartbeat downloads for manually resubmitted jobs and jobs
+        # Queue heartbeat downloads for manually resubmitted jobs and add jobs
         # whose downloads are finished to remove list.
         downloaded = self.downloadHeartbeats(todownload)
         manualIDs = set([job["arcjobid"] for job in downloaded])
@@ -613,6 +692,13 @@ class aCTValidator(aCTATLASProcess):
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
 
     def downloadHeartbeats(self, jobs):
+        """
+        Download job heartbeats.
+
+        A list of jobs (dicts) is sent to the worker thread. The sent jobs are
+        returned once the worker thread is finished downloading their
+        heartbeat.json.
+        """
         # send jobs to heartbeat downloader and start it if not active
         if jobs:
             self.heartbeatDownloader.taskQueue.put(ValueMsg(jobs))
@@ -629,6 +715,7 @@ class aCTValidator(aCTATLASProcess):
         return finished
 
     def process(self):
+        """Process eligible jobs."""
         self.logger.arclog.setReopen(True)
         self.logger.arclog.setReopen(False)
         self.setSites()
@@ -644,45 +731,115 @@ class aCTValidator(aCTATLASProcess):
 
 
 class JobStatus(Enum):
+    """Enumeration of possible job status values."""
+
     OK = 1
     RETRY = 2
     FAILED = 3
 
 
 class BaseMsg:
+    """
+    Base class for the type of message between threads.
+
+    Queues are used to communicate with the worker threads. A different type of
+    message is required to instruct the thread to exit or potentially perform
+    a different action. Because the exit needs to happen ASAP, the priority
+    queue is used and the exit message has the highest priority. This requires
+    the class hierarchy to implement magic methods for comparison.
+    """
 
     def __lt__(self, value):
+        """Return False for the lowest priority by default."""
         return False
 
 
 class ExitMsg(BaseMsg):
+    """
+    Message type used for instructing termination.
+
+    This should be the highest priority message type to allow for as quick
+    exit as possible.
+    """
 
     def __lt__(self, value):
+        """Return True for the highest possible priority."""
         return True
 
 
 class ValueMsg(BaseMsg):
+    """
+    Message type for any value.
+
+    Inherits the lowest priority from the base class.
+    """
 
     def __init__(self, value):
+        """Store the value to be handled by the recipient."""
         self.value = value
 
 
 class ThreadWorker:
+    """
+    Base implementation of a thread worker.
+
+    The ThreadWorker object is essentially a callable object run by
+    threading.Thread (similar to what aCTProcess is to multiprocessing.Process)
+    with attributes useful for the work done by the thread.
+
+    The thread attribute is the reference to the thread that runs the worker.
+    The worker object can create and be run by multiple threads during its
+    lifetime. That is why the start method is provided.
+
+    Each worker has a task queue where the tasks for the worker are sent.
+    Worker puts results into the result queue.
+
+    There are multiple reasons for the distinction between worker and its
+    thread. Initially, the inheritance of threading.Thread was considered.
+    The mixing of Thread API and whatever custom API is required for aCT
+    thread workers is considered less clean and more difficult to understand
+    than creating a custom callable.
+
+    Another reason for the distinction is that the life cycle of the thread
+    does not match the conceptual lifecycle of the worker. Threads on most OSes
+    cannot be restarted or stopped temporarily, which means that the new thread
+    needs to be created. However, the workers in aCT can stop when there is no
+    work and then start later or restart on crash. There is also an additional
+    context of queues and events that are associated with the worker and
+    independent from the lifecycle of the OS thread. It appears therefore that
+    having a thread as an attribute of the worker is more elegant.
+    """
 
     # TODO: There should be some form of null logger. For now, we rely on
     #       aCT always providing the logger.
     def __init__(self, log, taskQueue=None, resultQueue=None):
+        """Initialize the worker object."""
         self.log = log
         self.taskQueue = taskQueue if taskQueue else queue.PriorityQueue()
         self.resultQueue = resultQueue if resultQueue else queue.Queue()
         self.thread = threading.Thread(target=self)
 
     def start(self):
+        """
+        Start a new thread if not running already.
+
+        On the first start of a ThreadWorker object the Thread instance is
+        wasted because it was never started so it is not alive and a new one is
+        created. It is simpler to waste the instance than to keep additional
+        state to handle first start.
+        """
         if not self.thread.is_alive():
             self.thread = threading.Thread(target=self)
             self.thread.start()
 
     def __call__(self, *args, **kwargs):
+        """
+        Call the function that the thread should execute.
+
+        Threads should not silently crash so every exception is caught and
+        logged. Also, the finish method should always be run regardless of the
+        way the thread execution went.
+        """
         try:
             self.run(*args, **kwargs)
         except:
@@ -692,15 +849,28 @@ class ThreadWorker:
             self.finish()
 
     def run(*args, **kwargs):
+        """Do nothing by default on thread execution."""
         pass
 
     def finish(self):
+        """Debug log the name of the worker in the end."""
         self.log.debug(f"{self.__class__.__name__}: exited")
 
 
 class ARCWorker(ThreadWorker):
+    """
+    Common implementation of main loop for all validator thread workers.
+
+    Event is used to exit the loop. It can potentially be supplied and used
+    to terminate the thread from another thread but this should not be done
+    because it cannot wake up the thread from sleeping on the taskQueue.
+
+    The timeout attribute is used for exiting after not getting any task.
+    Credential is used for ARC bindings to authenticate on the SEs.
+    """
 
     def __init__(self, log, credential, timeout=60, terminate=None, **kwargs):
+        """Initialize the validator thread worker."""
         super().__init__(log, **kwargs)
         self.terminate = terminate if terminate else threading.Event()
         self.credential = credential
@@ -712,6 +882,7 @@ class ARCWorker(ThreadWorker):
         super().start()
 
     def run(self, *args, **kwargs):
+        """Process messages until the termination event."""
         while not self.terminate.is_set():
             self.log.debug(f"{self.__class__.__name__}: waiting on queue")
             try:
@@ -723,6 +894,7 @@ class ARCWorker(ThreadWorker):
                 self.processTask(task)
 
     def processTask(self, task):
+        """Process the message."""
         if isinstance(task, ExitMsg):
             self.log.debug(f"{self.__class__.__name__}: ExitMsg, exiting")
             self.terminate.set()
@@ -731,12 +903,15 @@ class ARCWorker(ThreadWorker):
             self.processValue(task.value)
 
     def processValue(self, value):
+        """Process the regular workload message."""
         pass
 
 
 class OutputChecker(ARCWorker):
+    """Thread worker that validates the output files."""
 
     def processValue(self, surls):
+        """Process a list of URLs and return results in result queue."""
         datapointlist = arc.DataPointList()
         surllist = []
         dummylist = []
@@ -838,8 +1013,10 @@ class OutputChecker(ARCWorker):
 
 
 class FileRemover(ARCWorker):
+    """Thread worker that removes output files."""
 
     def processValue(self, surls):
+        """Remove a list of URLs and return results in the result queue."""
         for surl in surls:
             if self.terminate.is_set():
                 return
@@ -867,12 +1044,19 @@ class FileRemover(ARCWorker):
 
 
 class HeartbeatDownloader(ARCWorker):
+    """Thread worker that downloads heartbeat.json files of jobs."""
 
     def __init__(self, tmpdir, *args, **kwargs):
+        """
+        Initialize the downloader.
+
+        tmpdir is a location where files should be downloaded.
+        """
         super().__init__(*args, **kwargs)
         self.tmpdir = tmpdir
 
     def processValue(self, jobs):
+        """Download heartbeat.json output files for given jobs."""
         for job in jobs:
             if self.terminate.is_set():
                 return
