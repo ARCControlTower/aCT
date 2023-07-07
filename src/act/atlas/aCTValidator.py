@@ -671,9 +671,8 @@ class ThreadWorker:
 
     # TODO: There should be some form of null logger. For now, we rely on
     #       aCT always providing the logger.
-    def __init__(self, log, terminate=None, taskQueue=None, resultQueue=None):
+    def __init__(self, log, taskQueue=None, resultQueue=None):
         self.log = log
-        self.terminate = terminate if terminate else threading.Event()
         self.taskQueue = taskQueue if taskQueue else queue.PriorityQueue()
         self.resultQueue = resultQueue if resultQueue else queue.Queue()
         self.thread = threading.Thread(target=self)
@@ -681,7 +680,6 @@ class ThreadWorker:
     def start(self):
         if not self.thread.is_alive():
             self.thread = threading.Thread(target=self)
-            self.terminate.clear()
             self.thread.start()
 
     def __call__(self, *args, **kwargs):
@@ -702,10 +700,16 @@ class ThreadWorker:
 
 class ARCWorker(ThreadWorker):
 
-    def __init__(self, log, credential, timeout=60, **kwargs):
+    def __init__(self, log, credential, timeout=60, terminate=None, **kwargs):
         super().__init__(log, **kwargs)
+        self.terminate = terminate if terminate else threading.Event()
         self.credential = credential
         self.timeout = timeout
+
+    def start(self):
+        """Start the thread if not running."""
+        self.terminate.clear()
+        super().start()
 
     def run(self, *args, **kwargs):
         while not self.terminate.is_set():
