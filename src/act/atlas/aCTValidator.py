@@ -378,10 +378,10 @@ class aCTValidator(aCTATLASProcess):
 
         return self.processJobsResults(self.checkResults, self.checkStatus, self.checkSurls)
 
-    def processJobsResults(self, resultsDict, statusDict, surlDict):
-        while not resultsDict.empty():
+    def processJobsResults(self, resultsQueue, statusDict, surlDict):
+        while not resultsQueue.empty():
             self.stopOnFlag()
-            jobid, surl, status = resultsDict.get()
+            jobid, surl, status = resultsQueue.get()
             self.log.debug(f"RESULT: {jobid} {surl} {status}")
 
             # remove from a set of job surls that are worked on
