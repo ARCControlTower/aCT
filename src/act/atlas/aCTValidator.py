@@ -110,23 +110,23 @@ class aCTValidator(aCTATLASProcess):
         """Properly handle all threads and job states."""
         # signal threads to terminate
         self.log.debug(f"Terminating {len(self.checkers)} OutputCheckers")
-        for worker in self.checkers:
+        for worker in self.checkers.values():
             worker.taskQueue.put(ExitMsg())
         self.log.debug(f"Terminating {len(self.cleaners)} FileRemovers")
-        for worker in self.cleaners:
+        for worker in self.cleaners.values():
             worker.taskQueue.put(ExitMsg())
         self.log.debug(f"Terminating {len(self.resubers)} FileRemovers")
-        for worker in self.resubers:
+        for worker in self.resubers.values():
             worker.taskQueue.put(ExitMsg())
         self.log.debug("Terminating HeartbeatDownloader")
         self.heartbeatDownloader.taskQueue.put(ExitMsg())
 
         # wait threads to finish
-        for worker in self.checkers:
+        for worker in self.checkers.values():
             worker.thread.join()
-        for worker in self.cleaners:
+        for worker in self.cleaners.values():
             worker.thread.join()
-        for worker in self.resubers:
+        for worker in self.resubers.values():
             worker.thread.join()
         self.heartbeatDownloader.thread.join()
 
