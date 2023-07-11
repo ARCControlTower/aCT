@@ -53,7 +53,8 @@ class aCTATLASProcess(aCTProcess):
     def setSites(self):
         self.sites = self.cricparser.getSites(flavour=self.ceflavour)
         # For DB queries
-        self.sitesselect = "('%s')" % "','".join(self.sites.keys())
+        siteStr = ",".join([f"'{site}'" for site in self.sites.keys()])
+        self.sitesselect = f"({siteStr})"
 
     def finish(self):
         self.dbarc.close()

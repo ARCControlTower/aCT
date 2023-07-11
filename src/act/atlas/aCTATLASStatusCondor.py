@@ -20,11 +20,10 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before updating every job
         """
-        sites = "','".join([s for s,a in self.sites.items() if a["status"] == "offline"])
-
-        if sites:
-
-            jobs = self.dbpanda.getJobs("(actpandastatus='starting' or actpandastatus='sent') and sitename in ('%s')" % sites,
+        offlinesites = [site for site, a in self.sites.items() if a["status"] == "offline"]
+        if offlinesites:
+            siteStr = ",".join([f"'{site}'" for site in offlinesites])
+            jobs = self.dbpanda.getJobs(f"(actpandastatus='starting' or actpandastatus='sent') and sitename in ({siteStr})",
                                         ["pandaid", "condorjobid", "siteName", "id"])
             for job in jobs:
 

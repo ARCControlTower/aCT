@@ -25,9 +25,10 @@ class aCTATLASStatus(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
-        offlinesites = [s for s,a in self.sites.items() if a['status'] == 'offline']
+        offlinesites = [site for site, a in self.sites.items() if a['status'] == 'offline']
         if offlinesites:
-            offlinesitesselect = "('%s')" % "','".join(offlinesites)
+            siteStr = ",".join([f"'{site}'" for site in offlinesites])
+            offlinesitesselect = f"({siteStr})"
             jobs = self.dbpanda.getJobs("(actpandastatus='starting' or actpandastatus='sent') and sitename in %s" % offlinesitesselect,
                                         ['pandaid', 'arcjobid', 'siteName', 'id'])
             for job in jobs:
