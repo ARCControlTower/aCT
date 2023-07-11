@@ -30,15 +30,15 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                 self.stopOnFlag()
 
                 continue  # TODO: does this make sense?
-                self.log.info("Cancelling starting job for %d for offline site %s" % (job['pandaid'], job['siteName']))
-                select = "id=%s" % job["id"]
+                self.log.info(f"Cancelling starting job for appjob({job['pandaid']}) for offline site {job['siteName']}")
+                select = f"id={job['id']}"
                 self.dbpanda.updateJobs(select, {"actpandastatus": "failed", "pandastatus": "failed",
                                                     "error": "Starting job was killed because queue went offline"})
                 if job["condorjobid"]:
                     self.dbcondor.updateCondorJob(job["condorjobid"], {"condorstate": "tocancel"})
 
         # Get jobs killed by panda
-        jobs = self.dbpanda.getJobs("actpandastatus='tobekilled' and sitename in %s" % self.sitesselect,
+        jobs = self.dbpanda.getJobs(f"actpandastatus='tobekilled' and sitename in {self.sitesselect}",
                                     ["pandaid", "condorjobid", "pandastatus", "id"])
         if not jobs:
             return
@@ -47,8 +47,8 @@ class aCTATLASStatusCondor(aCTATLASProcess):
 
             self.stopOnFlag()
 
-            self.log.info("Cancelling Condor job for %d", job['pandaid'])
-            select = "id=%s" % job["id"]
+            self.log.info(f"Cancelling Condor job for appjob({job['pandaid']}")
+            select = f"id={job['id']}"
 
             # Check if condorjobid is set before cancelling the job
             if not job["condorjobid"]:
@@ -56,7 +56,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                 continue
 
             # Put timings in the DB
-            condorselect = "condorjobid='%s' and condorjobs.id=pandajobs.condorjobid and siteName in %s" % (job["condorjobid"], self.sitesselect)
+            condorselect = f"condorjobid={job['condorjobid']} and condorjobs.id=pandajobs.condorjobid and siteName in {self.sitesselect}")
             condorjobs = self.dbcondor.getCondorJobsInfo(condorselect, tables="condorjobs,pandajobs")
             desc = {}
             if condorjobs:
@@ -65,7 +65,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
 
             # Check if job was manually killed
             if job["pandastatus"] is not None:
-                self.log.info("%s: Manually killed, marking cancelled" % job["pandaid"])
+                self.log.info(f"appjob({job['pandaid']}): Manually killed, marking cancelled")
                 desc["pandastatus"] = None
                 desc["error"] = "Job was killed in aCT"
             desc["actpandastatus"] = "cancelled"
@@ -93,7 +93,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         - exit is checked before every job update
         """
         select = "condorjobs.id=pandajobs.condorjobid and (condorjobs.condorstate='submitted' or condorjobs.condorstate='holding')"
-        select += " and pandajobs.actpandastatus='sent' and siteName in %s" % self.sitesselect
+        select += f" and pandajobs.actpandastatus='sent' and siteName in {self.sitesselect}"
         select += " limit 100000"
         columns = ["condorjobs.id", "condorjobs.cluster", "condorjobs.appjobid"]
         jobstoupdate = self.dbcondor.getCondorJobsInfo(select, columns=columns, tables="condorjobs,pandajobs")
@@ -101,7 +101,8 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         if len(jobstoupdate) == 0:
             return
         else:
-            self.log.debug("Found %d submitted jobs (%s)" % (len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([j["appjobid"] for j in jobstoupdate])
+            self.log.debug(f"Found {len(jobstoupdate)} submitted jobs ({idstr})")
 
         for job in jobstoupdate:
             self.stopOnFlag()
@@ -125,9 +126,10 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
+        # TODO: HARDCODED limit
         # do an inner join to pick up all jobs that should be set to running
         select = "condorjobs.id=pandajobs.condorjobid and condorjobs.condorstate='running' and pandajobs.actpandastatus='starting'"
-        select += " and siteName in %s limit 100000" % self.sitesselect
+        select += f" and siteName in {self.sitesselect} limit 100000"
         columns = ["condorjobs.id", "condorjobs.JobCurrentStartDate",
                 "condorjobs.cluster", "pandajobs.pandaid", "pandajobs.siteName", "condorjobs.appjobid"]
         jobstoupdate = self.dbcondor.getCondorJobsInfo(select, columns=columns, tables="condorjobs,pandajobs")
@@ -135,7 +137,8 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         if len(jobstoupdate) == 0:
             return
         else:
-            self.log.debug("Found %d running jobs (%s)" % (len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([j["appjobid"] for j in jobstoupdate])
+            self.log.debug(f"Found {len(jobstoupdate)} running jobs ({idstr})")
 
         for cj in jobstoupdate:
             self.stopOnFlag()
@@ -147,7 +150,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             desc["startTime"] = cj["JobCurrentStartDate"]
             # When true pilot job has started running, turn of aCT heartbeats
             if self.sites[cj["siteName"]]["truepilot"]:
-                self.log.info("%s: Job is running so stop sending heartbeats", cj["pandaid"])
+                self.log.info(f"appjob({cj['pandaid']}): Job is running so stop sending heartbeats")
                 desc["sendhb"] = 0
             self.dbpanda.updateJobs(select, desc)
 
@@ -163,6 +166,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
+        # TODO: HARDCODED limit
         # don't get jobs already having actpandastatus states treated by
         # validator to avoid race conditions
         select = "condorjobs.id=pandajobs.condorjobid and condorjobs.condorstate='done'"
@@ -170,7 +174,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         select += " and pandajobs.actpandastatus != 'toresubmit'"
         select += " and pandajobs.actpandastatus != 'toclean'"
         select += " and pandajobs.actpandastatus != 'finished'"
-        select += " and pandajobs.sitename in %s limit 100000" % self.sitesselect
+        select += f" and pandajobs.sitename in {self.sitesselect} limit 100000"
         columns = ["condorjobs.id", "condorjobs.JobCurrentStartDate", "condorjobs.CompletionDate",
                 "condorjobs.appjobid", "pandajobs.sendhb", "pandajobs.siteName"]
         jobstoupdate = self.dbcondor.getCondorJobsInfo(select, tables="condorjobs,pandajobs", columns=columns)
@@ -178,7 +182,8 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         if len(jobstoupdate) == 0:
             return
         else:
-            self.log.debug("Found %d finished jobs (%s)" % (len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([j["appjobid"] for j in jobstoupdate])
+            self.log.debug(f"Found {len(jobstoupdate)} finished jobs ({idstr})")
 
         for cj in jobstoupdate:
             self.stopOnFlag()
@@ -190,7 +195,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             desc["endTime"] = cj["CompletionDate"]
             # True pilot job may have gone straight to finished, turn off aCT heartbeats if necessary
             if self.sites[cj["siteName"]]["truepilot"] and cj["sendhb"] == 1:
-                self.log.info("%s: Job finished so stop sending heartbeats", cj["appjobid"])
+                self.log.info(f"appjob({cj['appjobid']}): Job finished so stop sending heartbeats")
                 desc["sendhb"] = 0
             self.dbpanda.updateJobs(select, desc)
 
@@ -205,10 +210,11 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
+        # TODO: HARDCODED limit
         # Look for failed final states
         select = "(condorstate='donefailed' or condorstate='cancelled' or condorstate='lost')"
         select += " and actpandastatus!='toclean' and actpandastatus!='toresubmit'"
-        select += " and pandajobs.condorjobid = condorjobs.id and pandajobs.sitename in %s limit 100000" % self.sitesselect
+        select += f" and pandajobs.condorjobid = condorjobs.id and pandajobs.sitename in {self.sitesselect} limit 100000"
         columns = ["condorstate", "appjobid", "condorjobid", "JobCurrentStartDate", "CompletionDate", "actpandastatus"]
 
         jobstoupdate = self.dbcondor.getCondorJobsInfo(select, columns=columns, tables="condorjobs,pandajobs")
@@ -218,14 +224,17 @@ class aCTATLASStatusCondor(aCTATLASProcess):
 
         failedjobs = [job for job in jobstoupdate if job["condorstate"]=="donefailed"]
         if len(failedjobs) != 0:
-            self.log.debug("Found %d failed jobs (%s)" % (len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([j["appjobid"] for j in failedjobs])
+            self.log.debug(f"Found {len(failedjobs)} failed jobs ({idstr})")
         lostjobs = [job for job in jobstoupdate if job["condorstate"]=="lost"]
         if len(lostjobs) != 0:
-            self.log.debug("Found %d lost jobs (%s)" % (len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([j["appjobid"] for j in lostjobs])
+            self.log.debug(f"Found {len(lostjobs)} lost jobs ({idstr})")
         # Cancelled jobs already in terminal state will be cleaned up in cleanupLeftovers()
         cancelledjobs = [job for job in jobstoupdate if job["condorstate"]=="cancelled" and job["actpandastatus"] not in ("cancelled", "donecancelled", "failed", "donefailed")]
         if len(cancelledjobs) != 0:
-            self.log.debug("Found %d cancelled jobs (%s)" % (len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([j["appjobid"] for j in cancelledjobs])
+            self.log.debug(f"Found {len(cancelledjobs)} cancelled jobs ({idstr})")
 
         # Get outputs to download for failed jobs
         select = "condorstate='failed'"
@@ -240,7 +249,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
 
         for cj in failedjobs:
             self.stopOnFlag()
-            self.log.info("%s: Job failed so stop sending heartbeats", cj["appjobid"])
+            self.log.info(f"appjob({cj['appjobid']}): Job failed so stop sending heartbeats")
             select = "condorjobid='"+str(cj["condorjobid"])+"'"
             desc = {}
             desc["pandastatus"] = "transferring"
@@ -254,7 +263,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         for cj in lostjobs:
             self.stopOnFlag()
             # For truepilot, just set to clean and transferring to clean up condor job
-            self.log.info("%s: Job is lost, cleaning up condor job", cj["appjobid"])
+            self.log.info(f"appjob({cj['appjobid']}): Job is lost, cleaning up condor job")
             select = "condorjobid='"+str(cj["condorjobid"])+"'"
             desc = {}
             desc["sendhb"] = 0
@@ -265,8 +274,8 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         for cj in cancelledjobs:
             self.stopOnFlag()
             # Only applies to manually cancelled jobs, simply clean them
-            self.log.info("%s: Job was cancelled, cleaning up condor job", cj["appjobid"])
-            select = "condorjobid='%s'" % str(cj["condorjobid"])
+            self.log.info(f"appjob({cj['appjobid']}): Job was cancelled, cleaning up condor job")
+            select = f"condorjobid={cj['condorjobid']}"
             desc = {}
             desc["sendhb"] = 0
             desc["pandastatus"] = "transferring"
@@ -292,7 +301,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         jobs = self.dbcondor.getCondorJobsInfo(select, ["id", "appjobid"])
         for job in jobs:
             self.stopOnFlag()
-            self.log.info("%s: Deleting from condorjobs unsubmitted job %d", job["appjobid"], job["id"])
+            self.log.info(f"appjob({job['appjobid']}): Deleting from condorjobs unsubmitted job condorjob({job['id']})")
             self.dbcondor.deleteCondorJob(job["id"])
 
         select = "(condorstate='done' or condorstate='lost' or condorstate='cancelled' or condorstate='donefailed') \
@@ -303,18 +312,18 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             self.stopOnFlag()
             # done jobs should not be there, log a warning
             if job["condorstate"] == "done":
-                self.log.warning("%s: Removing orphaned done job %d", job["appjobid"], job["id"])
+                self.log.warning(f"appjob({job['appjobid']}): Removing orphaned done job condorjob({job['id']})")
             else:
-                self.log.info("%s: Cleaning left behind %s job %d", job["appjobid"], job["condorstate"], job["id"])
+                self.log.info(f"appjob({job['appjobid']}): Cleaning left behind {job['condorstate']} job condorjob({job['id']})")
             self.dbcondor.updateCondorJob(job["id"], cleandesc)
 
         select = "condorstate='cancelled' and (actpandastatus in ('cancelled', 'donecancelled', 'failed', 'donefailed')) " \
-                "and pandajobs.condorjobid = condorjobs.id and pandajobs.sitename in %s" % self.sitesselect
+                 f"and pandajobs.condorjobid = condorjobs.id and pandajobs.sitename in {self.sitesselect}"
         cleandesc = {"condorstate":"toclean", "tcondorstate": self.dbcondor.getTimeStamp()}
         jobs = self.dbcondor.getCondorJobsInfo(select, ["condorjobs.id", "condorjobs.appjobid"], tables="condorjobs, pandajobs")
         for job in jobs:
             self.stopOnFlag()
-            self.log.info("%s: Cleaning cancelled job %d", job["appjobid"], job["id"])
+            self.log.info(f"appjob({job['appjobid']}): Cleaning cancelled job condorjob({job['id']})")
             self.dbcondor.updateCondorJob(job["id"], cleandesc)
 
     def process(self):
