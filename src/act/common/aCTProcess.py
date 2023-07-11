@@ -79,27 +79,36 @@ class aCTProcess:
         setproctitle() is used to change the name of the process (from actmain)
         so that the process can be identified properly by the aCTReport.py.
         """
-        if self.cluster:
-            setproctitle(f'{self.name} {self.cluster}')
-            url = urlparse(self.cluster)
-            logname = f'{self.name}-{url.hostname}'
-        else:
-            setproctitle(self.name)
-            logname = self.name
-        self.logger = aCTLogger(logname, cluster=self.cluster)
-        self.criticallogger = aCTLogger('aCTCritical', cluster=self.cluster, arclog=False)
-        self.log = self.logger()
-        self.criticallog = self.criticallogger()
-
+        self.setupLogger(self.name, self.cluster)
         msg = f'Starting process {self.name}'
         if self.cluster:
             msg += f' for cluster {self.cluster}'
+            setproctitle(f'{self.name} {self.cluster}')
+        else:
+            setproctitle(self.name)
         self.log.info(msg)
 
         # ignore SIGINT for use case of running aCT from terminal
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-
         signal.signal(signal.SIGTERM, self.exitHandler)
+
+    def setupLogger(self, name, cluster):
+        """
+        Set up the logger objects.
+
+        This method is meant to be overriden by any process that requires the
+        logging setup for ARC bindings. It is called in the base setup()
+        implementation and should create the self.log and self.criticallog
+        """
+        if cluster:
+            url = urlparse(cluster)
+            logname = f'{name}-{url.hostname}'
+        else:
+            logname = name
+        self.logger = aCTLogger(logname, cluster=cluster, arclog=False)
+        self.criticallogger = aCTLogger('aCTCritical', cluster=cluster, arclog=False)
+        self.log = self.logger()
+        self.criticallog = self.criticallogger()
 
     def loadConf(self):
         """

@@ -11,11 +11,13 @@ import shutil
 import threading
 import time
 from enum import Enum
+from urllib.parse import urlparse
 
 import arc
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
 from act.common import aCTUtils
+from act.common.aCTLogger import aCTLogger
 from act.common.aCTProxy import aCTProxy
 
 
@@ -105,6 +107,18 @@ class aCTValidator(aCTATLASProcess):
         self.heartbeatDownloader = HeartbeatDownloader(self.tmpdir, self.log, self.uc)
 
         self.recoverIntermediateStates()
+
+    def setupLogger(self, name, cluster=None):
+        """Set up the logger objects with ARC binding logging."""
+        if cluster:
+            url = urlparse(cluster)
+            logname = f'{name}-{url.hostname}'
+        else:
+            logname = name
+        self.logger = aCTLogger(logname, cluster=cluster, arclog=True)
+        self.criticallogger = aCTLogger('aCTCritical', cluster=cluster, arclog=False)
+        self.log = self.logger()
+        self.criticallog = self.criticallogger()
 
     def finish(self):
         """Properly handle all threads and job states."""
