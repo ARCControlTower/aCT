@@ -57,7 +57,7 @@ class aCTAutopilot(aCTATLASProcess):
         uc.ProxyPath(self.arcconf.voms.proxypath)
         cred = arc.Credential(uc)
         dn = cred.GetIdentityName()
-        self.log.info("Running under DN %s" % dn)
+        self.log.info(f"Running under DN {dn}")
         # Keep a panda object per proxy. The site "type" maps to a specific
         # proxy role
         self.pandas = {}
@@ -67,10 +67,10 @@ class aCTAutopilot(aCTATLASProcess):
 
         actp = aCTProxy.aCTProxy(self.log)
         for role in self.arcconf.voms.roles:
-            attr = '/atlas/Role='+role
+            attr = f'/atlas/Role={role}'
             proxyid = actp.getProxyId(dn, attr)
             if not proxyid:
-                raise Exception("Proxy with DN "+dn+" and attribute "+attr+" was not found in proxies table")
+                raise Exception(f"Proxy with DN {dn} and attribute {attr} was not found in proxies table")
 
             proxyfile = actp.path(dn, attribute=attr)
             # pilot role is mapped to analysis type
@@ -106,11 +106,12 @@ class aCTAutopilot(aCTATLASProcess):
         self.stopOnFlag()
 
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
-        jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
+        jobs = self.dbpanda.getJobs(f"pandastatus='{pstatus}' and sendhb=1 and ({self.dbpanda.timeStampLessThan('theartbeat', self.conf.panda.heartbeattime)} or modified > theartbeat) limit 1000", columns)
         if not jobs:
             return
 
-        self.log.info("Update heartbeat for %d jobs in state %s (%s)" % (len(jobs), pstatus, ','.join([str(j['pandaid']) for j in jobs])))
+        idstr = ",".join([str(job['pandaid']) for job in jobs])
+        self.log.info(f"Update heartbeat for {len(jobs)} jobs in state {pstatus} ({idstr})")
 
         changed_pstatus = False
         if pstatus == 'sent':
@@ -133,14 +134,14 @@ class aCTAutopilot(aCTATLASProcess):
             # location so logs are available in case of lost heartbeat
             if pstatus == 'starting' and not changed_pstatus and self.sites[j['siteName']]['truepilot']:
                 date = time.strftime('%Y-%m-%d', time.gmtime())
-                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], '%s.out' % j['pandaid']])
-                jd['pilotID'] = '%s|Unknown|Unknown|Unknown|Unknown' % logurl
+                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], f"{j['pandaid']}.out"])
+                jd['pilotID'] = f'{logurl}|Unknown|Unknown|Unknown|Unknown'
             try:
                 corecount = int(j['corecount']) if j['corecount'] > 0 else self.sites[j['siteName']]['corecount']
-                jd['jobMetrics'] = "coreCount=%d" % corecount
+                jd['jobMetrics'] = f"coreCount={corecount}"
                 jd['coreCount'] = corecount
             except:
-                self.log.warning('%s: no corecount available' % j['pandaid'])
+                self.log.warning(f"{j['pandaid']}: no corecount available")
             t=PandaThr(self.getPanda(j['siteName']).updateStatus,j['pandaid'],pstatus,jd)
             tlist.append(t)
 
@@ -170,7 +171,7 @@ class aCTAutopilot(aCTATLASProcess):
             # If panda tells us to kill the job, set actpandastatus to tobekilled
             # and remove from heartbeats
             if 'command' in t.result and ( ("tobekilled" in t.result['command'][0]) or ("badattemptnr" in t.result['command'][0]) ):
-                self.log.info('%s: cancelled by panda' % t.id)
+                self.log.info(f'{t.id}: cancelled by panda')
                 jd['actpandastatus']="tobekilled"
                 jd['pandastatus']=None
             self.dbpanda.updateJob(t.id,jd)
@@ -190,12 +191,13 @@ class aCTAutopilot(aCTATLASProcess):
         self.stopOnFlag()
 
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
-        jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
+        jobs=self.dbpanda.getJobs(f"pandastatus='{pstatus}' and sendhb=1 and ({self.dbpanda.timeStampLessThan('theartbeat', self.conf.panda.heartbeattime)} or modified > theartbeat) limit 1000", columns)
         #jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", 60)+" or modified > theartbeat) limit 1000", columns)
         if not jobs:
             return
 
-        self.log.info("Update heartbeat for %d jobs in state %s (%s)" % (len(jobs), pstatus, ','.join([str(j['pandaid']) for j in jobs])))
+        idstr = ",".join([str(job["pandaid"]) for job in jobs])
+        self.log.info(f"Update heartbeat for {len(jobs)} jobs in state {pstatus} ({idstr})")
 
         changed_pstatus = False
         if pstatus == 'sent':
@@ -219,14 +221,14 @@ class aCTAutopilot(aCTATLASProcess):
             # location so logs are available in case of lost heartbeat
             if pstatus == 'starting' and not changed_pstatus and self.sites[j['siteName']]['truepilot']:
                 date = time.strftime('%Y-%m-%d', time.gmtime())
-                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], '%s.out' % j['pandaid']])
-                jd['pilotID'] = '%s|Unknown|Unknown|Unknown|Unknown' % logurl
+                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], f"{j['pandaid']}.out"])
+                jd['pilotID'] = f'{logurl}|Unknown|Unknown|Unknown|Unknown'
             try:
                 corecount = int(j['corecount']) if j['corecount'] > 0 else self.sites[j['siteName']]['corecount']
-                jd['jobMetrics'] = "coreCount=%d" % corecount
+                jd['jobMetrics'] = f"coreCount={corecount}"
                 jd['coreCount'] = corecount
             except:
-                self.log.warning('%s: no corecount available' % j['pandaid'])
+                self.log.warning(f"{j['pandaid']}: no corecount available")
 
             try:
                 jobsbyproxy[self.sites[j['siteName']]['type']].append(jd)
@@ -248,7 +250,7 @@ class aCTAutopilot(aCTATLASProcess):
                 try:
                     result = parse_qs(response)
                 except Exception:
-                    self.log.error('Could not parse result from panda: %s' % response)
+                    self.log.error(f'Could not parse result from panda: {response}')
                     continue
 
                 if not result.get('StatusCode'):
@@ -258,7 +260,7 @@ class aCTAutopilot(aCTATLASProcess):
                     self.log.error('Failed to contact Panda, proxy may have expired')
                     continue
                 if result.get('command', [''])[0] not in ['', "NULL"]:
-                    self.log.info("%s: response: %s" % (pandaid, result))
+                    self.log.info(f"{pandaid}: response: {result}")
                 jd = {}
                 if changed_pstatus:
                     jd['pandastatus'] = pstatus
@@ -267,7 +269,7 @@ class aCTAutopilot(aCTATLASProcess):
                 # If panda tells us to kill the job, set actpandastatus to tobekilled
                 # and remove from heartbeats
                 if result.get('command', [''])[0] in ["tobekilled", "badattemptnr", "alreadydone"]:
-                    self.log.info('%s: cancelled by panda' % pandaid)
+                    self.log.info(f'{pandaid}: cancelled by panda')
                     jd['actpandastatus'] = "tobekilled"
                     jd['pandastatus'] = None
                 self.dbpanda.updateJob(pandaid, jd)
@@ -292,7 +294,8 @@ class aCTAutopilot(aCTATLASProcess):
         if not jobs:
             return
 
-        self.log.info("Updating panda for %d finished jobs (%s)" % (len(jobs), ','.join([str(j['pandaid']) for j in jobs])))
+        idstr = ",".join([str(job['pandaid']) for job in jobs])
+        self.log.info(f"Updating panda for {len(jobs)} finished jobs ({idstr})")
 
         tlist = []
         for j in jobs:
@@ -322,10 +325,10 @@ class aCTAutopilot(aCTATLASProcess):
             else:
                 try:
                     # Load heartbeat information from pilot
-                    fname = os.path.join(self.tmpdir, "heartbeats", "%d.json" % j['pandaid'])
+                    fname = os.path.join(self.tmpdir, "heartbeats", f"{j['pandaid']}.json")
                     jobinfo = aCTPandaJob(filename=fname)
                 except Exception as x:
-                    self.log.error('%s: %s' % (j['pandaid'], x))
+                    self.log.error(f"{j['pandaid']}: {x}")
                     # Send some basic info back to panda
                     info = {'jobId': j['pandaid'], 'state': j['pandastatus']}
                     jobinfo = aCTPandaJob(jobinfo=info)
@@ -334,7 +337,7 @@ class aCTAutopilot(aCTATLASProcess):
                 else:
                     os.remove(fname)
 
-            self.log.debug('%s: final heartbeat: %s' % (j['pandaid'], jobinfo.dictionary()))
+            self.log.debug(f"{j['pandaid']}: final heartbeat: {jobinfo.dictionary()}")
             t=PandaThr(self.getPanda(j['siteName']).updateStatus,j['pandaid'],j['pandastatus'],jobinfo.dictionary())
             tlist.append(t)
 
@@ -387,7 +390,7 @@ class aCTAutopilot(aCTATLASProcess):
         for j in pjobs:
             if j['jobStatus'] == 'sent' or j['jobStatus'] == 'running' or j['jobStatus'] == 'transferring' or j['jobStatus'] == 'starting' :
                 pjids.append(j['PandaID'])
-        self.log.info("%d" % len(pjids))
+        self.log.info(f"{len(pjids)}")
 
         # try to recover lost jobs (jobs in aCT but not in Panda)
 
@@ -395,7 +398,7 @@ class aCTAutopilot(aCTATLASProcess):
 
         for j in jobs:
             self.stopOnFlag()
-            self.log.info("%d" % j['pandaid'])
+            self.log.info(str(j['pandaid']))
             if j['pandaid'] in pjids:
                 pass
             else:
@@ -409,13 +412,13 @@ class aCTAutopilot(aCTATLASProcess):
         count=0
         for j in pjobs:
             self.stopOnFlag()
-            self.log.debug("checking job %d" % j['PandaID'])
+            self.log.debug(f"checking job {j['PandaID']}")
             job=self.dbpanda.getJob(j['PandaID'])
             if job is None and ( j['pandastatus'] == 'running' or j['pandastatus'] == 'transferring' or j['pandastatus'] == 'starting') :
-                self.log.info("Missing: %d" % j['PandaID'])
+                self.log.info(f"Missing: {j['PandaID']}")
                 count+=1
                 panda.updateStatus(j['PandaID'],'failed')
-        self.log.info("missing jobs: %d removed" % count)
+        self.log.info(f"missing jobs: {count} removed")
 
 
     def updateArchive(self):
@@ -433,10 +436,10 @@ class aCTAutopilot(aCTATLASProcess):
         if not jobs:
             return
 
-        self.log.info('Archiving %d jobs' % len(jobs))
+        self.log.info(f'Archiving {len(jobs)} jobs')
         for job in jobs:
             self.stopOnFlag()
-            self.log.debug('Archiving panda job %d' % job['pandaid'])
+            self.log.debug(f"Archiving panda job {job['pandaid']}")
             # Fill out empty start/end time
             if job['starttime']:
                 if not job['endtime']:

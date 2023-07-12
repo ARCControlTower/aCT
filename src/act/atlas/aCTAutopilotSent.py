@@ -38,7 +38,7 @@ class aCTAutopilotSent(aCTATLASProcess):
         uc.ProxyPath(self.arcconf.voms.proxypath)
         cred = arc.Credential(uc)
         dn = cred.GetIdentityName()
-        self.log.info("Running under DN %s" % dn)
+        self.log.info(f"Running under DN {dn}")
         # Keep a panda object per proxy. The site "type" maps to a specific
         # proxy role
         self.pandas = {}
@@ -48,10 +48,10 @@ class aCTAutopilotSent(aCTATLASProcess):
 
         actp = aCTProxy.aCTProxy(self.log)
         for role in self.arcconf.voms.roles:
-            attr = '/atlas/Role='+role
+            attr = f'/atlas/Role={role}'
             proxyid = actp.getProxyId(dn, attr)
             if not proxyid:
-                raise Exception("Proxy with DN "+dn+" and attribute "+attr+" was not found in proxies table")
+                raise Exception(f"Proxy with DN {dn} and attribute {attr} was not found in proxies table")
 
             proxyfile = actp.path(dn, attribute=attr)
             # pilot role is mapped to analysis type
@@ -84,11 +84,12 @@ class aCTAutopilotSent(aCTATLASProcess):
         """
         nthreads=self.conf.panda.threads
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
-        jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", self.conf.panda.heartbeattime)+" or modified > theartbeat) limit 1000", columns)
+        jobs=self.dbpanda.getJobs(f"pandastatus='{pstatus}' and sendhb=1 and ({self.dbpanda.timeStampLessThan('theartbeat', self.conf.panda.heartbeattime)} or modified > theartbeat) limit 1000", columns)
         if not jobs:
             return
 
-        self.log.info("Update heartbeat for %d jobs in state %s (%s)" % (len(jobs), pstatus, ','.join([str(j['pandaid']) for j in jobs])))
+        idstr = ",".join([str(job['pandaid']) for job in jobs])
+        self.log.info(f"Update heartbeat for {len(jobs)} jobs in state {pstatus} ({idstr})")
 
         changed_pstatus = False
         if pstatus == 'sent':
@@ -111,10 +112,11 @@ class aCTAutopilotSent(aCTATLASProcess):
             # location so logs are available in case of lost heartbeat
             if pstatus == 'starting' and not changed_pstatus and self.sites[j['siteName']]['truepilot']:
                 date = time.strftime('%Y-%m-%d', time.gmtime())
-                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], '%s.out' % j['pandaid']])
-                jd['pilotID'] = '%s|Unknown|Unknown|Unknown|Unknown' % logurl
+                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], f"{j['pandaid']}.out"])
+                jd['pilotID'] = f'{logurl}|Unknown|Unknown|Unknown|Unknown'
             try:
-                jd['jobMetrics']="coreCount=%s" % (j['corecount'] if j['corecount'] > 0 else self.sites[j['siteName']]['corecount'])
+                corecount = j['corecount'] if j['corecount'] > 0 else self.sites[j['siteName']]['corecount']
+                jd['jobMetrics'] = f"coreCount={corecount}"
             except:
                 pass
             t=PandaThr(self.getPanda(j['siteName']).updateStatus,j['pandaid'],pstatus,jd)
@@ -131,7 +133,7 @@ class aCTAutopilotSent(aCTATLASProcess):
                 continue
             #self.log.debug('%s: %s' % (t.id, t.result))
             if 'command' in t.result  and t.result['command'][0] != "NULL":
-                self.log.info("%s: response: %s" % (t.id,t.result) )
+                self.log.info(f"{t.id}: response: {t.result}")
             jd={}
             if changed_pstatus:
                 jd['pandastatus']=pstatus
@@ -147,7 +149,7 @@ class aCTAutopilotSent(aCTATLASProcess):
             # If panda tells us to kill the job, set actpandastatus to tobekilled
             # and remove from heartbeats
             if 'command' in t.result and ( ("tobekilled" in t.result['command'][0]) or ("badattemptnr" in t.result['command'][0]) ):
-                self.log.info('%s: cancelled by panda' % t.id)
+                self.log.info(f'{t.id}: cancelled by panda')
                 jd['actpandastatus']="tobekilled"
                 jd['pandastatus']=None
             self.dbpanda.updateJob(t.id,jd)
