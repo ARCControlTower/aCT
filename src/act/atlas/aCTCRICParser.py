@@ -45,7 +45,7 @@ class aCTCRICParser:
             siteinfo['enabled'] = True
             sites[sitename] = siteinfo
 
-        self.log.info("Parsed sites from config: %s" % str(list(sites.keys())))
+        self.log.info(f"Parsed sites from config: {sites.keys()}")
         return sites
 
     def _parseCRICJson(self, cricfilename, pilotmgr, pilotver):
@@ -72,7 +72,7 @@ class aCTCRICParser:
             for queue in siteinfo['queues']:
                 if queue.get('ce_state') != 'ACTIVE':
                     if siteinfo['enabled']:
-                        self.log.info('Skipping inactive CE %s' % queue.get('ce_endpoint'))
+                        self.log.info(f"Skipping inactive CE {queue.get('ce endpoint')}")
                     continue
                 if queue['ce_flavour'] == 'CREAM-CE':
                     endpoints.append('cream %s/ce-cream/services/CREAM2 %s %s' % (queue['ce_endpoint'], queue['ce_jobmanager'], queue['ce_queue_name']))
@@ -82,7 +82,7 @@ class aCTCRICParser:
                     endpoints.append('%s/%s' % (queue['ce_endpoint'], queue['ce_queue_name']))
                 else:
                     if siteinfo['enabled']:
-                        self.log.warning('Cannot use CE flavour %s for queue %s' % (queue['ce_flavour'], sitename))
+                        self.log.warning(f"Cannot use CE flavour {queue['ce flavour']} for queue {sitename}")
             # Ignore endpoints with "default" queue unless that is the only queue
             nondefaultendpoints = [e for e in endpoints if not e.endswith(' default')]
             if not nondefaultendpoints:
@@ -113,9 +113,9 @@ class aCTCRICParser:
             siteinfo['truepilot'] = truepilot
 
         if len(sites) < 100:
-            self.log.info("Parsed sites from CRIC: %s" % str(list(sites.keys())))
+            self.log.info(f"Parsed sites from CRIC: {sites.keys()}")
         else:
-            self.log.info("Parsed %d sites from CRIC" % len(sites))
+            self.log.info(f"Parsed {len(sites)} sites from CRIC")
         return sites
 
     def _mergeSiteDicts(self, dict1, dict2):
@@ -163,9 +163,10 @@ class aCTCRICParser:
                 if not info['enabled']:
                     continue
                 if not info.get('endpoints') and info.get('status') != 'offline':
-                    self.log.warning("%s: No CE endpoints defined, no jobs can be submitted" % site)
+                    self.log.warning(f"{site}: No CE endpoints defined, no jobs can be submitted")
                 else:
-                    self.log.info("%s (%s): %s (%s), maxjobs %d" % (site, info['status'], 'True pilot' if info['truepilot'] else 'ARC pilot', info['flavour'], info['maxjobs']))
+                    pilotType = 'True pilot' if info['truepilot'] else 'ARC pilot'
+                    self.log.info(f"{site} ({info['status']}): {pilotType} ({info['flavour']}), maxjobs {info['maxjobs']}")
 
         if flavour:
             return dict((k,v) for (k,v) in self.sites.items() if v.get('flavour') in flavour)

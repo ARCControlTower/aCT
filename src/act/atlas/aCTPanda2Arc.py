@@ -30,13 +30,13 @@ class aCTPanda2Arc(aCTATLASProcess):
 
             parser = aCTPanda2Xrsl(job, self.sites[job['siteName']], self.tmpdir, self.conf, self.log)
 
-            self.log.info("site %s maxwalltime %s", job['siteName'],self.sites[job['siteName']]['maxwalltime'] )
+            self.log.info(f"site {job['siteName']} maxwalltime {self.sites[job['siteName']]['maxwalltime']}")
 
             try:
                 parser.parse()
             except Exception as e:
                 # try again later
-                self.log.error('%s: Cant handle job description: %s' % (job['pandaid'], str(e)))
+                self.log.error(f"appjob({job['pandaid']}): Cant handle job description: {e}")
                 self.log.error(traceback.format_exc())
                 continue
             self.sendTraces(parser.traces, proxies_map[job['proxyid']])
@@ -47,7 +47,7 @@ class aCTPanda2Arc(aCTATLASProcess):
             if xrsl is not None:
                 endpoints = self.sites[job['siteName']]['endpoints']
                 if not endpoints: # No CEs, try later
-                    self.log.warning("%d: Cannot submit to %s because no CEs available" % (job['pandaid'], job['siteName']))
+                    self.log.warning(f"appjob({job['pandaid']}): Cannot submit to {job['siteName']} because no CEs available")
                     continue
                 cl = []
                 for e in endpoints:
@@ -56,7 +56,7 @@ class aCTPanda2Arc(aCTATLASProcess):
                         e = 'gsiftp://' + e
                     cl.append(e)
                 cls = ",".join(cl)
-                self.log.info("Inserting job %i with clusterlist %s" % (job['pandaid'], cls))
+                self.log.info(f"Inserting appjob({job['pandaid']}) with clusterlist {cls}")
                 maxattempts = 5
                 if self.sites[job['siteName']]['truepilot']:
                     # truepilot jobs should never be resubmitted
@@ -76,7 +76,7 @@ class aCTPanda2Arc(aCTATLASProcess):
                                                         proxyid=job['proxyid'], appjobid=str(job['pandaid']),
                                                         downloadfiles=downloadfiles, fairshare=job['siteName'])
                 if not aid:
-                    self.log.error("%s: Failed to insert arc job description: %s" % (job['pandaid'], xrsl))
+                    self.log.error(f"appjob({job['pandaid']}): Failed to insert arc job description: {xrsl}")
                     continue
 
                 jd = {}
@@ -94,7 +94,7 @@ class aCTPanda2Arc(aCTATLASProcess):
                     os.makedirs(logdir, 0o755, exist_ok=True)
                     jdlfile = os.path.join(logdir, '%s.jdl' % job['pandaid'])
                     with open(jdlfile, 'w') as f:
-                        self.log.debug('Wrote description to %s' % jdlfile)
+                        self.log.debug(f'Wrote description to {jdlfile}')
                         f.write(xrsl)
 
     def process(self):
@@ -115,7 +115,7 @@ class aCTPanda2Arc(aCTATLASProcess):
                 # send further requests
                 resp.read()
                 if resp.status != 201:
-                    self.log.error(f"Error sending trace: {resp.staus} : {resp.reason}")
+                    self.log.error(f"Error sending trace: {resp.staus}: {resp.reason}")
             client.close()
         except Exception as error:
             self.log.error(f"Error sending trace: {error}")

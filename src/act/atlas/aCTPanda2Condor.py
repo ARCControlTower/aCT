@@ -32,7 +32,7 @@ class aCTPanda2Condor(aCTATLASProcess):
             parser = aCTPanda2ClassAd(job['pandajob'], job['id'], job['siteName'], self.sites[job['siteName']], proxies_map[job['proxyid']],
                                    self.tmpdir, self.conf, job['metadata'].decode(), self.log)
 
-            self.log.info("site %s maxwalltime %s", job['siteName'],self.sites[job['siteName']]['maxwalltime'] )
+            self.log.info(f"site {job['siteName']} maxwalltime {self.sites[job['siteName']]['maxwalltime']}")
 
             parser.parse()
 
@@ -42,15 +42,15 @@ class aCTPanda2Condor(aCTATLASProcess):
                 pass
             if classad is not None:
                 endpoints = ','.join(self.sites[job['siteName']]['endpoints'])
-                self.log.info("Inserting job %d with clusterlist %s" % (job['pandaid'], endpoints))
-                self.log.debug("%d: classad: %s" % (job['pandaid'], classad))
+                self.log.info(f"Inserting appjob({job['pandaid']}) with clusterlist {endpoints}")
+                self.log.debug(f"appjob({job['pandaid']}): classad: {classad}")
                 maxattempts = 0 # Never resubmit condor jobs
 
                 aid = self.dbcondor.insertCondorJobDescription(classad, maxattempts=maxattempts, clusterlist=endpoints,
                                                             proxyid=job['proxyid'], appjobid=str(job['pandaid']),
                                                             fairshare=job['siteName'])
                 if not aid:
-                    self.log.error("%d: Failed to insert condor job description: %s" % (job['pandaid'], classad))
+                    self.log.error(f"appjob({job['pandaid']}): Failed to insert condor job description: {classad}")
                     continue
 
                 jd = {}
@@ -70,7 +70,7 @@ class aCTPanda2Condor(aCTATLASProcess):
                     jdlfile = os.path.join(logdir, '%s.jdl' % job['pandaid'])
                     with open(jdlfile, 'w') as f:
                         f.write('\n'.join(['%s = %s' % (k,v) for (k,v) in classad.items()]))
-                        self.log.debug('Wrote description to %s' % jdlfile)
+                        self.log.debug(f'Wrote description to {jdlfile}')
 
     def process(self):
         self.setSites()

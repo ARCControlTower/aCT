@@ -78,14 +78,14 @@ class aCTClient2Arc(aCTProcess):
                     ';'.join(downloads)
                 )
             except:
-                self.log.exception(f'Error inserting job {job["id"]} to arc table')
+                self.log.exception(f'Error inserting appjob({job["id"]}) to arc table')
             else:
                 # create a reference to job in client table
                 self.clidb.updateJob(job['id'], {
                     'arcjobid': row['LAST_INSERT_ID()'],
                     'modified': self.clidb.getTimeStamp()
                 })
-                self.log.info(f'Successfully inserted job {job["id"]} {row["LAST_INSERT_ID()"]} to ARC engine')
+                self.log.info(f'Successfully inserted appjob({job["id"]}) {row["LAST_INSERT_ID()"]} to ARC engine')
 
         res = self.arcdb.db.releaseMutexLock('nulljobs')
         if not res:

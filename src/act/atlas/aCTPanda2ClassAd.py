@@ -81,7 +81,7 @@ class aCTPanda2ClassAd:
             disk += sum([int(f) for f in self.jobdesc['fsize'][0].split(',')]) / 1000000
         # Add safety factor
         disk += 2000
-        self.log.debug('%s: disk space %d' % (self.pandaid, disk))
+        self.log.debug(f'appjob({self.pandaid}): disk space {disk}')
         self.classad['RequestDisk'] = str(disk * 1024) # number in KiB
 
     def setTime(self):
@@ -89,10 +89,10 @@ class aCTPanda2ClassAd:
         if 'maxCpuCount' in self.jobdesc:
             cpucount = int(self.jobdesc['maxCpuCount'][0])
             cpucount = int(2 * cpucount)
-            self.log.info('%s: job maxCpuCount %s' % (self.pandaid, cpucount))
+            self.log.info(f'appjob({self.pandaid}): job maxCpuCount {cpucount}')
         else:
             cpucount = self.defaults['cputime']
-            self.log.info('%s: Using default maxCpuCount %s' % (self.pandaid, cpucount))
+            self.log.info(f'appjob({self.pandaid}): Using default maxCpuCount {cpucount}')
 
         if cpucount == 0:
             cpucount = self.defaults['cputime']
@@ -106,7 +106,7 @@ class aCTPanda2ClassAd:
 
         self.walltime = walltime
         cputime = self.getNCores() * walltime
-        self.log.info('%s: walltime: %ds, cputime: %ds' % (self.pandaid, walltime, cputime))
+        self.log.info(f'appjob({self.pandaid}): walltime: {walltime}s, cputime: {cputime}s')
 
         # CERN uses MaxRunTime (seconds)
         self.classad['+MaxRuntime'] = str(walltime)

@@ -40,7 +40,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
         uc.ProxyPath(self.arcconf.voms.proxypath)
         cred = arc.Credential(uc)
         dn = cred.GetIdentityName()
-        self.log.info("Running under DN %s" % dn)
+        self.log.info(f"Running under DN {dn}")
         # Keep a panda object per proxy. The site "type" maps to a specific
         # proxy role
         self.pandas = {}
@@ -92,7 +92,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
         if queueinfo:
             for site in [k for k,v in self.sites.items() if v['enabled']]:
                 if site not in queueinfo:
-                    self.log.debug("%s: no jobs" % site)
+                    self.log.debug(f"{site}: no jobs")
                     self.activated[site] = {'rc_test': 0, 'rest': 0}
                     continue
                 n_rc_test = 0
@@ -105,7 +105,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
                             n_rest += jobs['activated']
 
                 self.activated[site] = {'rc_test': n_rc_test, 'rest': n_rest}
-                self.log.debug('%s: activated rc_test %d, rest %d' % (site, n_rc_test, n_rest))
+                self.log.debug(f'{site}: activated rc_test {n_rc_test}, rest {n_rest}')
 
     def getPanda(self, sitename):
         return self.pandas.get(self.sites[sitename]['type'], self.pandas.get('production'))
@@ -135,12 +135,12 @@ class aCTPandaGetJobs(aCTATLASProcess):
                 continue
 
             if (not self.getjob) and site in self.activated and sum([x for x in self.activated[site].values()]) == 0:
-                self.log.info("Site %s: No activated jobs" % site)
+                self.log.info(f"Site {site}: No activated jobs")
                 continue
 
             prodsourcelabel = None
             if attrs['status'] == 'test' and attrs['type'] in ['production', 'unified']:
-                self.log.info("Site %s is in test, will set prodSourceLabel to prod_test" % site)
+                self.log.info(f"Site {site} is in test, will set prodSourceLabel to prod_test")
                 prodsourcelabel = 'prod_test'
             elif attrs['type'] == 'unified':
                 prodsourcelabel = 'unified'
@@ -151,16 +151,16 @@ class aCTPandaGetJobs(aCTATLASProcess):
             # Get total number of active jobs
             nall = self.dbpanda.getNJobs("siteName='%s' and actpandastatus!='done' \
                                           and actpandastatus!='donefailed' and actpandastatus!='donecancelled'" % site)
-            self.log.info("Site %s: %i jobs in sent, %i total" % (site, nsubmitting, nall))
+            self.log.info(f"Site {site}: {nsubmitting} jobs in sent, {nall} total")
 
             # Limit number of jobs waiting submission to avoid getting too many
             # jobs from Panda
             if nsubmitting > self.conf.panda.minjobs:
-                self.log.info("Site %s: at limit of sent jobs" % site)
+                self.log.info(f"Site {site}: at limit of sent jobs")
                 continue
 
             if nall >= self.sites[site]['maxjobs']:
-                self.log.info("Site %s: at or above max job limit of %d" % (site, self.sites[site]['maxjobs']))
+                self.log.info(f"Site {site}: at or above max job limit of {self.sites[site]['maxjobs']}")
                 continue
 
             nthreads = min(self.conf.panda.threads, self.sites[site]['maxjobs'] - nall)
@@ -184,13 +184,13 @@ class aCTPandaGetJobs(aCTATLASProcess):
                         t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='ptest')
                     elif r.randint(0,100) <= 2:
                         if (not self.getjob) and site in self.activated and self.activated[site]['rc_test'] == 0:
-                            self.log.debug('%s: No rc_test activated jobs' % site)
+                            self.log.debug(f'{site}: No rc_test activated jobs')
                             continue
                         else:
                             t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='rc_test', push=attrs['push'])
                     else:
                         if (not self.getjob) and site in self.activated and self.activated[site]['rest'] == 0:
-                            self.log.debug('%s: No activated jobs' % site)
+                            self.log.debug(f'{site}: No activated jobs')
                             continue
                         elif attrs['type'] == "analysis":
                             t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='user', push=attrs['push'])
@@ -200,7 +200,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
                     t.start()
                     nall += 1
                     if nall >= self.sites[site]['maxjobs']:
-                        self.log.info("Site %s: reached max job limit of %d" % (site, self.sites[site]['maxjobs']))
+                        self.log.info(f"Site {site}: reached max job limit of {self.sites[site]['maxjobs']}")
                         stopflag = True
                         break
 
@@ -225,7 +225,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
                         try:
                             n['corecount'] = int(re.search(r'coreCount=(\d+)', pandajob).group(1))
                         except:
-                            self.log.warning('%s: no corecount in job description' % pandaid)
+                            self.log.warning(f'appjob({pandaid}): no corecount in job description')
                     n['sendhb'] = attrs['push']
                     if pandaid == 0:
                         # Pull mode: set dummy arcjobid and condorjobid to avoid
@@ -266,7 +266,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
         # request new jobs
         num = self.getJobs(int(self.conf.panda.getjobs))
         if num:
-            self.log.info("Got %i jobs" % num)
+            self.log.info(f"Got {num} jobs")
         self.getjob = False
 
 if __name__ == '__main__':

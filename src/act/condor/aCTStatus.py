@@ -95,24 +95,24 @@ class aCTStatus(aCTCondorProcess):
                 jobstatus = updatedjob['JobStatus']
             except KeyError:
                 # If not in the queue, look in history for finished jobs
-                self.log.debug(f'{appjobid}: Job not in condor queue, checking history')
+                self.log.debug(f'appjob({appjobid}): Job not in condor queue, checking history')
                 history = self.schedd.history(f'ClusterID=?={clusterid}', qattrs, 1)
                 try:
                     hist = next(history)
                 except StopIteration:
-                    self.log.warning(f'{appjobid}: Job id {clusterid} not found!')
+                    self.log.warning(f'appjob({appjobid}): Job id condorid({clusterid}) not found!')
                     continue
                 except RuntimeError as e: # Usually a timeout connecting to remote host
-                    self.log.error(f'{appjobid}: Problem getting history: {e}')
+                    self.log.error(f'appjob({appjobid}): Problem getting history: {e}')
                     continue
                 updatedjob = hist
                 jobstatus = updatedjob['JobStatus']
 
-            self.log.debug(f'{appjobid}: Job {clusterid}: Status {jobstatus} ({CONDOR_STATE_MAP[jobstatus]})')
+            self.log.debug(f'appjob({appjobid}): Job condorid({clusterid}): Status {jobstatus} ({CONDOR_STATE_MAP[jobstatus]})')
 
             if jobstatus == 1 and 'GridResourceUnavailableTime' in updatedjob:
                 # Job could not be submitted due to remote CE being down
-                self.log.warning(f'{appjobid}: Could not submit to remote CE, will retry')
+                self.log.warning(f'appjob({appjobid}): Could not submit to remote CE, will retry')
                 jobdesc = {}
                 jobdesc['condorstate'] = 'toresubmit'
                 jobdesc['JobStatus'] = 0
@@ -126,7 +126,7 @@ class aCTStatus(aCTCondorProcess):
                 self.db.updateCondorJob(job['id'], {'tcondorstate': self.db.getTimeStamp()})
                 continue
 
-            self.log.info(f"{appjobid}: Job {clusterid}: {CONDOR_STATE_MAP[oldstatus]} -> {CONDOR_STATE_MAP[jobstatus]}")
+            self.log.info(f"appjob({appjobid}): Job condorid({clusterid}): {CONDOR_STATE_MAP[oldstatus]} -> {CONDOR_STATE_MAP[jobstatus]}")
 
             # state changed, update condorstate
             condorstate = 'submitted'
@@ -174,13 +174,13 @@ class aCTStatus(aCTCondorProcess):
         for job in jobs:
             self.stopOnFlag()
             if job['condorstate'] == 'cancelling':
-                self.log.warning(f"{job['appjobid']}: Job {job['ClusterId']} lost from information system, marking as cancelled")
+                self.log.warning(f"appjob({job['appjobid']}): Job condorid({job['ClusterId']}) lost from information system, marking as cancelled")
                 self.db.updateCondorJob(
                     job['id'],
                     {'condorstate': 'cancelled', 'tcondorstate': self.db.getTimeStamp()}
                 )
             else:
-                self.log.warning(f"{job['appjobid']}: Job {job['ClusterId']} lost from information system, marking as lost")
+                self.log.warning(f"appjob({job['appjobid']}): Job condorid({job['ClusterId']}) lost from information system, marking as lost")
                 self.db.updateCondorJob(
                     job['id'],
                     {'condorstate': 'lost', 'tcondorstate': self.db.getTimeStamp()}
@@ -210,14 +210,14 @@ class aCTStatus(aCTCondorProcess):
                 self.stopOnFlag()
                 if job['condorstate'] == 'toclean' or job['condorstate'] == 'cancelling':
                     # mark as cancelled jobs stuck in toclean/cancelling
-                    self.log.info(f"{job['appjobid']}: Job stuck in toclean/cancelling for too long, marking cancelled")
+                    self.log.info(f"appjob({job['appjobid']}): Job stuck in toclean/cancelling for too long, marking cancelled")
                     self.db.updateCondorJob(
                         job['id'],
                         {'condorstate': 'cancelled', 'tcondorstate': self.db.getTimeStamp(), 'tstate': self.db.getTimeStamp()}
                     )
                     continue
 
-                self.log.warning(f"{job['appjobid']}: Job {job['ClusterId']} too long in state {jobstate}, cancelling")
+                self.log.warning(f"appjob({job['appjobid']}): Job condorid({job['ClusterId']}) too long in state {jobstate}, cancelling")
                 if job['ClusterId']:
                     # If jobid is defined, cancel
                     self.db.updateCondorJob(

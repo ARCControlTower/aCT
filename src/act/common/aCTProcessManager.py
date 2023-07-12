@@ -157,7 +157,7 @@ class aCTProcessManager:
         try:
             mod = importlib.import_module(module)
         except Exception as exc:
-            self.log.debug(f'Error loading module {module}: {exc}')
+            self.log.error(f'Error loading module {module}: {exc}')
             return
         typeList = mod.processes.get(procType, {})
 
@@ -169,19 +169,19 @@ class aCTProcessManager:
                 continue
             # create process if it doesn't exist
             elif procName not in clusterProcs:
-                self.log.debug(f'Starting process {procName} for cluster {cluster}')
+                self.log.info(f'Starting process {procName} for cluster {cluster}')
 
                 # try for hardening
                 try:
                     clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
                     clusterProcs[procName].start()
                 except Exception as exc:
-                    self.log.debug(f'Error starting process {procName} for cluster {cluster}: {exc}')
+                    self.log.error(f'Error starting process {procName} for cluster {cluster}: {exc}')
                     continue
 
             # close not alive process and create new one
             elif not clusterProcs[procName].is_alive():
-                self.log.debug(f'Process {procName} for cluster {cluster} not alive, restarting')
+                self.log.info(f'Process {procName} for cluster {cluster} not alive, restarting')
                 # only available from Python 3.7
                 #clusterProcs[procName].close()
 
@@ -190,15 +190,15 @@ class aCTProcessManager:
                     clusterProcs[procName] = multiprocessing.Process(target=procClass(cluster))
                     clusterProcs[procName].start()
                 except Exception as exc:
-                    self.log.debug(f'Error starting process {procName} for cluster {cluster}: {exc}')
+                    self.log.error(f'Error starting process {procName} for cluster {cluster}: {exc}')
                     continue
 
             # try for hardening
             try:
                 if clusterProcs[procName].is_alive():
-                    self.log.debug(f'Process {procName} running for cluster {cluster}')
+                    self.log.info(f'Process {procName} running for cluster {cluster}')
             except Exception as exc:
-                self.log.debug(f'Error checking if {procName} is running for cluster {cluster}: {exc}')
+                self.log.error(f'Error checking if {procName} is running for cluster {cluster}: {exc}')
 
     def startSingleProcs(self, module):
         """Start all enabled single processes for a given module."""
@@ -209,7 +209,7 @@ class aCTProcessManager:
         try:
             mod = importlib.import_module(module)
         except Exception as exc:
-            self.log.debug(f'Error loading module {module}: {exc}')
+            self.log.error(f'Error loading module {module}: {exc}')
             return
         singleList = mod.processes.get('single', {})
 
@@ -221,19 +221,19 @@ class aCTProcessManager:
                 continue
             # create process if it doesn't exist
             if procName not in singleProcs:
-                self.log.debug(f'Starting process {procName}')
+                self.log.info(f'Starting process {procName}')
 
                 # try for hardening
                 try:
                     singleProcs[procName] = multiprocessing.Process(target=procClass())
                     singleProcs[procName].start()
                 except Exception as exc:
-                    self.log.debug(f'Error starting process {procName}: {exc}')
+                    self.log.error(f'Error starting process {procName}: {exc}')
                     continue
 
             # close not alive process and create new one
             elif not singleProcs[procName].is_alive():
-                self.log.debug(f'Process {procName} not alive, restarting')
+                self.log.info(f'Process {procName} not alive, restarting')
                 # only available from Python 3.7
                 #singleProcs[procName].close()
 
@@ -242,15 +242,15 @@ class aCTProcessManager:
                     singleProcs[procName] = multiprocessing.Process(target=procClass())
                     singleProcs[procName].start()
                 except Exception as exc:
-                    self.log.debug(f'Error starting process {procName}: {exc}')
+                    self.log.error(f'Error starting process {procName}: {exc}')
                     continue
 
             # try for hardening
             try:
                 if singleProcs[procName].is_alive():
-                    self.log.debug(f'Process {procName} running')
+                    self.log.info(f'Process {procName} running')
             except Exception as exc:
-                self.log.debug(f'Error checking if {procName} is running: {exc}')
+                self.log.error(f'Error checking if {procName} is running: {exc}')
 
     # TODO: would it be cleaner to have a method for stopping a single process?
     def stopProcs(self, procs):
@@ -269,7 +269,7 @@ class aCTProcessManager:
             try:
                 proc.terminate()
             except Exception as exc:
-                self.log.debug(f'Failed to terminate process {proc.name}: {exc}')
+                self.log.error(f'Failed to terminate process {proc.name}: {exc}')
 
             self.terminating.append((proc, now))
 
@@ -298,7 +298,7 @@ class aCTProcessManager:
                     self.killing.append((proc, now))
                     self.terminating.pop(i)
             except Exception as exc:
-                self.log.debug(f'Failed to check if process {proc.name} is running: {exc}')
+                self.log.error(f'Failed to check if process {proc.name} is running: {exc}')
                 self.killing.append((proc, now))
                 self.terminating.pop(i)
 
@@ -330,7 +330,7 @@ class aCTProcessManager:
                     # Could potentially lead to accumulation of alive processes.
                     pass
             except Exception as exc:
-                self.log.debug(f'Failed to check if process {proc.name} is running: {exc}')
+                self.log.error(f'Failed to check if process {proc.name} is running: {exc}')
 
     def updateClusterProcs(self, module):
         """
@@ -355,7 +355,7 @@ class aCTProcessManager:
         submitProcs = moduleProcs.get('submitter', {})
         for cluster, submitters in submitProcs.items():
             if submitters and cluster not in requestedClusters:
-                self.log.debug(f'Cluster {cluster} not requested anymore, stopping {", ".join(submitters.keys())}')
+                self.log.info(f'Cluster {cluster} not requested anymore, stopping {", ".join(submitters.keys())}')
                 self.stopProcs(submitters.values())
                 submitProcs[cluster].clear()
 
@@ -363,7 +363,7 @@ class aCTProcessManager:
         clusterProcs = moduleProcs.get('cluster', {})
         for cluster, managers in clusterProcs.items():
             if managers and cluster not in activeClusters:
-                self.log.debug(f'Cluster {cluster} not active anymore, stopping {", ".join(managers.keys())}')
+                self.log.info(f'Cluster {cluster} not active anymore, stopping {", ".join(managers.keys())}')
                 self.stopProcs(managers.values())
                 clusterProcs[cluster].clear()
 
@@ -381,7 +381,7 @@ class aCTProcessManager:
         singleProcs = self.processes.get(module, {}).get('single', {})
         for procName in list(singleProcs):
             if procName in self.appconf.get('disabledProcs', {}).get(module, {}).get('single', []):
-                self.log.debug(f'Single process {procName} disabled, stopping')
+                self.log.info(f'Single process {procName} disabled, stopping')
                 self.stopProcs([singleProcs[procName]])
                 del singleProcs[procName]
 
@@ -414,13 +414,13 @@ class aCTProcessManager:
             try:
                 proc.join()
             except Exception as exc:
-                self.log.debug(f'Failed to wait for stopped process {proc.name}')
+                self.log.error(f'Failed to wait for stopped process {proc.name}: {exc}')
         for proc, _ in self.killing:
             # try for hardening
             try:
                 proc.join()
             except Exception as exc:
-                self.log.debug(f'Failed to wait for killed process {proc.name}')
+                self.log.error(f'Failed to wait for killed process {proc.name}: {exc}')
 
     def reconnectDB(self):
         """Reconnect database connections."""

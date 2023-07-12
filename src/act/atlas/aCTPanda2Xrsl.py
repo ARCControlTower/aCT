@@ -55,7 +55,7 @@ class aCTPanda2Xrsl:
             rint = random.randrange(100)
             if rint == 0 :
                 self.piloturl = atlasconf.executable.p3tarurlrcp
-                self.log.info('%s: using pilotcode %s' % (self.pandaid, self.piloturl ))
+                self.log.info(f'appjob({self.pandaid}): using pilotcode {self.piloturl}')
 
         self.tmpdir = tmpdir
         self.inputfiledir = os.path.join(self.tmpdir, 'inputfiles')
@@ -105,7 +105,7 @@ class aCTPanda2Xrsl:
         #    disk += sum([int(f) for f in self.jobdesc['fsize'][0].split(',')]) // 1000000
         # Add safety factor
         disk += 2000
-        self.log.debug('%s: disk space %d' % (self.pandaid, disk))
+        self.log.debug(f'appjob({self.pandaid}): disk space {disk}')
         self.xrsl['disk'] = "(disk = %d)" % disk
 
     def setTime(self):
@@ -117,10 +117,10 @@ class aCTPanda2Xrsl:
             if cpucount == 600:
                 cpucount = 24*3600
 
-            self.log.info('%s: job maxCpuCount %d' % (self.pandaid, cpucount))
+            self.log.info(f'appjob({self.pandaid}): job maxCpuCount {cpucount}')
         else:
             cpucount = self.defaults['cputime']
-            self.log.info('%s: Using default maxCpuCount %d' % (self.pandaid, cpucount))
+            self.log.info(f'appjob({self.pandaid}): Using default maxCpuCount {cpucount}')
 
         if cpucount <= 0:
             cpucount = self.defaults['cputime']
@@ -158,7 +158,7 @@ class aCTPanda2Xrsl:
                 walltime = min(240, walltime)
             cputime = walltime
 
-        self.log.info('%s: walltime: %d, cputime: %d, maxtime: %d' % (self.pandaid, walltime, cputime, self.maxwalltime))
+        self.log.info(f'appjob({self.pandaid}): walltime: {walltime}, cputime: {cputime}, maxtime: {self.maxwalltime}')
 
         self.xrsl['time'] = '(walltime=%d)(cputime=%d)' % (walltime, cputime)
 

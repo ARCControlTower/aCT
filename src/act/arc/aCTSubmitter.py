@@ -192,15 +192,15 @@ class aCTSubmitter(aCTARCProcess):
                     for error in result:
                         if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError, MatchmakingError):
                             jobdict["arcstate"] = "cancelled"
-                            self.log.debug(f"Error submitting job {job['appjobid']}: {error}")
+                            self.log.error(f"Error submitting appjob({job['appjobid']}): {error}")
                             break
                         elif isinstance(error, InputUploadError):
                             jobdict["arcstate"] = "tocancel"
                             jobdict["cluster"] = self.cluster
                             jobdict["IDFromEndpoint"] = error.jobid
                             for exc in error.errors:
-                                self.log.debug(f"Error uploading input files for job {job['appjobid']}: {exc}")
-                            self.log.debug(f"Cancelling job {job['appjobid']} due to upload errors")
+                                self.log.error(f"Error uploading input files for appjob({job['appjobid']}): {exc}")
+                            self.log.info(f"Cancelling appjob({job['appjobid']}) due to upload errors")
                             break
                         # Errors covered in else branch are not a reason to
                         # cancel the job which is why else does not break from
@@ -213,7 +213,7 @@ class aCTSubmitter(aCTARCProcess):
                         # worth the effort.
                         else:
                             jobdict["arcstate"] = "tosubmit"
-                            self.log.debug(f"Error submitting job {job['appjobid']}: {error}")
+                            self.log.error(f"Error submitting appjob({job['appjobid']}): {error}")
                 else:
                     jobid, state = result
                     jobdict["arcstate"] = "submitted"
@@ -233,7 +233,7 @@ class aCTSubmitter(aCTARCProcess):
                     path = arcrest.apiPath
                     jobdict["JobID"] = f"https://{host}{path}/jobs/{jobid}"
                     jobdict["State"] = ARC_STATE_MAPPING[state]
-                    self.log.debug(f"Submission successfull for job {job['appjobid']}: {jobid}")
+                    self.log.info(f"Submission successfull for appjob({job['appjobid']}): {jobid}")
 
                 jobdict["tarcstate"] = tstamp
                 self.db.updateArcJob(job["id"], jobdict)
@@ -263,7 +263,7 @@ class aCTSubmitter(aCTARCProcess):
             # TODO: HARDCODED
             if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
                 self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
-                self.log.debug(f"Cancelling job {job['appjobid']} for being too long in tosubmit")
+                self.log.warning(f"Cancelling appjob({job['appjobid']}) for being too long in tosubmit")
 
     def processToCancel(self):
         """
@@ -289,7 +289,7 @@ class aCTSubmitter(aCTARCProcess):
         for job in jobstocancel:
             if job["tarcstate"] + limit < now:
                 self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                self.log.debug(f"Could not cancel job {job['appjobid']} in time, setting to cancelled")
+                self.log.warning(f"Could not cancel appjob({job['appjobid']}) in time, setting to cancelled")
             else:
                 tocancel.append(job)
 
@@ -342,18 +342,18 @@ class aCTSubmitter(aCTARCProcess):
                 if isinstance(result, ARCHTTPError):
                     state = "cancelled"
                     if result.status == 404:
-                        self.log.error(f"Job {job['appjobid']} missing in ARC, setting to cancelled")
+                        self.log.warning(f"appjob({job['appjobid']}) missing in ARC, setting to cancelled")
                     else:
-                        self.log.error(f"Error killing job {job['appjobid']}: {result.status} {result.text}")
+                        self.log.error(f"Error killing appjob({job['appjobid']}): {result.status} {result.text}")
                 else:
                     state = "cancelling"
-                    self.log.debug(f"ARC will cancel job {job['appjobid']}")
+                    self.log.info(f"ARC will cancel appjob({job['appjobid']})")
                 self.db.updateArcJob(job["id"], {"arcstate": state, "tarcstate": tstamp})
 
             # update DB for jobs not in ARC
             for job in cancelled:
                 self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                self.log.debug(f"Job {job['appjobid']} not in ARC, setting to cancelled directly")
+                self.log.info(f"appjob({job['appjobid']}) not in ARC, setting to cancelled directly")
 
     def processToResubmit(self):
         """
@@ -384,7 +384,7 @@ class aCTSubmitter(aCTARCProcess):
         for job in jobstoresubmit:
             if job["tarcstate"] + limit < now:
                 self.db.updateArcJob(job["id"], {"arcstate": "failed", "tarcstate": tstamp, "attemptsleft": 0})
-                self.log.debug(f"Could not resubmit job {job['appjobid']} in time, setting to failed")
+                self.log.warning(f"Could not resubmit appjob({job['appjobid']}) in time, setting to failed")
             else:
                 toresubmit.append(job)
 
@@ -428,9 +428,9 @@ class aCTSubmitter(aCTARCProcess):
             # log results
             for job, result in zip(toARCClean, results):
                 if isinstance(result, ARCHTTPError):
-                    self.log.error(f"Error cleaning job {job['appjobid']}: {result.status} {result.text}")
+                    self.log.error(f"Error cleaning appjob({job['appjobid']}): {result.status} {result.text}")
                 else:
-                    self.log.debug(f"Successfully cleaned job {job['appjobid']}")
+                    self.log.info(f"Successfully cleaned appjob({job['appjobid']})")
 
             tstamp = self.db.getTimeStamp()
 
@@ -467,7 +467,7 @@ class aCTSubmitter(aCTARCProcess):
         for job in jobstorerun:
             if job["tarcstate"] + limit < now:
                 self.db.updateArcJob(job["id"], {"arcstate": "failed", "tarcstate": tstamp})
-                self.log.debug(f"Could not restart job {job['appjobid']} in time, setting to failed")
+                self.log.warning(f"Could not restart appjob({job['appjobid']}) in time, setting to failed")
             else:
                 torerun.append(job)
 
@@ -503,9 +503,9 @@ class aCTSubmitter(aCTARCProcess):
             renewed = set()  # performance and duplicate prevention
             for job, result in zip(dbjobs, results):
                 if isinstance(result, ARCHTTPError):
-                    self.log.error(f"Error getting delegations for job {job['appjobid']}: {result.status} {result.text}")
+                    self.log.error(f"Error getting delegations for appjob({job['appjobid']}): {result.status} {result.text}")
                 elif isinstance(result, NoValueInARCResult):
-                    self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF DELEGATIONS FOR JOB {job['appjobid']}")
+                    self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF DELEGATIONS FOR appjob({job['appjobid']})")
                 else:
                     try:
                         # renewing the first delegation from the list works
@@ -514,9 +514,9 @@ class aCTSubmitter(aCTARCProcess):
                             arcrest.renewDelegation(result[0])
                             renewed.add(result[0])
                     except Exception as exc:
-                        self.log.error(f"Failed to renew delegation for job {job['appjobid']}: {exc}")
+                        self.log.error(f"Failed to renew delegation for appjob({job['appjobid']}): {exc}")
                     else:
-                        self.log.debug(f"Successfully renewed delegation {result[0]} for job {job['appjobid']}")
+                        self.log.info(f"Successfully renewed delegation {result[0]} for appjob({job['appjobid']})")
                         torestart.append(job)
                         arcids.append(job["IDFromEndpoint"])
 
@@ -540,19 +540,19 @@ class aCTSubmitter(aCTARCProcess):
                     error = result
                     if error.status == 505 and error.text == "No more restarts allowed":
                         self.db.updateArcJob(job["id"], {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
-                        self.log.error(f"Restart of job {job['appjobid']} not allowed, setting to failed")
+                        self.log.error(f"Restart of appjob({job['appjobid']}) not allowed, setting to failed")
                     elif error.status == 505 and error.text == "Job has not failed":
                         self.db.updateArcJob(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
-                        self.log.error(f"Job {job['appjobid']} has not failed, setting to submitted")
+                        self.log.warning(f"appjob({job['appjobid']}) has not failed, setting to submitted")
                     elif error.status == 404:
                         self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
-                        self.log.error(f"Job {job['appjobid']} not found, cancelling")
+                        self.log.warning(f"appjob({job['appjobid']}) not found, cancelling")
                     else:
                         self.db.updateArcJob(job["id"], {"arcstate": "torerun", "tarcstate": tstamp})
-                        self.log.error(f"Error rerunning job {job['appjobid']}: {error.status} {error.text}")
+                        self.log.error(f"Error rerunning appjob({job['appjobid']}): {error.status} {error.text}")
                 else:
                     self.db.updateArcJob(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
-                    self.log.info(f"Successfully rerun job {job['appjobid']}")
+                    self.log.info(f"Successfully rerun appjob({job['appjobid']})")
 
     def process(self):
         # process jobs which have to be cancelled

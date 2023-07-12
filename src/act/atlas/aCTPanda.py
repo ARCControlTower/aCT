@@ -35,7 +35,7 @@ class aCTPanda:
             urldata = resp.read().decode()
             conn.close()
         except Exception as x:
-            self.log.error("error in connection: %s" %x)
+            self.log.error(f"error in connection: {x}")
         return urldata
 
     def getQueueStatus(self, queue=None):
@@ -51,7 +51,7 @@ class aCTPanda:
         try:
             data = pickle.loads(urldata.encode())
         except Exception:
-            self.log.error('Could not load panda response: %s' % urldata)
+            self.log.error(f'Could not load panda response: {urldata}')
             return None
 
         return data
@@ -63,7 +63,7 @@ class aCTPanda:
             node['prodSourceLabel']=prodSourceLabel
         pid = None
         urldesc=None
-        self.log.debug('Fetching jobs for %s %s' % ( siteName, prodSourceLabel) )
+        self.log.debug(f'Fetching jobs for {siteName} {prodSourceLabel}')
         urldata=self.__HTTPConnect__('getJob',node)
         if not urldata:
             self.log.info('No job from panda')
@@ -74,25 +74,25 @@ class aCTPanda:
             self.log.error(x)
             return (None,None,None)
 
-        self.log.info('panda returned %s' % urldesc)
+        self.log.info(f'panda returned {urldesc}')
         status = urldesc['StatusCode'][0]
         if status == '20':
             self.log.debug('No Panda activated jobs available')
             return (-1,None,None)
         elif status == '0':
             pid = urldesc['PandaID'][0]
-            self.log.info('New Panda job with ID %s' % pid)
+            self.log.info(f'New Panda job with ID pandaid({pid})')
             prodSourceLabel = urldesc['prodSourceLabel'][0]
         elif status == '60':
             self.log.error('Failed to contact Panda, proxy may have expired')
         else:
-            self.log.error('Check out what this Panda rc means %s' % status)
-        self.log.debug("%s %s" % (pid,urldesc))
+            self.log.error(f'Check out what this Panda rc means {status}')
+        self.log.debug(f"pandaid({pid}) {urldesc}")
         return (pid,urldata,prodSourceLabel)
 
 
     def getStatus(self,pandaId):
-        self.log.info("entry %d" % pandaId)
+        self.log.info(f"entry {pandaId}")
         node={}
         node['ids']=pandaId
         urldesc=None

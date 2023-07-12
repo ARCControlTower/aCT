@@ -21,7 +21,7 @@ class aCTCRICFetcher(aCTATLASProcess):
         super().wait(limit)
 
     def fetchFromCRIC(self, url, filename):
-        self.log.debug(f"Downloading from {url}")
+        self.log.info(f"Downloading from {url}")
         try:
             client = HTTPClient(url)
             response = client.request("GET", url)
@@ -31,7 +31,7 @@ class aCTCRICFetcher(aCTATLASProcess):
             self.log.debug(f"Fetched {url}")
             return urldata
         except Exception as e:
-            self.log.warning("Failed to contact CRIC: %s" % str(e))
+            self.log.warning(f"Failed to contact CRIC: {e}")
             # Check if the cached data is getting old, if so raise a critical error
             try:
                 mtime = os.stat(filename).st_mtime
@@ -58,7 +58,6 @@ class aCTCRICFetcher(aCTATLASProcess):
         """
         Main loop
         """
-        self.log.info("Running")
         # todo: check if cric.json exists and return if too new
         # fetch data from CRIC
         queuesjson = self.fetchFromCRIC(self.queues, self.queuesfile)

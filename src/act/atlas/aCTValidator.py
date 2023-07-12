@@ -184,7 +184,7 @@ class aCTValidator(aCTATLASProcess):
         select = f"arcjobs.id={arcjobid} AND arcjobs.id=pandajobs.arcjobid"
         aj = self.dbarc.getArcJobsInfo(select, columns=columns, tables='arcjobs,pandajobs')
         if not aj or 'JobID' not in aj[0] or not aj[0]['JobID']:
-            self.log.error(f'No JobID in arcjob {arcjobid}: {aj}')
+            self.log.error(f"appjob({aj['appjobid']}): No ARC ID for arcjob({arcjobid}): {aj}")
             return False
         aj = aj[0]
         jobid = aj['JobID']
@@ -194,7 +194,7 @@ class aCTValidator(aCTATLASProcess):
             try:
                 jobinfo = aCTPandaJob(filename=os.path.join(self.tmpdir, sessionid, 'heartbeat.json'))
             except Exception as x:
-                self.log.error(f"{aj['appjobid']}: failed to load heartbeat file for arcjob {jobid}: {x}")
+                self.log.error(f"appjob({aj['appjobid']}): failed to load heartbeat file: {x}")
                 jobinfo = aCTPandaJob(jobinfo={'jobId': aj['appjobid'], 'state': 'finished'})
 
             # update heartbeat and dump to tmp/heartbeats
@@ -212,13 +212,13 @@ class aCTValidator(aCTATLASProcess):
                     # Sanity check for efficiency > 100%
                     cputimepercore = getattr(jobinfo, 'cpuConsumptionTime', 0) / getattr(jobinfo, 'coreCount', 1)
                     if aj['UsedTotalWallTime'] < cputimepercore:
-                        self.log.warning(f'{aj["appjobid"]}: Adjusting reported walltime {aj["UsedTotalWallTime"]} to CPU time {cputimepercore}')
+                        self.log.warning(f'appjob({aj["appjobid"]}): Adjusting reported walltime {aj["UsedTotalWallTime"]} to CPU time {cputimepercore}')
                         jobinfo.startTime = (aj['EndTime'] - datetime.timedelta(0, cputimepercore)).strftime('%Y-%m-%d %H:%M:%S')
                 else:
-                    self.log.warning(f'{aj["appjobid"]}: no endtime found')
+                    self.log.warning(f'appjob({aj["appjobid"]}): no endtime found')
             if len(aj["ExecutionNode"]) > 255:
                 jobinfo.node = aj["ExecutionNode"][:254]
-                self.log.warning(f"{aj['appjobid']}: Truncating wn hostname from {aj['ExecutionNode']} to {jobinfo.node}")
+                self.log.warning(f"appjob({aj['appjobid']}): Truncating wn hostname from {aj['ExecutionNode']} to {jobinfo.node}")
             else:
                 jobinfo.node = aj["ExecutionNode"]
 
@@ -232,7 +232,7 @@ class aCTValidator(aCTATLASProcess):
                 try:
                     jobinfo.metaData = json.loads(jobinfo.metaData)
                 except Exception as e:
-                    self.log.warning(f"{aj['appjobid']}: no metaData in pilot metadata: {e}")
+                    self.log.warning(f"appjob({aj['appjobid']}): no metaData in pilot metadata: {e}")
                 jobinfo.writeToFile(os.path.join(smeta['harvesteraccesspoint'], 'jobReport.json'))
             else:
                 jobinfo.writeToFile(os.path.join(self.tmpdir, "heartbeats", f"{aj['appjobid']}.json"))
@@ -271,7 +271,7 @@ class aCTValidator(aCTATLASProcess):
     def extractOutputFilesFromMetadata(self, arcjobid):
         aj = self.dbarc.getArcJobInfo(arcjobid, columns=["JobID", "appjobid"])
         if not aj or 'JobID' not in aj or not aj['JobID']:
-            self.log.error(f"failed to find arcjobid {arcjobid} in database")
+            self.log.error(f"failed to find arcjob({arcjobid}) in database")
             return {}
 
         jobid=aj['JobID']
@@ -280,13 +280,13 @@ class aCTValidator(aCTATLASProcess):
             jobinfo = aCTPandaJob(filename=os.path.join(self.tmpdir, sessionid, 'heartbeat.json'))
             metadata = getattr(jobinfo, 'xml') # travis doesn't like jobinfo.xml
         except Exception as x:
-            self.log.error(f"{aj['appjobid']}: failed to extract metadata for arcjob {sessionid}: {x}")
+            self.log.error(f"appjob({aj['appjobid']}): failed to extract metadata for arcid({jobid}): {x}")
             return {}
 
         try:
             outputfiles = json.loads(metadata)
         except Exception as e:
-            self.log.error(f"{aj['appjobid']}: failed to load output file info for arcjob {sessionid}: {e}")
+            self.log.error(f"appjob({aj['appjobid']}): failed to load output file info for arcid({jobid}): {e}")
             return {}
 
         surls = {}
@@ -301,7 +301,7 @@ class aCTValidator(aCTATLASProcess):
                     surl = 'srm://srm.ndgf.org:8443/'+res.group(1)
                 se = arc.URL(str(surl)).Host()
             except Exception as x:
-                self.log.error(f'{aj["appjobid"]}: {x}')
+                self.log.error(f"appjob({aj['appjobid']}): {x}")
             else:
                 checksum = "adler32:"+ (adler32 or '00000001')
                 if se not in surls:
@@ -351,9 +351,9 @@ class aCTValidator(aCTATLASProcess):
         for job in jobstoupdate:
             self.stopOnFlag()
             if self.sites[job['siteName']]['truepilot']:
-                self.log.info(f"{job['pandaid']}: Pilot job, skip validation")
+                self.log.info(f"appjob({job['pandaid']}): Pilot job, skip validation")
                 if not self.copyFinishedFiles(job["arcjobid"], False):
-                    self.log.warning(f"{job['pandaid']}: Failed to copy log files")
+                    self.log.warning(f"appjob({job['pandaid']}): Failed to copy log files")
                 self.cleanDownloadedJob(job['arcjobid'])
                 self.dbarc.updateArcJob(job['arcjobid'], cleandesc)
                 select = f"arcjobid={job['arcjobid']}"
@@ -371,7 +371,7 @@ class aCTValidator(aCTATLASProcess):
             if not jobsurls:
                 # problem extracting files, fail job, clean ARC job
                 # and job files
-                self.log.error(f"{job['pandaid']}: Cannot validate output of arcjob {job['arcjobid']}, setting to failed")
+                self.log.error(f"appjob({job['pandaid']}): Cannot validate output, setting to failed")
                 self.cleanDownloadedJob(job['arcjobid'])
                 self.dbarc.updateArcJob(job['arcjobid'], cleandesc)
                 select = f"arcjobid={job['arcjobid']}"
@@ -391,7 +391,7 @@ class aCTValidator(aCTATLASProcess):
         for jobid, status in checkResults:
             self.stopOnFlag()
             if status == JobStatus.OK:
-                self.log.info(f"Successful output file check for arcjob {jobid}")
+                self.log.info(f"Successful output file check for arcjob({jobid})")
                 desc = {"pandastatus": "finished", "actpandastatus": "finished"}
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
                 if not self.copyFinishedFiles(jobid, True):
@@ -401,12 +401,12 @@ class aCTValidator(aCTATLASProcess):
                 self.dbarc.updateArcJob(jobid, cleandesc)
             elif status == JobStatus.FAILED:
                 # output file failed, set toresubmit to clean up output and resubmit
-                self.log.info(f"Failed output file check for arcjob {jobid}, resubmitting")
+                self.log.error(f"Failed output file check for arcjob({jobid}), resubmitting")
                 desc = {"pandastatus": "starting", "actpandastatus": "toresubmit"}
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
             else:
                 # Retry next time
-                self.log.info(f"Failed output file check for arcjob {jobid}, will retry")
+                self.log.warning(f"Failed output file check for arcjob({jobid}), will retry")
                 desc = {"actpandastatus": "tovalidate"}
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
 
@@ -438,7 +438,7 @@ class aCTValidator(aCTATLASProcess):
                 jobSurls = self.checkSurls.setdefault(jobid, set())
                 if not surl:
                     # job fails immediately if one of the URLs is missing
-                    self.log.error(f"Missing surl for {surl['arcjobid']}, cannot validate")
+                    self.log.error(f"Missing surl for arcjob({jobid}), cannot validate")
                     self.checkStatus[jobid] = JobStatus.FAILED
                 elif jobid not in self.checkStatus:
                     jobSurls.add(surl)
@@ -466,7 +466,7 @@ class aCTValidator(aCTATLASProcess):
         while not resultsQueue.empty():
             self.stopOnFlag()
             jobid, surl, status = resultsQueue.get()
-            self.log.debug(f"RESULT: {jobid} {surl} {status}")
+            self.log.debug(f"RESULT: arcjob({jobid}) {surl} {status}")
 
             # remove from a set of job surls that are worked on
             surlDict[jobid].discard(surl)
@@ -542,7 +542,7 @@ class aCTValidator(aCTATLASProcess):
         for job in jobstoupdate:
             self.stopOnFlag()
             if self.sites[job['siteName']]['truepilot']:
-                self.log.info(f"{job['pandaid']}: Skip cleanup of output files")
+                self.log.info(f"appjob({job['pandaid']}): Pilot job, skip cleanup of output files")
                 self.cleanDownloadedJob(job["arcjobid"])
                 self.dbarc.updateArcJob(job["arcjobid"], cleandesc)
                 select = f"arcjobid={job['arcjobid']}"
@@ -559,7 +559,7 @@ class aCTValidator(aCTATLASProcess):
             jobsurls = self.extractOutputFilesFromMetadata(jobid)
             if not jobsurls:
                 # problem extracting files, fail job, clean ARC job and files
-                self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {jobid}, skipping")
+                self.log.warning(f"appjob({job['pandaid']}): Cannot remove output, skipping")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", faildesc)
@@ -577,17 +577,17 @@ class aCTValidator(aCTATLASProcess):
             self.stopOnFlag()
             if status in (JobStatus.OK, JobStatus.FAILED):
                 if status == JobStatus.OK:
-                    self.log.info(f"Successfuly removed output files for failed arcjob {jobid}")
+                    self.log.info(f"Successfuly removed output files for failed arcjob({jobid})")
                 else:
                     # If unretriably failed, there is not much we can do except
                     # continue
-                    self.log.info(f"Output file removal failed for arcjob {jobid}, skipping")
+                    self.log.warning(f"Output file removal failed for arcjob({jobid}), skipping")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", faildesc)
             else:
                 # Retry next time
-                self.log.info(f"Output file removal failed for arcjob {jobid}, will retry")
+                self.log.warning(f"Output file removal failed for arcjob({jobid}), will retry")
                 desc = {"actpandastatus": "toclean"}
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
 
@@ -601,7 +601,7 @@ class aCTValidator(aCTATLASProcess):
 
         for job in jobstoupdate:
             self.stopOnFlag()
-            self.log.info(f"{job['pandaid']}: resubmitting")
+            self.log.info(f"appjob({job['pandaid']}): resubmitting")
             select = f"id={job['id']}"
             desc = {"actpandastatus": "starting", "arcjobid": None}
             self.dbpanda.updateJobs(select, desc)
@@ -656,13 +656,13 @@ class aCTValidator(aCTATLASProcess):
                     # Clean job files and ARC job, finish resubmission if
                     # resubmitted manually or job failed before finishing,
                     # since there are likely no output files.
-                    self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {jobid}, resubmit finished")
+                    self.log.info(f"appjob({job['pandaid']}): Cannot remove output, resubmit finished")
                     self.cleanDownloadedJob(jobid)
                     self.dbarc.updateArcJob(jobid, cleandesc)
                     self.dbpanda.updateJobs(f"arcjobid={jobid}", resubdesc)
                 else:
                     # Otherwise fail job whose outputs cannot be cleaned.
-                    self.log.error(f"{job['pandaid']}: Cannot remove output of arcjob {jobid}, skipping")
+                    self.log.error(f"appjob({job['pandaid']}): Cannot remove output, skipping")
                     self.cleanDownloadedJob(jobid)
                     self.dbarc.updateArcJob(jobid, cleandesc)
                     self.dbpanda.updateJobs(f"arcjobid={jobid}", faildesc)
@@ -681,9 +681,9 @@ class aCTValidator(aCTATLASProcess):
                 # resubmitted jobs or jobs whose files were successfully
                 # removed
                 if jobid in manualIDs and status != JobStatus.OK:
-                    self.log.info(f"Failed deleting outputs for manually resubmitted arcjob {jobid}, will clean arcjob and finish resubmit")
+                    self.log.warning(f"Failed deleting outputs for manually resubmitted arcjob({jobid}), will clean arcjob and finish resubmit")
                 else:
-                    self.log.info(f"Successfully deleted outputs for arcjob {jobid}, resubmit finished")
+                    self.log.info(f"Successfully deleted outputs for arcjob({jobid}), resubmit finished")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", resubdesc)
@@ -692,7 +692,7 @@ class aCTValidator(aCTATLASProcess):
                 # If we couldn't clean outputs the next try of the job will
                 # also fail. Better to return to panda for an increased attempt
                 # no.
-                self.log.info(f"Failed deleting outputs for arcjob {jobid}, setting to failed")
+                self.log.error(f"Failed deleting outputs for arcjob({jobid}), setting to failed")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
                 desc = {"actpandastatus": "failed", "pandastatus": "failed"}
@@ -701,7 +701,7 @@ class aCTValidator(aCTATLASProcess):
 
             else:
                 # set back to toresubmit to retry
-                self.log.info(f"Failed deleting outputs for arcjob {jobid}, will retry")
+                self.log.warning(f"Failed deleting outputs for arcjob({jobid}), will retry")
                 desc = {"actpandastatus": "toresubmit"}
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", desc)
 
@@ -935,11 +935,12 @@ class OutputChecker(ARCWorker):
         for surl in surls:
             if self.terminate.is_set():
                 return
+            jobid, url = surl["arcjobid"], surl["surl"]
             self.log.debug(f"{self.__class__.__name__}: count: {count}, surl: {surl}")
-            dp = aCTUtils.DataPoint(str(surl['surl']), self.credential)
-            if not dp or not dp.h or surl['surl'].startswith('davs://srmdav.ific.uv.es:8443'):
-                self.log.warning(f"URL {surl['surl']} not supported, skipping validation")
-                self.resultQueue.put((surl["arcjobid"], surl["surl"], JobStatus.OK))
+            dp = aCTUtils.DataPoint(str(url), self.credential)
+            if not dp or not dp.h or url.startswith('davs://srmdav.ific.uv.es:8443'):
+                self.log.warning(f"URL {url} not supported, skipping validation")
+                self.resultQueue.put(jobid, url, JobStatus.OK))
                 continue
             count += 1
             datapointlist.append(dp.h)
@@ -980,17 +981,17 @@ class OutputChecker(ARCWorker):
                         if not st or not f:
                             s = surllist[i]
                             if status.Retryable():
-                                self.log.warning(f"Failed to query files on {datapointlist[i].GetURL().Host()}, will retry later: {st}")
+                                self.log.warning(f"arcjob({jobid}): Failed to query files on {datapointlist[i].GetURL().Host()}, will retry later: {st}")
                                 self.resultQueue.put((jobid, url, JobStatus.RETRY))
                             else:
-                                self.log.warning(f"{s['arcjobid']}: Failed to find info on {dpurl}")
+                                self.log.error(f"arcjob({jobid}): Failed to find info on {dpurl}")
                                 self.resultQueue.put((jobid, url, JobStatus.FAILED))
                             files.append(None)
                         else:
                             files.append(f)
 
                     if not files[i]:
-                        self.log.warning(f"{jobid}: Failed to find info on {dpurl}")
+                        self.log.error(f"arcjob({jobid}): Failed to find info on {dpurl}")
                         self.resultQueue.put((jobid, url, JobStatus.FAILED))
                     else:
                         fsize, checksum = s["fsize"], s["checksum"]
@@ -999,25 +1000,26 @@ class OutputChecker(ARCWorker):
                         # compare metadata
                         try:
                             self.log.debug(
-                                f"File {dpurl} for {jobid}: expected size {fsize}, checksum {checksum}, "
+                                f"arcjob({jobid}): File {dpurl}: expected size {fsize}, checksum {checksum}, "
                                 f"actual size {statsize}, checksum {statsum}"
                             )
                         except:
-                            self.log.warning(f"Unhandled issue {i}")
+                            import traceback
+                            self.log.warning(f"arcjob({jobid}): Unhandled issue: {traceback.format_exc()}")
                             self.resultQueue.put((jobid, url, JobStatus.FAILED))
                             continue
                         if fsize != statsize:
-                            self.log.warning(f"File {dpurl} for {jobid}: size on storage ({statsize}) differs from expected size ({fsize})")
+                            self.log.error(f"arcjob({jobid}): File {dpurl}: size on storage ({statsize}) differs from expected size ({fsize})")
                             self.resultQueue.put((jobid, url, JobStatus.FAILED))
                             continue
                         if not files[i].CheckCheckSum():
-                            self.log.warning(f"File {dpurl} for {jobid}: no checksum information available")
+                            self.log.warning(f"arcjob({jobid}): File {dpurl}: no checksum information available")
                         elif checksum != statsum:
-                            self.log.warning(f"File {dpurl} for {jobid}: checksum on storage ({statsum}) differs from expected checksum ({checksum})")
+                            self.log.error(f"arcjob({jobid}): File {dpurl}: checksum on storage ({statsum}) differs from expected checksum ({checksum})")
                             self.resultQueue.put((jobid, url, JobStatus.FAILED))
                             continue
 
-                        self.log.info(f"File {dpurl} validated for {jobid}")
+                        self.log.info(f"arcjob({jobid}): File {dpurl}: validated")
                         self.resultQueue.put((jobid, url, JobStatus.OK))
 
             # Clear lists and go to next round
@@ -1038,22 +1040,22 @@ class FileRemover(ARCWorker):
             jobid, url = surl["arcjobid"], surl["surl"]
             dp = aCTUtils.DataPoint(str(url), self.credential)
             if not dp.h or url.startswith('root://'):
-                self.log.info(f"Removed {url} for {jobid}")
+                self.log.info(f"arcjob({jobid}): Removed {url}")
                 self.resultQueue.put((jobid, url, JobStatus.OK))
                 continue
             status = dp.h.Remove()
             if not status:
                 if status.Retryable() and not url.startswith('davs://srmdav.ific.uv.es:8443'):
-                    self.log.warning(f"Failed to delete {url} for {jobid}, will retry later: {status}")
+                    self.log.warning(f"arcjob({jobid}): Failed to delete {url}, will retry later: {status}")
                     self.resultQueue.put((jobid, url, JobStatus.RETRY))
                 elif status.GetErrno() == errno.ENOENT:
-                    self.log.info(f"File {url} for {jobid} does not exist")
+                    self.log.warning(f"arcjob({jobid}): File {url} does not exist")
                     self.resultQueue.put((jobid, url, JobStatus.OK))
                 else:
-                    self.log.error(f"Failed to delete {url} for {jobid}: {status}")
+                    self.log.error(f"arcjob({jobid}): Failed to delete {url}: {status}")
                     self.resultQueue.put((jobid, url, JobStatus.FAILED))
             else:
-                self.log.info(f"Removed {url} for {jobid}")
+                self.log.info(f"arcjob({jobid}): Removed {url}")
                 self.resultQueue.put((jobid, url, JobStatus.OK))
 
 
@@ -1090,5 +1092,5 @@ class HeartbeatDownloader(ARCWorker):
             dm = arc.DataMover()
             status = dm.Transfer(source.h, dest.h, arc.FileCache(), arc.URLMap())
             if not status:
-                self.log.debug(f"{job['pandaid']}: Failed to download {source.h.GetURL.str()}: {status}")
+                self.log.error(f"appjob({job['pandaid']}): Failed to download {source.h.GetURL.str()}: {status}")
                 self.resultQueue.put(job)

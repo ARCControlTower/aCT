@@ -21,7 +21,7 @@ class aCTCleaner(aCTCondorProcess):
 
         for job in jobstoclean:
             self.stopOnFlag()
-            self.log.info(f"{job['appjobid']}: Cleaning job {job['ClusterId']}")
+            self.log.info(f"appjob({job['appjobid']}): Cleaning condorjob({job['ClusterId']})")
             self.db.deleteCondorJob(job['id'])
 
     def process(self):

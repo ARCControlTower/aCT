@@ -38,7 +38,7 @@ class aCTValidatorCondor(aCTATLASProcess):
         # Skip validation for the true pilot jobs, just copy logs, set to done and clean condor job
         for job in jobstoupdate:
             self.stopOnFlag()
-            self.log.info('%s: Skip validation' % job['pandaid'])
+            self.log.info(f"appjob({job['pandaid']}): Skip validation")
             select = "condorjobid='"+str(job["condorjobid"])+"'"
             desc = {"pandastatus": None, "actpandastatus": "finished"}
             self.dbpanda.updateJobs(select, desc)
@@ -67,7 +67,7 @@ class aCTValidatorCondor(aCTATLASProcess):
         # For truepilot jobs, don't try to clean outputs (too dangerous), just clean condor job
         for job in jobstoupdate[:]:
             self.stopOnFlag()
-            self.log.info("%s: Skip cleanup of output files" % job['pandaid'])
+            self.log.info(f"appjob({job['pandaid']}): Skip cleanup of output files")
             select = "condorjobid='"+str(job["condorjobid"])+"'"
             desc = {"pandastatus": None, "actpandastatus": "failed"}
             self.dbpanda.updateJobs(select, desc)
@@ -94,7 +94,7 @@ class aCTValidatorCondor(aCTATLASProcess):
 
         for job in jobstoupdate:
             self.stopOnFlag()
-            self.log.info('%s: resubmitting' % job['pandaid'])
+            self.log.info(f"appjob({job['pandaid']}): resubmitting")
             select = "id="+str(job['id'])
             desc = {"actpandastatus": "starting", "condorjobid": None}
             self.dbpanda.updateJobs(select, desc)
@@ -112,12 +112,11 @@ class aCTValidatorCondor(aCTATLASProcess):
             self.stopOnFlag()
             # Only try to cancel jobs which are not finished
             if job['condorstate'] not in ('donefailed', 'done', 'lost', 'cancelled'):
-                self.log.info('%s: manually asked to resubmit, cancelling condor job %s' %
-                                (job['pandaid'], job['ClusterId']))
+                self.log.info(f"appjob({job['pandaid']}): manually asked to resubmit, cancelling condor job condorid({job['ClusterId']})")
                 desc = {'condorstate': 'tocancel', 'tcondorstate': self.dbcondor.getTimeStamp()}
                 self.dbcondor.updateCondorJob(job['condorjobid'], desc)
 
-            self.log.info('%s: resubmitting' % job['pandaid'])
+            self.log.info(f"appjob({job['pandaid']}): resubmitting")
             select = "pandaid="+str(job['pandaid'])
             desc = {"actpandastatus": "starting", "condorjobid": None}
             self.dbpanda.updateJobs(select, desc)

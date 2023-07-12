@@ -189,7 +189,7 @@ class aCTStatus(aCTARCProcess):
                     if job["IDFromEndpoint"] not in joblist:
                         jobdict.update({"arcstate": "tocancel"})
                         self.db.updateArcJob(job["id"], jobdict)
-                        self.log.error(f"Job {job['appjobid']} not in ARC anymore, cancelling")
+                        self.log.warning(f"appjob({job['appjobid']}) not in ARC anymore, cancelling")
                         continue
 
                 # cancel 404 jobs and log errors
@@ -197,12 +197,12 @@ class aCTStatus(aCTARCProcess):
                     if result.status == 404:
                         jobdict.update({"arcstate": "tocancel"})
                         self.db.updateArcJob(job["id"], jobdict)
-                        self.log.error(f"Job {job['appjobid']} not found, cancelling")
+                        self.log.warning(f"appjob({job['appjobid']}) not found, cancelling")
                     else:
-                        self.log.error(f"Error fetching info for job {job['appjobid']}: {result.status} {result.text}")
+                        self.log.error(f"Error fetching info for appjob({job['appjobid']}): {result.status} {result.text}")
                     continue
                 elif isinstance(result, NoValueInARCResult):
-                    self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF INFO FOR JOB {job['appjobid']}")
+                    self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF INFO FOR appjob({job['appjobid']})")
                     continue
 
                 jobInfo = result
@@ -213,11 +213,11 @@ class aCTStatus(aCTARCProcess):
                     try:
                         mappedState = ARC_STATE_MAPPING[state]
                     except KeyError:
-                        self.log.debug(f"No state mapping for state {state}")
+                        self.log.error(f"No state mapping for state {state}")
                     else:
                         if job["State"] != mappedState:
 
-                            self.log.info(f"ARC status change for job {job['appjobid']}: {job['State']} -> {mappedState}")
+                            self.log.info(f"ARC status change for appjob({job['appjobid']}): {job['State']} -> {mappedState}")
                             jobdict.update({"State": mappedState, "tstate": tstamp})
 
                             if state in ("ACCEPTING", "ACCEPTED", "PREPARING", "PREPARED", "SUBMITTING", "QUEUING"):
@@ -237,7 +237,7 @@ class aCTStatus(aCTARCProcess):
                                 if exitCode is None:
                                     # missing exit code, but assume success
                                     jobdict["ExitCode"] = 0
-                                    self.log.warning(f"Job {job['appjobid']} is finished but has missing exit code, setting to zero")
+                                    self.log.warning(f"appjob({job['appjobid']}) is finished but has missing exit code, setting to zero")
                                 else:
                                     jobdict["ExitCode"] = exitCode
                                 jobdict["arcstate"] = "finished"
@@ -265,12 +265,12 @@ class aCTStatus(aCTARCProcess):
                     time = walltime // slots
                     if time > fromCreated:
                         jobdict["UsedTotalWallTime"] = fromCreated
-                        self.log.warning(f"Job {job['appjobid']}: Fixing reported walltime {time} to {fromCreated}")
+                        self.log.warning(f"appjob({job['appjobid']}): Fixing reported walltime {time} to {fromCreated}")
                     else:
                         jobdict["UsedTotalWallTime"] = time
                 else:
                     jobdict["UsedTotalWallTime"] = fromCreated
-                    self.log.warning(f"Job {job['appjobid']}: No reported walltime, using DB timestamps: {fromCreated}")
+                    self.log.warning(f"appjob({job['appjobid']}): No reported walltime, using DB timestamps: {fromCreated}")
 
                 # fix wrongly reported cpu time
                 cputime = jobInfo.get("UsedTotalCPUTime", None)
@@ -278,7 +278,7 @@ class aCTStatus(aCTARCProcess):
                     # TODO: HARDCODED
                     if cputime > 10 ** 7:
                         jobdict["UsedTotalCPUTime"] = -1
-                        self.log.warning(f"Discarding reported CPU time {cputime} for job {job['appjobid']}")
+                        self.log.warning(f"Discarding reported CPU time {cputime} for appjob({job['appjobid']})")
                     else:
                         jobdict["UsedTotalCPUTime"] = cputime
 
@@ -308,7 +308,7 @@ class aCTStatus(aCTARCProcess):
                 try:
                     self.db.updateArcJob(job["id"], jobdict)
                 except:
-                    self.log.error(f"Bad dict for job {job['appjobid']}: {jobdict}")
+                    self.log.error(f"Bad dict for appjob({job['appjobid']}): {jobdict}")
 
         self.log.info("Done")
 
@@ -323,25 +323,25 @@ class aCTStatus(aCTARCProcess):
         if "Error" in jobInfo:
             errors = ";".join(jobInfo["Error"])
             resub = [err for err in self.conf.errors.toresubmit.arcerrors if err in errors]
-            self.log.info(f"Job {job['appjobid']} failed with error: {errors}")
+            self.log.info(f"appjob({job['appjobid']}) failed with error: {errors}")
         else:
-            self.log.info(f"Job {job['appjobid']} failed, no error given")
+            self.log.info(f"appjob({job['appjobid']}) failed, no error given")
 
         # restart if data staging problem but not output file list problem
         restartState = jobInfo.get("restartState", None)
         if restartState in ("PREPARING", "FINISHING"):
             if "Error reading user generated output file list" not in jobInfo.get("Error", []):
                 patchDict.update({"State": "Undefined", "arcstate": "torerun"})
-                self.log.info(f"Will rerun {job['appjobid']}")
+                self.log.info(f"Will rerun appjob({job['appjobid']})")
 
         # resubmit if certain errors
         elif resub:
             if job["attemptsleft"] <= 0:
-                self.log.info(f"Job {job['appjobid']} out of retries")
+                self.log.info(f"appjob({job['appjobid']}) out of retries")
             else:
                 attempts = job["attemptsleft"] - 1
                 patchDict.update({"State": "Undefined", "arcstate": "toresubmit", "attemptsleft": attempts})
-                self.log.info(f"Job {job['appjobid']} will be resubmitted, {attempts} attempts left")
+                self.log.info(f"appjob({job['appjobid']}) will be resubmitted, {attempts} attempts left")
 
         return patchDict
 
@@ -366,10 +366,10 @@ class aCTStatus(aCTARCProcess):
             self.stopOnFlag()
             if job["arcstate"] == "cancelling":
                 self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                self.log.warning(f"Job {job['appjobid']} too long in cancelling, marking as cancelled")
+                self.log.warning(f"appjob({job['appjobid']}) too long in cancelling, marking as cancelled")
             else:
                 self.db.updateArcJob(job["id"], {"arcstate": "lost", "tarcstate": tstamp})
-                self.log.warning(f"Job {job['appjobid']} too long in {job['arcstate']}, marking as lost")
+                self.log.warning(f"appjob({job['appjobid']}) too long in {job['arcstate']}, marking as lost")
 
     # TODO: refactor to some library aCT job operation
     def checkStuckJobs(self):
@@ -401,7 +401,7 @@ class aCTStatus(aCTARCProcess):
                 if job["arcstate"] == "toclean":
                     # delete jobs stuck in toclean
                     self.db.deleteArcJob(job["id"])
-                    self.log.info(f"Job {job['appjobid']} stuck in toclean for too long, deleting")
+                    self.log.warning(f"appjob({job['appjobid']}) stuck in toclean for too long, deleting")
                 else:
                     # cancel other stuck jobs
                     if job["JobID"]:
@@ -410,7 +410,7 @@ class aCTStatus(aCTARCProcess):
                     else:
                         # otherwise mark cancelled
                         self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "tstate": tstamp})
-                    self.log.warning(f"Job {job['appjobid']} too long in state {jobstate}, cancelling")
+                    self.log.warning(f"appjob({job['appjobid']}) too long in state {jobstate}, cancelling")
 
     # TODO: refactor to some library aCT job operation
     # TODO: is the comprehensive update of jobs from info required? (return
@@ -454,7 +454,7 @@ class aCTStatus(aCTARCProcess):
                     job["tarcstate"] = job["tcreated"]
                 if job["tarcstate"] + timedelta(seconds=3600) < datetime.utcnow():
                     self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                    self.log.error(f"Job {job['appjobid']} stuck in cancelling, setting to cancelled")
+                    self.log.warning(f"appjob({job['appjobid']}) stuck in cancelling, setting to cancelled")
                 else:
                     tocheck.append(job)
 
@@ -495,7 +495,7 @@ class aCTStatus(aCTARCProcess):
                 # be cancelled [1]
                 if job["id"] not in joblist:
                     self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                    self.log.error(f"Job {job['appjobid']} not in ARC job list anymore, setting to cancelled")
+                    self.log.warning(f"appjob({job['appjobid']}) not in ARC job list anymore, setting to cancelled")
                     continue
 
                 # process errors
@@ -503,9 +503,9 @@ class aCTStatus(aCTARCProcess):
                     if isinstance(result, ARCHTTPError):
                         if result.status == 404:
                             self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                            self.log.error(f"Job {job['appjobid']} not found, considering cancelled")
+                            self.log.warning(f"appjob({job['appjobid']}) not found, considering cancelled")
                             continue
-                    self.log.error(f"Error fetching info of cancelling job {job['appjobid']}: {result}")
+                    self.log.error(f"Error fetching info of cancelling appjob({job['appjobid']}): {result}")
                     continue
 
                 # set to cancelled if in terminal state
@@ -514,18 +514,18 @@ class aCTStatus(aCTARCProcess):
                     try:
                         mappedState = ARC_STATE_MAPPING[state]
                     except KeyError:
-                        self.log.debug(f"STATE MAPPING ERROR: state: {state}")
+                        self.log.error(f"STATE MAPPING ERROR: state: {state}")
                     else:
                         if mappedState in ("Finished", "Failed", "Killed", "Deleted"):
                             self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp, "State": mappedState, "tstate": tstamp})
-                            self.log.debug(f"Job {job['appjobid']} is cancelled by ARC")
+                            self.log.info(f"appjob({job['appjobid']}) is cancelled by ARC")
 
         self.log.info("Done")
 
     def process(self):
         # minimum time between checks
         if time.time() < self.checktime + self.conf.jobs.checkmintime:
-            self.log.debug("mininterval not reached")
+            self.log.info("mininterval not reached")
             return
         self.checktime = time.time()
 

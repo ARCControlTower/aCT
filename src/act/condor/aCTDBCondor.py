@@ -93,7 +93,7 @@ class aCTDBCondor(aCTDB):
             c.execute(create)
             self.Commit()
         except Exception as x:
-            self.log.error("failed create table %s" %x)
+            self.log.error(f"failed create table {x}")
             return False
 
         return True
@@ -105,13 +105,13 @@ class aCTDBCondor(aCTDB):
         '''
 
         if not clusterlist:
-            self.log.error('%s: clusterlist cannot be empty for condor jobs' % appjobid)
+            self.log.error(f'appjob({appjobid}): clusterlist cannot be empty for condor jobs')
             return None
 
         try:
             jobdescstr = json.dumps(jobdesc)
         except:
-            self.log.error('%s: could not parse job description as dict: %s' % (appjobid, str(jobdesc)))
+            self.log.error(f'appjob({appjobid}): could not parse job description as dict: {jobdesc}')
             return None
 
         # todo: find some useful default for proxyid
@@ -169,10 +169,10 @@ class aCTDBCondor(aCTDB):
         executing update.
         '''
         c = self.db.getCursor()
-        c.execute("select id from condorjobs where id=%d limit 1" % id)
+        c.execute(f"select id from condorjobs where id={id} limit 1")
         row = c.fetchone()
         if row is None:
-            self.log.warning("Condor job id %d no longer exists" % id)
+            self.log.warning(f"condorjob({id}) no longer exists")
             return
 
         desc['modified'] = self.getTimeStamp()
@@ -223,7 +223,7 @@ class aCTDBCondor(aCTDB):
             #select += self.addLock()
             res = self.db.getMutexLock('condorjobs', timeout=2)
             if not res:
-                self.log.debug("Could not get lock: %s"%str(res))
+                self.log.debug(f"Could not get lock: {res}")
                 return []
         c.execute("SELECT "+self._column_list2str(columns)+" FROM "+tables+" WHERE "+select)
         rows=c.fetchall()

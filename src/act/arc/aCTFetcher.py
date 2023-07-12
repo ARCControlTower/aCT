@@ -47,7 +47,7 @@ class aCTFetcher(aCTARCProcess):
         for job in jobstofetch:
             if job["tarcstate"] + limit < now:
                 self.db.updateArcJob(job["id"], {"arcstate": "donefailed", "tarcstate": tstamp})
-                self.log.debug(f"Could fetch job {job['appjobid']} in time, setting to donefailed")
+                self.log.warning(f"Could not fetch appjob({job['appjobid']}) in time, setting to donefailed")
             else:
                 tofetch.append(job)
 
@@ -130,24 +130,24 @@ class aCTFetcher(aCTARCProcess):
                 for error in errors:
                     # don't treat missing diagnose file as fail
                     if isinstance(error, MissingDiagnoseFile):
-                        self.log.info(f"Skipping the missing diagnose file \"{error.filename}\" for job {job['appjobid']}")
+                        self.log.info(f"Skipping the missing diagnose file \"{error.filename}\" for appjob({job['appjobid']})")
 
                     # missing result file -> error
                     elif isinstance(error, MissingResultFile):
                         isError = True
-                        self.log.error(f"Error fetching job {job['appjobid']}: missing file {error.filename}")
+                        self.log.error(f"Error fetching appjob({job['appjobid']}): missing file {error.filename}")
 
                     # all other errors are fails as well
                     else:
                         isError = True
-                        self.log.error(f"Error fetching job {job['appjobid']}: {error}")
+                        self.log.error(f"Error fetching appjob({job['appjobid']}): {error}")
 
                 if not isError:
                     jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
                     self.db.updateArcJob(job["id"], jobdict)
-                    self.log.debug(f"Successfully fetched job {job['appjobid']}")
+                    self.log.info(f"Successfully fetched appjob({job['appjobid']})")
 
-        self.log.debug("Done")
+        self.log.info("Done")
 
     def process(self):
         # download failed job outputs that should be fetched

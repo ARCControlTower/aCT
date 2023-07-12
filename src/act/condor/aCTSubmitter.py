@@ -28,7 +28,7 @@ def Submit(jobdesc, log, appjobid, schedd):
     global queuelist
 
     if len(queuelist) == 0:
-        log.error(f"{appjobid}: no cluster free for submission")
+        log.error(f"appjob({appjobid}): no cluster free for submission")
         return None
 
     # This method only works with condor version >= 8.5.8 but is needed to
@@ -62,12 +62,12 @@ class aCTSubmitter(aCTCondorProcess):
                 t.join(60.0)
                 if t.isAlive():
                     # abort due to timeout and try again
-                    self.log.error(f"{t.appjobid}: submission timeout: exit and try again")
+                    self.log.error(f"appjob({t.appjobid}): submission timeout: exit and try again")
                     errfl = True
                     continue
                 # updatedb
                 if t.jobid is None:
-                    self.log.error(f"{t.appjobid}: no job defined for {t.id}")
+                    self.log.error(f"appjob({t.appjobid}): no job defined for {t.id}")
                     errfl = True
                     continue
                 jd = {}
@@ -76,7 +76,7 @@ class aCTSubmitter(aCTCondorProcess):
                 jd['tcondorstate'] = self.db.getTimeStamp(time.time() - self.conf.jobs.checkinterval + 120)
                 jd['cluster'] = self.cluster
                 jd['ClusterId'] = t.jobid
-                self.log.info(f"{t.appjobid}: Job submitted with ClusterId {t.jobid}")
+                self.log.info(f"appjob({t.appjobid}): Job submitted with ClusterId {t.jobid}")
                 self.db.updateCondorJobLazy(t.id, jd)
             if errfl:
                 break
@@ -189,14 +189,14 @@ class aCTSubmitter(aCTCondorProcess):
 
             # Just run one thread for each job in sequence.
             for j in jobs:
-                self.log.debug(f"{j['appjobid']}: preparing submission")
+                self.log.debug(f"appjob({j['appjobid']}): preparing submission")
                 jobdescstr = self.db.getCondorJobDescription(str(j['jobdesc']))
                 try:
                     # Not so nice using eval but condor doesn't accept unicode
                     # strings returned from json.loads()
                     jobdesc = ast.literal_eval(jobdescstr)
                 except:
-                    self.log.error(f"{j['appjobid']}: Failed to prepare job description")
+                    self.log.error(f"appjob({j['appjobid']}): Failed to prepare job description")
                     continue
 
                 # Extract the GridResource
@@ -211,7 +211,7 @@ class aCTSubmitter(aCTCondorProcess):
                 jobdesc['+queue'] = f'"{queue}"'
                 # Set tag for aCTStatus to query
                 jobdesc['+ACTCluster'] = f'"{self.cluster}"'
-                self.log.debug(f'{j["appjobid"]}: Set GridResource to {gridresource}, queue {queue}')
+                self.log.debug(f'appjob({j["appjobid"]}): Set GridResource to {gridresource}, queue {queue}')
                 self.log.debug(jobdesc)
                 t = SubmitThr(Submit, j['id'], j['appjobid'], jobdesc, self.log, self.schedd)
                 self.RunThreadsSplit([t], 1)
@@ -260,11 +260,11 @@ class aCTSubmitter(aCTCondorProcess):
 
             self.stopOnFlag()
 
-            self.log.info(f"{job['appjobid']}: Cancelling condor job")
+            self.log.info(f"appjob({job['appjobid']}): Cancelling condor job")
 
             if not job['ClusterId']:
                 # Job not submitted
-                self.log.info(f"{job['appjobid']}: Marking unsubmitted job cancelled")
+                self.log.info(f"appjob({job['appjobid']}): Marking unsubmitted job cancelled")
                 self.db.updateCondorJob(job['id'], {"condorstate": "cancelled",
                                                     "tcondorstate": self.db.getTimeStamp()})
                 continue
@@ -272,9 +272,9 @@ class aCTSubmitter(aCTCondorProcess):
             try:
                 remove = self.schedd.act(htcondor.JobAction.Remove, [f'{job["ClusterId"]}.0'])
             except RuntimeError as e:
-                self.log.error(f"{job['appjobid']}: Failed to cancel in condor: {e}")
+                self.log.error(f"appjob({job['appjobid']}): Failed to cancel in condor: {e}")
                 continue
-            self.log.debug(f"{job['appjobid']}: Cancellation returned {remove}")
+            self.log.debug(f"appjob({job['appjobid']}): Cancellation returned {remove}")
             self.db.updateCondorJob(job['id'], {"condorstate": "cancelling",
                                                 "tcondorstate": self.db.getTimeStamp()})
             # TODO deal with failed cancel
@@ -298,7 +298,7 @@ class aCTSubmitter(aCTCondorProcess):
                 try:
                     self.schedd.act(htcondor.JobAction.Remove, [f'{job["ClusterId"]}.0'])
                 except RuntimeError as e:
-                    self.log.error(f"{job['appjobid']}: Failed to cancel in condor: {e}")
+                    self.log.error(f"appjob({job['appjobid']}): Failed to cancel in condor: {e}")
                 # TODO handle failed clean
 
             self.db.updateCondorJob(

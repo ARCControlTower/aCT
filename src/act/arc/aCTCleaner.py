@@ -34,7 +34,7 @@ class aCTCleaner(aCTARCProcess):
         for job in jobstoclean:
             if job["tarcstate"] + limit < now:
                 self.db.deleteArcJob(job["id"])
-                self.log.debug(f"Could clean job {job['appjobid']} in time, removing from DB")
+                self.log.warning(f"Could not clean appjob({job['appjobid']}) in time, removing from DB")
             else:
                 toclean.append(job)
 
@@ -78,16 +78,16 @@ class aCTCleaner(aCTARCProcess):
             # log results
             for job, result in zip(arcjobs, results):
                 if isinstance(result, ARCHTTPError):
-                    self.log.error(f"Error cleaning job {job['appjobid']} from ARC: {result.status} {result.text}")
+                    self.log.error(f"Error cleaning appjob({job['appjobid']}) from ARC: {result.status} {result.text}")
                 else:
-                    self.log.debug(f"Successfully cleaned job {job['appjobid']} from ARC")
+                    self.log.info(f"Successfully cleaned appjob({job['appjobid']}) from ARC")
 
             # update DB
             for job in dbjobs:
                 self.db.deleteArcJob(job["id"])
-                self.log.debug(f"Successfully cleaned job {job['appjobid']} in arc DB")
+                self.log.info(f"Successfully cleaned appjob({job['appjobid']}) in arc DB")
 
-        self.log.debug("Done")
+        self.log.info("Done")
 
     def process(self):
         self.processToClean()
