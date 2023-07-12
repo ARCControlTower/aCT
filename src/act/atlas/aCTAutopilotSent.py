@@ -84,6 +84,7 @@ class aCTAutopilotSent(aCTATLASProcess):
         """
         nthreads=self.conf.panda.threads
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
+        # TODO: HARDCODED limit
         jobs=self.dbpanda.getJobs(f"pandastatus='{pstatus}' and sendhb=1 and ({self.dbpanda.timeStampLessThan('theartbeat', self.conf.panda.heartbeattime)} or modified > theartbeat) limit 1000", columns)
         if not jobs:
             return

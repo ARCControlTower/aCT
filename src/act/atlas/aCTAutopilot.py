@@ -106,6 +106,7 @@ class aCTAutopilot(aCTATLASProcess):
         self.stopOnFlag()
 
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
+        # TODO: HARDCODED limit
         jobs = self.dbpanda.getJobs(f"pandastatus='{pstatus}' and sendhb=1 and ({self.dbpanda.timeStampLessThan('theartbeat', self.conf.panda.heartbeattime)} or modified > theartbeat) limit 1000", columns)
         if not jobs:
             return
@@ -191,6 +192,7 @@ class aCTAutopilot(aCTATLASProcess):
         self.stopOnFlag()
 
         columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
+        # TODO: HARDCODED limit
         jobs=self.dbpanda.getJobs(f"pandastatus='{pstatus}' and sendhb=1 and ({self.dbpanda.timeStampLessThan('theartbeat', self.conf.panda.heartbeattime)} or modified > theartbeat) limit 1000", columns)
         #jobs=self.dbpanda.getJobs("pandastatus='"+pstatus+"' and sendhb=1 and ("+self.dbpanda.timeStampLessThan("theartbeat", 60)+" or modified > theartbeat) limit 1000", columns)
         if not jobs:
@@ -289,6 +291,7 @@ class aCTAutopilot(aCTATLASProcess):
         """
         self.stopOnFlag()
 
+        # TODO: HARDCODED limit
         jobs=self.dbpanda.getJobs("actpandastatus='finished' or actpandastatus='failed' or actpandastatus='cancelled' limit 1000")
 
         if not jobs:
