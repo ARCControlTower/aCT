@@ -39,6 +39,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 if job["arcjobid"]:
                     self.dbarc.updateArcJob(job["arcjobid"], {"arcstate": "tocancel"})
 
+        # TODO: HARDCODED limit
         # Get jobs killed by panda
         jobs = self.dbpanda.getJobs(f"actpandastatus='tobekilled' and siteName in {self.sitesselect} limit 100",
                                     ["pandaid", "arcjobid", "pandastatus", "id", "siteName"])
@@ -104,6 +105,7 @@ class aCTATLASStatus(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
+        # TODO: HARDCODED limit
         select = "((arcjobs.arcstate in ('submitted', 'holding') and pandajobs.actpandastatus='sent') or"
         select += " (arcjobs.arcstate in ('tosubmit', 'submitting', 'submitted', 'holding') and pandajobs.actpandastatus='running'))"
         select += f" and arcjobs.id=pandajobs.arcjobid and pandajobs.sitename in {self.sitesselect} limit 100000"
@@ -139,6 +141,7 @@ class aCTATLASStatus(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
+        # TODO: HARDCODED limit
         # do an inner join to pick up all jobs that should be set to running
         # TODO: pandajobs.starttime will not be updated if a job is resubmitted
         # internally by the ARC part.
@@ -204,6 +207,7 @@ class aCTATLASStatus(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
+        # TODO: HARDCODED limit
         # don't get jobs already having actpandastatus states treated by
         # validator to avoid race conditions
         select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate='done'"
@@ -458,6 +462,7 @@ class aCTATLASStatus(aCTATLASProcess):
             desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
             self.dbarc.updateArcJobs(desc, select)
 
+        # TODO: HARDCODED limit
         # Look for failed final states in ARC which are still starting or running in panda
         select = "(arcstate='donefailed' or arcstate='cancelled' or arcstate='lost')"
         select += " and actpandastatus in ('sent', 'starting', 'running', 'transferring')"
