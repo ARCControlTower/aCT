@@ -102,7 +102,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             return
         else:
             idstr = ",".join([j["appjobid"] for j in jobstoupdate])
-            self.log.debug(f"Found {len(jobstoupdate)} submitted jobs ({idstr})")
+            self.log.info(f"Found {len(jobstoupdate)} submitted jobs ({idstr})")
 
         for job in jobstoupdate:
             self.stopOnFlag()
@@ -138,7 +138,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             return
         else:
             idstr = ",".join([j["appjobid"] for j in jobstoupdate])
-            self.log.debug(f"Found {len(jobstoupdate)} running jobs ({idstr})")
+            self.log.info(f"Found {len(jobstoupdate)} running jobs ({idstr})")
 
         for cj in jobstoupdate:
             self.stopOnFlag()
@@ -183,7 +183,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
             return
         else:
             idstr = ",".join([j["appjobid"] for j in jobstoupdate])
-            self.log.debug(f"Found {len(jobstoupdate)} finished jobs ({idstr})")
+            self.log.info(f"Found {len(jobstoupdate)} finished jobs ({idstr})")
 
         for cj in jobstoupdate:
             self.stopOnFlag()
@@ -225,16 +225,16 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         failedjobs = [job for job in jobstoupdate if job["condorstate"]=="donefailed"]
         if len(failedjobs) != 0:
             idstr = ",".join([j["appjobid"] for j in failedjobs])
-            self.log.debug(f"Found {len(failedjobs)} failed jobs ({idstr})")
+            self.log.info(f"Found {len(failedjobs)} failed jobs ({idstr})")
         lostjobs = [job for job in jobstoupdate if job["condorstate"]=="lost"]
         if len(lostjobs) != 0:
             idstr = ",".join([j["appjobid"] for j in lostjobs])
-            self.log.debug(f"Found {len(lostjobs)} lost jobs ({idstr})")
+            self.log.info(f"Found {len(lostjobs)} lost jobs ({idstr})")
         # Cancelled jobs already in terminal state will be cleaned up in cleanupLeftovers()
         cancelledjobs = [job for job in jobstoupdate if job["condorstate"]=="cancelled" and job["actpandastatus"] not in ("cancelled", "donecancelled", "failed", "donefailed")]
         if len(cancelledjobs) != 0:
             idstr = ",".join([j["appjobid"] for j in cancelledjobs])
-            self.log.debug(f"Found {len(cancelledjobs)} cancelled jobs ({idstr})")
+            self.log.info(f"Found {len(cancelledjobs)} cancelled jobs ({idstr})")
 
         # Get outputs to download for failed jobs
         select = "condorstate='failed'"
