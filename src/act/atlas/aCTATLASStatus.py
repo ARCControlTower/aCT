@@ -28,20 +28,19 @@ class aCTATLASStatus(aCTATLASProcess):
         offlinesites = [site for site, a in self.sites.items() if a["status"] == "offline"]
         if offlinesites:
             siteStr = ",".join([f"'{site}'" for site in offlinesites])
-            offlinesitesselect = f"({siteStr})"
-            jobs = self.dbpanda.getJobs("(actpandastatus='starting' or actpandastatus='sent') and sitename in %s" % offlinesitesselect,
+            jobs = self.dbpanda.getJobs(f"(actpandastatus='starting' or actpandastatus='sent') and sitename in ({siteStr})",
                                         ["pandaid", "arcjobid", "siteName", "id"])
             for job in jobs:
                 self.stopOnFlag()
-                self.log.info("Cancelling starting job for %d for offline site %s" % (job["pandaid"], job["siteName"]))
-                select = "id=%s" % job["id"]
+                self.log.info(f"Cancelling starting appjob({job['pandaid']}) for offline site {job['siteName']}")
+                select = f"id={job['id']}"
                 self.dbpanda.updateJobs(select, {"actpandastatus": "failed", "pandastatus": "failed",
                                                     "error": "Starting job was killed because queue went offline"})
                 if job["arcjobid"]:
                     self.dbarc.updateArcJob(job["arcjobid"], {"arcstate": "tocancel"})
 
         # Get jobs killed by panda
-        jobs = self.dbpanda.getJobs("actpandastatus='tobekilled' and siteName in %s limit 100" % self.sitesselect,
+        jobs = self.dbpanda.getJobs(f"actpandastatus='tobekilled' and siteName in {self.sitesselect} limit 100",
                                     ["pandaid", "arcjobid", "pandastatus", "id", "siteName"])
         if not jobs:
             return
@@ -50,8 +49,8 @@ class aCTATLASStatus(aCTATLASProcess):
 
             self.stopOnFlag()
 
-            self.log.info("Cancelling arc job for %d", job["pandaid"])
-            select = "id=%s" % job["id"]
+            self.log.info(f"Cancelling arc job for {job['pandaid']}")
+            select = f"id={job['id']}"
 
             # Check if arcjobid is set before cancelling the job
             if not job["arcjobid"]:
@@ -59,7 +58,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 continue
 
             # Put timings in the DB
-            arcselect = "arcjobid='%s' and arcjobs.id=pandajobs.arcjobid and sitename in %s" % (job["arcjobid"], self.sitesselect)
+            arcselect = f"arcjobid={job['arcjobid']} and arcjobs.id=pandajobs.arcjobid and sitename in {self.sitesselect}"
             columns = ["arcjobs.EndTime", "UsedTotalWallTime", "stdout", "JobID", "appjobid", "siteName", "cluster", "metadata",
                         "ExecutionNode", "pandaid", "UsedTotalCPUTime", "ExitCode", "arcjobs.Error", "sendhb", "pandajobs.created", "corecount"]
 
@@ -73,7 +72,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
             # Check if job was manually killed
             if job["pandastatus"] is not None:
-                self.log.info("%s: Manually killed, will report failure to panda" % job["pandaid"])
+                self.log.info(f"{job['pandaid']}: Manually killed, will report failure to panda")
                 # Skip validator since there is no metadata.xml
                 desc["actpandastatus"] = "failed"
                 desc["pandastatus"] = "failed"
@@ -107,18 +106,19 @@ class aCTATLASStatus(aCTATLASProcess):
         """
         select = "((arcjobs.arcstate in ('submitted', 'holding') and pandajobs.actpandastatus='sent') or"
         select += " (arcjobs.arcstate in ('tosubmit', 'submitting', 'submitted', 'holding') and pandajobs.actpandastatus='running'))"
-        select += " and arcjobs.id=pandajobs.arcjobid and pandajobs.sitename in %s limit 100000" % self.sitesselect
+        select += f" and arcjobs.id=pandajobs.arcjobid and pandajobs.sitename in {self.sitesselect} limit 100000"
         columns = ["arcjobs.id", "arcjobs.cluster", "arcjobs.appjobid"]
         jobstoupdate = self.dbarc.getArcJobsInfo(select, columns=columns, tables="arcjobs,pandajobs")
 
         if len(jobstoupdate) == 0:
             return
         else:
-            self.log.debug("Found %d submitted jobs (%s)" % (len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([job["appjobid"] for job in jobstoupdate])
+            self.log.debug(f"Found {len(jobstoupdate)} submitted jobs ({idstr})")
 
         for aj in jobstoupdate:
             self.stopOnFlag()
-            select = "arcjobid='"+str(aj["id"])+"'"
+            select = f"arcjobid={aj['id']}"
             desc = {}
             desc["pandastatus"] = "starting"
             desc["actpandastatus"] = "starting"
@@ -146,7 +146,7 @@ class aCTATLASStatus(aCTATLASProcess):
             select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate in ('running') and pandajobs.actpandastatus in ('starting', 'sent')"
         if state == "finishing":
             select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate in ('finishing') and pandajobs.actpandastatus in ('starting', 'sent', 'running')"
-        select += " and pandajobs.sitename in %s limit 100000" % self.sitesselect
+        select += f" and pandajobs.sitename in {self.sitesselect} limit 100000"
 
         columns = ["arcjobs.id", "arcjobs.UsedTotalWalltime", "arcjobs.ExecutionNode",
                    "arcjobs.cluster", "arcjobs.RequestedSlots", "pandajobs.pandaid", "pandajobs.siteName", "arcjobs.appjobid", "arcjobs.tstate"]
@@ -155,13 +155,14 @@ class aCTATLASStatus(aCTATLASProcess):
         if len(jobstoupdate) == 0:
             return
         else:
-            self.log.debug("Found %s: %d jobs (%s)" % (state, len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([job["appjobid"] for job in jobstoupdate])
+            self.log.debug(f"Found {state}: {len(jobstoupdate)} jobs ({idstr})")
 
         for aj in jobstoupdate:
 
             self.stopOnFlag()
 
-            select = "arcjobid='"+str(aj["id"])+"'"
+            select = f"arcjobid={aj['id']}"
             desc = {}
             desc["pandastatus"] = "running"
             desc["actpandastatus"] = "running"
@@ -170,7 +171,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 desc["actpandastatus"] = "transferring"
             if len(aj["ExecutionNode"]) > 255:
                 desc["node"] = aj["ExecutionNode"][:254]
-                self.log.warning("%s: Truncating wn hostname from %s to %s" % (aj["pandaid"], aj["ExecutionNode"], desc["node"]))
+                self.log.warning(f"{aj['pandaid']}: Truncating wn hostname from {aj['ExecutionNode']} to {desc['node']}")
             else:
                 desc["node"] = aj["ExecutionNode"]
             desc["computingElement"] = urlparse(aj["cluster"]).hostname
@@ -179,7 +180,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
             # When true pilot job has started running, turn of aCT heartbeats
             if self.sites[aj["siteName"]]["truepilot"]:
-                self.log.info("%s: Job is running so stop sending heartbeats", aj["pandaid"])
+                self.log.info(f"{aj['pandaid']}: Job is running so stop sending heartbeats")
                 desc["sendhb"] = 0
             else:
                 # Update APFmon (done by wrapper for truepilot)
@@ -213,20 +214,21 @@ class aCTATLASStatus(aCTATLASProcess):
         select += " and pandajobs.actpandastatus != 'validating'"
         select += " and pandajobs.actpandastatus != 'cleaning'"
         select += " and pandajobs.actpandastatus != 'resubmitting'"
-        select += " and pandajobs.sitename in %s limit 100000" % self.sitesselect
+        select += f" and pandajobs.sitename in {self.sitesselect} limit 100000"
         columns = ["arcjobs.id", "arcjobs.UsedTotalWallTime", "arcjobs.EndTime", "arcjobs.appjobid", "pandajobs.sendhb", "pandajobs.siteName"]
         jobstoupdate = self.dbarc.getArcJobsInfo(select, tables="arcjobs,pandajobs", columns=columns)
 
         if len(jobstoupdate) == 0:
             return
         else:
-            self.log.debug("Found %d finished jobs (%s)" % (len(jobstoupdate), ",".join([j["appjobid"] for j in jobstoupdate])))
+            idstr = ",".join([job['appjobid'] for job in jobstoupdate])
+            self.log.debug(f"Found {len(jobstoupdate)} finished jobs ({idstr})")
 
         for aj in jobstoupdate:
 
             self.stopOnFlag()
 
-            select = "arcjobid='"+str(aj["id"])+"'"
+            select = f"arcjobid={aj['id']}"
             desc = {}
             desc["pandastatus"] = "transferring"
             desc["actpandastatus"] = "tovalidate"
@@ -234,7 +236,7 @@ class aCTATLASStatus(aCTATLASProcess):
             desc["endTime"] = aj["EndTime"]
             # True pilot job may have gone straight to finished, turn off aCT heartbeats if necessary
             if self.sites[aj["siteName"]]["truepilot"] and aj["sendhb"] == 1:
-                self.log.info("%s: Job finished so stop sending heartbeats", aj["appjobid"])
+                self.log.info(f"{aj['appjobid']}: Job finished so stop sending heartbeats")
                 desc["sendhb"] = 0
 
             if not self.sites[aj["siteName"]]["truepilot"]:
@@ -262,7 +264,7 @@ class aCTATLASStatus(aCTATLASProcess):
             self.stopOnFlag()
 
             if self.sites[aj["siteName"]]["truepilot"]:
-                self.log.info("%s: No resubmission for true pilot job", aj["appjobid"])
+                self.log.info(f"{aj['appjobid']}: No resubmission for true pilot job")
                 failedjobs += [aj]
                 continue
             resubmit=False
@@ -271,8 +273,8 @@ class aCTATLASStatus(aCTATLASProcess):
                 if aj["Error"].find(error) != -1:
                     resubmit=True
             if resubmit:
-                self.log.info("%s: Resubmitting %d %s %s" % (aj["appjobid"],aj["arcjobid"],aj["JobID"],aj["Error"]))
-                select = "arcjobid='"+str(aj["arcjobid"])+"'"
+                self.log.info(f"{aj['appjobid']}: Resubmitting {aj['arcjobid']} {aj['JobID']} {aj['Error']}")
+                select = f"arcjobid={aj['id']}"
                 jd={}
                 # Validator processes this state before setting back to starting
                 jd["pandastatus"] = "starting"
@@ -322,7 +324,7 @@ class aCTATLASStatus(aCTATLASProcess):
             log+="".join(lns[:nlines])
             # copy logfiles to failedlogs dir
             try:
-                f=open(os.path.join(self.tmpdir, "failedlogs", str(pandaid)+".log"),"w")
+                f=open(os.path.join(self.tmpdir, "failedlogs", f"{pandaid}.log"),"w")
                 f.write(log)
                 f.close()
             except:
@@ -340,7 +342,7 @@ class aCTATLASStatus(aCTATLASProcess):
         if not arcjobs:
             return
 
-        self.log.info("processing %d failed jobs" % len(arcjobs))
+        self.log.info(f"processing {len(arcjobs)} failed jobs")
         for aj in arcjobs:
 
             self.stopOnFlag()
@@ -348,7 +350,7 @@ class aCTATLASStatus(aCTATLASProcess):
             jobid=aj["JobID"]
             if not jobid:
                 # Job was not even submitted, there is no more information
-                self.log.warning("%s: Job has not been submitted yet so no information to report", aj["appjobid"])
+                self.log.warning(f"{aj['appjobid']}: Job has not been submitted yet so no information to report")
                 continue
 
             sessionid=jobid[jobid.rfind("/")+1:]
@@ -359,13 +361,13 @@ class aCTATLASStatus(aCTATLASProcess):
             # copy from tmp to outd. tmp dir will be cleaned in validator
             localdir = os.path.join(self.tmpdir, sessionid)
             gmlogerrors = os.path.join(localdir, "gmlog", "errors")
-            arcjoblog = os.path.join(outd, "%s.log" % aj["appjobid"])
+            arcjoblog = os.path.join(outd, f"{aj['appjobid']}.log")
             if not os.path.exists(arcjoblog):
                 try:
                     shutil.copy(gmlogerrors, arcjoblog)
                     os.chmod(arcjoblog, 0o644)
                 except:
-                    self.log.error("Failed to copy %s" % gmlogerrors)
+                    self.log.error(f"Failed to copy {gmlogerrors}")
 
             pilotlog = aj["stdout"]
             if not pilotlog and os.path.exists(localdir):
@@ -376,10 +378,10 @@ class aCTATLASStatus(aCTATLASProcess):
             if pilotlog:
                 try:
                     shutil.copy(os.path.join(localdir, pilotlog),
-                                os.path.join(outd, "%s.out" % aj["appjobid"]))
-                    os.chmod(os.path.join(outd, "%s.out" % aj["appjobid"]), 0o644)
+                                os.path.join(outd, f"{aj['appjobid']}.out"))
+                    os.chmod(os.path.join(outd, f"{aj['appjobid']}.out", 0o644))
                 except Exception as e:
-                    self.log.warning("%s: Failed to copy job output for %s: %s" % (aj["appjobid"], jobid, str(e)))
+                    self.log.warning(f"{aj['appjobid']}: Failed to copy job output for {jobid}: {e}")
 
             try:
                 smeta = json.loads(aj["metadata"].decode())
@@ -399,7 +401,7 @@ class aCTATLASStatus(aCTATLASProcess):
             pupdate.pilotID = f"{self.conf.joblog.urlprefix}/{date}/{aj['siteName']}/{aj['appjobid']}.out|Unknown|Unknown|Unknown|Unknown"
             if len(aj["ExecutionNode"]) > 255:
                 pupdate.node = aj["ExecutionNode"][:254]
-                self.log.warning("%s: Truncating wn hostname from %s to %s" % (aj["pandaid"], aj["ExecutionNode"], pupdate.node))
+                self.log.warning(f"{aj['pandaid']}: Truncating wn hostname from {aj['ExecutionNode']} to {pupdate.node}")
             else:
                 pupdate.node = aj["ExecutionNode"]
             pupdate.node = aj["ExecutionNode"]
@@ -408,7 +410,7 @@ class aCTATLASStatus(aCTATLASProcess):
             pupdate.cpuConsumptionUnit = "seconds"
             pupdate.cpuConversionFactor = 1
             pupdate.coreCount = aj["corecount"] or 1
-            pupdate.pilotTiming = "0|0|%s|0" % aj["UsedTotalWallTime"]
+            pupdate.pilotTiming = f"0|0|{aj['UsedTotalWallTime']}|0"
             pupdate.errorCode = 9000
             pupdate.errorDiag = aj["Error"]
             # set start/endtime
@@ -418,8 +420,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 # Sanity check for efficiency > 100%
                 cputimepercore = pupdate.cpuConsumptionTime / pupdate.coreCount
                 if aj["UsedTotalWallTime"] < cputimepercore:
-                    self.log.warning("%s: Adjusting reported walltime %d to CPU time %d" %
-                                      (aj["appjobid"], aj["UsedTotalWallTime"], cputimepercore))
+                    self.log.warning(f"{aj['appjobid']}: Adjusting reported walltime {aj['UsedTotalWallTime']} to CPU time {cputimepercore}")
                     pupdate.startTime = (aj["EndTime"] - datetime.timedelta(0, cputimepercore)).strftime("%Y-%m-%d %H:%M:%S")
             else:
                 # Set walltime to cputime per core
@@ -430,10 +431,10 @@ class aCTATLASStatus(aCTATLASProcess):
                 if smeta and smeta.get("harvesteraccesspoint"):
                     hbfile = os.path.join(smeta["harvesteraccesspoint"], "jobReport.json")
                 else:
-                    hbfile = os.path.join(self.tmpdir, "heartbeats", str(aj["pandaid"])+".json")
+                    hbfile = os.path.join(self.tmpdir, "heartbeats", f"{aj['pandaid']}.json")
                 pupdate.writeToFile(hbfile)
             except Exception as e:
-                self.log.warning("%s: Failed to write file %s: %s" % (aj["appjobid"], hbfile, str(e)))
+                self.log.warning(f"{aj['appjobid']}: Failed to write file {hbfile}: {e}")
 
     def updateFailedJobs(self):
         """
@@ -454,14 +455,14 @@ class aCTATLASStatus(aCTATLASProcess):
         arcjobs = self.dbarc.getArcJobsInfo(select, columns)
         for aj in arcjobs:
             self.stopOnFlag()
-            select = "id='"+str(aj["id"])+"'"
+            select = f"id={aj['id']}"
             desc = {"arcstate":"tofetch", "tarcstate": self.dbarc.getTimeStamp()}
             self.dbarc.updateArcJobs(desc, select)
 
         # Look for failed final states in ARC which are still starting or running in panda
         select = "(arcstate='donefailed' or arcstate='cancelled' or arcstate='lost')"
         select += " and actpandastatus in ('sent', 'starting', 'running', 'transferring')"
-        select += " and pandajobs.arcjobid = arcjobs.id and siteName in %s limit 100000" % self.sitesselect
+        select += f" and pandajobs.arcjobid = arcjobs.id and siteName in {self.sitesselect} limit 100000"
         columns = ["arcstate", "arcjobid", "appjobid", "JobID", "arcjobs.Error", "arcjobs.EndTime",
                    "siteName", "ExecutionNode", "pandaid", "UsedTotalCPUTime", "pandajobs.created",
                    "UsedTotalWallTime", "ExitCode", "sendhb", "stdout", "metadata", "cluster", "corecount"]
@@ -474,17 +475,20 @@ class aCTATLASStatus(aCTATLASProcess):
         # get donefailed jobs
         failedjobs = [job for job in jobstoupdate if job["arcstate"] == "donefailed"]
         if len(failedjobs) != 0:
-            self.log.debug("Found %d failed jobs (%s)" % (len(failedjobs), ",".join([j["appjobid"] for j in failedjobs])))
+            idstr = ",".join([job["appjobid"] for job in failedjobs])
+            self.log.debug(f"Found {len(failedjobs)} failed jobs ({idstr})")
 
         # get lost jobs
         lostjobs = [job for job in jobstoupdate if job["arcstate"] == "lost"]
         if len(lostjobs) != 0:
-            self.log.debug("Found %d lost jobs (%s)" % (len(lostjobs), ",".join([j["appjobid"] for j in lostjobs])))
+            idstr = ",".join([job["appjobid"] for job in lostjobs])
+            self.log.debug(f"Found {len(lostjobs)} lost jobs ({idstr})")
 
         # get cancelled jobs
         cancelledjobs = [job for job in jobstoupdate if job["arcstate"] == "cancelled"]
         if len(cancelledjobs) != 0:
-            self.log.debug("Found %d cancelled jobs (%s)" % (len(cancelledjobs), ",".join([j["appjobid"] for j in cancelledjobs])))
+            idstr = ",".join([job["appjobid"] for job in cancelledjobs])
+            self.log.debug(f"Found {len(cancelledjobs)} cancelled jobs ({idstr})")
 
         # try to resubmit on certain errors
         failedjobs = self.checkFailed(failedjobs)
@@ -494,7 +498,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         for aj in failedjobs:
             self.stopOnFlag()
-            select = "arcjobid='"+str(aj["arcjobid"])+"'"
+            select = f"arcjobid={aj['arcjobid']}"
             desc = {}
             desc["pandastatus"] = "transferring"
             desc["actpandastatus"] = "toclean" # to clean up any output
@@ -503,7 +507,7 @@ class aCTATLASStatus(aCTATLASProcess):
             desc["error"] = aj["Error"]
             # True pilot job may have gone straight to failed, turn off aCT heartbeats if necessary
             if self.sites[aj["siteName"]]["truepilot"] and aj["sendhb"] == 1:
-                self.log.info("%s: Job finished so stop sending heartbeats", aj["appjobid"])
+                self.log.info(f"{aj['appjobid']}: Job finished so stop sending heartbeats")
                 desc["sendhb"] = 0
 
             if not self.sites[aj["siteName"]]["truepilot"]:
@@ -519,18 +523,18 @@ class aCTATLASStatus(aCTATLASProcess):
         # clean lost pilot jobs or resubmit other lost jobs
         for aj in lostjobs:
             self.stopOnFlag()
-            select = "arcjobid='"+str(aj["arcjobid"])+"'"
+            select = f"arcjobid={aj['arcjobid']}"
             desc={}
 
             # For truepilot, just set to clean and transferring to clean up arc job
             if self.sites[aj["siteName"]]["truepilot"]:
-                self.log.info("%s: Job is lost, cleaning up arc job", aj["appjobid"])
+                self.log.info(f"{aj['appjobid']}: Job is lost, cleaning up arc job")
                 desc["sendhb"] = 0
                 desc["pandastatus"] = "transferring"
                 desc["actpandastatus"] = "toclean"
                 desc["error"] = "Job was lost from ARC CE"
             else:
-                self.log.info("%s: Resubmitting lost job %d %s %s" % (aj["appjobid"], aj["arcjobid"],aj["JobID"],aj["Error"]))
+                self.log.info(f"{aj['appjobid']}: Resubmitting lost job {aj['arcjobid']} {aj['JobID']} {aj['Error']}")
                 desc["pandastatus"] = "starting"
                 desc["actpandastatus"] = "starting"
                 desc["arcjobid"] = None
@@ -540,17 +544,17 @@ class aCTATLASStatus(aCTATLASProcess):
         for aj in cancelledjobs:
             self.stopOnFlag()
             # Jobs were unexpectedly killed in arc, resubmit and clean
-            select = "arcjobid='"+str(aj["arcjobid"])+"'"
+            select = f"arcjobid={aj['arcjobid']}"
             desc = {}
             # For truepilot, just set to clean and transferring to clean up arc job
             if self.sites[aj["siteName"]]["truepilot"]:
-                self.log.info("%s: Job was cancelled, cleaning up arc job", aj["appjobid"])
+                self.log.info(f"{aj['appjobid']}: Job was cancelled, cleaning up arc job")
                 desc["sendhb"] = 0
                 desc["pandastatus"] = "transferring"
                 desc["actpandastatus"] = "toclean"
                 desc["error"] = aj["Error"]
             else:
-                self.log.info("%s: Resubmitting cancelled job %d %s" % (aj["appjobid"], aj["arcjobid"],aj["JobID"]))
+                self.log.info(f"{aj['appjobid']}: Resubmitting cancelled job {aj['arcjobid']} {aj['JobID']}")
                 desc["pandastatus"] = "starting"
                 desc["actpandastatus"] = "starting"
                 desc["arcjobid"] = None
@@ -575,7 +579,7 @@ class aCTATLASStatus(aCTATLASProcess):
         jobs = self.dbarc.getArcJobsInfo(select, ["id", "appjobid"])
         for job in jobs:
             self.stopOnFlag()
-            self.log.info("%s: Deleting from arcjobs unsubmitted job %d", job["appjobid"], job["id"])
+            self.log.info(f"{job['appjobid']}: Deleting from arcjobs unsubmitted job {job['id']}")
             self.dbarc.deleteArcJob(job["id"])
 
         select = "(arcstate='done' or arcstate='lost' or arcstate='cancelled' or arcstate='donefailed') \
@@ -586,9 +590,9 @@ class aCTATLASStatus(aCTATLASProcess):
             self.stopOnFlag()
             # done jobs should not be there, log a warning
             if job["arcstate"] == "done":
-                self.log.warning("%s: Removing orphaned done job %d", job["appjobid"], job["id"])
+                self.log.warning(f"{job['appjobid']}: Removing orphaned done job {job['id']}")
             else:
-                self.log.info("%s: Cleaning left behind %s job %d", job["appjobid"], job["arcstate"], job["id"])
+                self.log.info(f"{job['appjobid']}: Cleaning left behind {job['arcstate']} job {job['id']}")
             self.dbarc.updateArcJob(job["id"], cleandesc)
             if job["JobID"] and job["JobID"].rfind("/") != -1:
                 sessionid = job["JobID"][job["JobID"].rfind("/"):]
@@ -596,12 +600,12 @@ class aCTATLASStatus(aCTATLASProcess):
                 shutil.rmtree(localdir, ignore_errors=True)
 
         select = "arcstate='cancelled' and (actpandastatus in ('cancelled', 'donecancelled', 'failed', 'donefailed')) " \
-                "and pandajobs.arcjobid = arcjobs.id and siteName in %s" % self.sitesselect
+                 f"and pandajobs.arcjobid = arcjobs.id and siteName in {self.sitesselect}"
         cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
         jobs = self.dbarc.getArcJobsInfo(select, ["arcjobs.id", "arcjobs.appjobid", "arcjobs.JobID"], tables="arcjobs, pandajobs")
         for job in jobs:
             self.stopOnFlag()
-            self.log.info("%s: Cleaning cancelled job %d", job["appjobid"], job["id"])
+            self.log.info(f"{job['appjobid']}: Cleaning cancelled job {job['id']}")
             self.dbarc.updateArcJob(job["id"], cleandesc)
             if job["JobID"] and job["JobID"].rfind("/") != -1:
                 sessionid = job["JobID"][job["JobID"].rfind("/"):]
