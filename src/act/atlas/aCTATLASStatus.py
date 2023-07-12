@@ -35,7 +35,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 self.log.info(f"Cancelling starting appjob({job['pandaid']}) for offline site {job['siteName']}")
                 select = f"id={job['id']}"
                 self.dbpanda.updateJobs(select, {"actpandastatus": "failed", "pandastatus": "failed",
-                                                    "error": "Starting job was killed because queue went offline"})
+                                                 "error": "Starting job was killed because queue went offline"})
                 if job["arcjobid"]:
                     self.dbarc.updateArcJob(job["arcjobid"], {"arcstate": "tocancel"})
 
@@ -60,7 +60,7 @@ class aCTATLASStatus(aCTATLASProcess):
             # Put timings in the DB
             arcselect = f"arcjobid={job['arcjobid']} and arcjobs.id=pandajobs.arcjobid and sitename in {self.sitesselect}"
             columns = ["arcjobs.EndTime", "UsedTotalWallTime", "stdout", "JobID", "appjobid", "siteName", "cluster", "metadata",
-                        "ExecutionNode", "pandaid", "UsedTotalCPUTime", "ExitCode", "arcjobs.Error", "sendhb", "pandajobs.created", "corecount"]
+                       "ExecutionNode", "pandaid", "UsedTotalCPUTime", "ExitCode", "arcjobs.Error", "sendhb", "pandajobs.created", "corecount"]
 
             arcjobs = self.dbarc.getArcJobsInfo(arcselect, columns=columns, tables="arcjobs,pandajobs")
             desc = {}
@@ -126,7 +126,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 desc["computingElement"] = urlparse(aj["cluster"]).hostname
             self.dbpanda.updateJobs(select, desc)
 
-    def updateRunningJobs(self,state):
+    def updateRunningJobs(self, state):
         """
         Check for new running jobs.
 
@@ -267,19 +267,19 @@ class aCTATLASStatus(aCTATLASProcess):
                 self.log.info(f"{aj['appjobid']}: No resubmission for true pilot job")
                 failedjobs += [aj]
                 continue
-            resubmit=False
+            resubmit = False
             # TODO: errors part of aCTConfigARC should probably be moved to aCTConfigAPP.
             for error in self.arcconf.errors.toresubmit.arcerrors:
                 if aj["Error"].find(error) != -1:
-                    resubmit=True
+                    resubmit = True
             if resubmit:
                 self.log.info(f"{aj['appjobid']}: Resubmitting {aj['arcjobid']} {aj['JobID']} {aj['Error']}")
                 select = f"arcjobid={aj['id']}"
-                jd={}
+                jd = {}
                 # Validator processes this state before setting back to starting
                 jd["pandastatus"] = "starting"
                 jd["actpandastatus"] = "toresubmit"
-                self.dbpanda.updateJobs(select,jd)
+                self.dbpanda.updateJobs(select, jd)
                 #resubmitting=True
             else:
                 failedjobs += [aj]
@@ -292,39 +292,38 @@ class aCTATLASStatus(aCTATLASProcess):
         'failed' file and errors from the pilot log if available. Creates a
         local copy under tmp/failedlogs.
         """
-        nlines=20
-        log=""
+        nlines = 20
+        log = ""
         try:
-            f=open(outd+"/gmlog/failed","r")
-            log+="---------------------------------------------------------------\n"
-            log+="GMLOG: failed\n"
-            log+="---------------------------------------------------------------\n"
-            log+="".join(f.readlines())
+            f = open(outd+"/gmlog/failed", "r")
+            log += "---------------------------------------------------------------\n"
+            log += "GMLOG: failed\n"
+            log += "---------------------------------------------------------------\n"
+            log += "".join(f.readlines())
             f.close()
         except:
             pass
 
-
         import glob
-        lf=glob.glob(outd+"/log*")
+        lf = glob.glob(outd+"/log*")
         try:
-            f=open(lf[0],"r")
-            lines=f.readlines()
-            log+="---------------------------------------------------------------\n"
-            log+="LOGFILE: tail\n"
-            log+="---------------------------------------------------------------\n"
-            lns=[]
+            f = open(lf[0],"r")
+            lines = f.readlines()
+            log += "---------------------------------------------------------------\n"
+            log += "LOGFILE: tail\n"
+            log += "---------------------------------------------------------------\n"
+            lns = []
             for l in lines:
-                if re.match(".*error",l,re.IGNORECASE):
+                if re.match(".*error", l, re.IGNORECASE):
                     lns.append(l)
-                if re.match(".*warning",l,re.IGNORECASE):
+                if re.match(".*warning", l, re.IGNORECASE):
                     lns.append(l)
-                if re.match(".*failed",l,re.IGNORECASE):
+                if re.match(".*failed", l, re.IGNORECASE):
                     lns.append(l)
-            log+="".join(lns[:nlines])
+            log += "".join(lns[:nlines])
             # copy logfiles to failedlogs dir
             try:
-                f=open(os.path.join(self.tmpdir, "failedlogs", f"{pandaid}.log"),"w")
+                f = open(os.path.join(self.tmpdir, "failedlogs", f"{pandaid}.log"), "w")
                 f.write(log)
                 f.close()
             except:
@@ -347,13 +346,13 @@ class aCTATLASStatus(aCTATLASProcess):
 
             self.stopOnFlag()
 
-            jobid=aj["JobID"]
+            jobid = aj["JobID"]
             if not jobid:
                 # Job was not even submitted, there is no more information
                 self.log.warning(f"{aj['appjobid']}: Job has not been submitted yet so no information to report")
                 continue
 
-            sessionid=jobid[jobid.rfind("/")+1:]
+            sessionid = jobid[jobid.rfind("/")+1:]
             date = aj["created"].strftime("%Y-%m-%d")
             outd = os.path.join(self.conf.joblog.dir, date, aj["siteName"])
             # Make sure the path to outd exists
@@ -456,7 +455,7 @@ class aCTATLASStatus(aCTATLASProcess):
         for aj in arcjobs:
             self.stopOnFlag()
             select = f"id={aj['id']}"
-            desc = {"arcstate":"tofetch", "tarcstate": self.dbarc.getTimeStamp()}
+            desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
             self.dbarc.updateArcJobs(desc, select)
 
         # Look for failed final states in ARC which are still starting or running in panda
@@ -524,7 +523,7 @@ class aCTATLASStatus(aCTATLASProcess):
         for aj in lostjobs:
             self.stopOnFlag()
             select = f"arcjobid={aj['arcjobid']}"
-            desc={}
+            desc = {}
 
             # For truepilot, just set to clean and transferring to clean up arc job
             if self.sites[aj["siteName"]]["truepilot"]:
@@ -538,7 +537,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 desc["pandastatus"] = "starting"
                 desc["actpandastatus"] = "starting"
                 desc["arcjobid"] = None
-            self.dbpanda.updateJobs(select,desc)
+            self.dbpanda.updateJobs(select, desc)
 
         # clean cancelled pilot jobs and resubmit other cancelled jobs
         for aj in cancelledjobs:
@@ -585,7 +584,7 @@ class aCTATLASStatus(aCTATLASProcess):
         select = "(arcstate='done' or arcstate='lost' or arcstate='cancelled' or arcstate='donefailed') \
                 and arcjobs.id not in (select arcjobid from pandajobs where arcjobid is not NULL)"
         jobs = self.dbarc.getArcJobsInfo(select, ["id", "appjobid", "arcstate", "JobID"])
-        cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+        cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
         for job in jobs:
             self.stopOnFlag()
             # done jobs should not be there, log a warning
@@ -601,7 +600,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         select = "arcstate='cancelled' and (actpandastatus in ('cancelled', 'donecancelled', 'failed', 'donefailed')) " \
                  f"and pandajobs.arcjobid = arcjobs.id and siteName in {self.sitesselect}"
-        cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+        cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
         jobs = self.dbarc.getArcJobsInfo(select, ["arcjobs.id", "arcjobs.appjobid", "arcjobs.JobID"], tables="arcjobs, pandajobs")
         for job in jobs:
             self.stopOnFlag()
