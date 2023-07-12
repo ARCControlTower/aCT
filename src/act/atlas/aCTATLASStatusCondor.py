@@ -56,7 +56,7 @@ class aCTATLASStatusCondor(aCTATLASProcess):
                 continue
 
             # Put timings in the DB
-            condorselect = f"condorjobid={job['condorjobid']} and condorjobs.id=pandajobs.condorjobid and siteName in {self.sitesselect}")
+            condorselect = f"condorjobid={job['condorjobid']} and condorjobs.id=pandajobs.condorjobid and siteName in {self.sitesselect}"
             condorjobs = self.dbcondor.getCondorJobsInfo(condorselect, tables="condorjobs,pandajobs")
             desc = {}
             if condorjobs:
