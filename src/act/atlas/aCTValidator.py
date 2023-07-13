@@ -940,7 +940,7 @@ class OutputChecker(ARCWorker):
             dp = aCTUtils.DataPoint(str(url), self.credential)
             if not dp or not dp.h or url.startswith('davs://srmdav.ific.uv.es:8443'):
                 self.log.warning(f"URL {url} not supported, skipping validation")
-                self.resultQueue.put(jobid, url, JobStatus.OK))
+                self.resultQueue.put((jobid, url, JobStatus.OK))
                 continue
             count += 1
             datapointlist.append(dp.h)
