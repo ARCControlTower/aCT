@@ -43,9 +43,8 @@ class aCTProcess:
     __call__(*args, **kwargs) -> run(*args, *kwargs) -> setup(*args, **kwargs)
 
     The aCTProcess can exit in two ways:
-    - by setting the self.terminate flag (setStopFlag method); the flag is
-      checked at least once per main loop and in more involved operations it is
-      used more granularly
+    - by setting the self.terminate flag ; the flag is checked at least once
+      per main loop and in more involved operations it is used more granularly
     - by raising the ExitProcessException (stopWithException method); this one
       should not be used when transaction integrity is required (e. g. between
       modification of multiple tables and executing some operations with
@@ -134,22 +133,14 @@ class aCTProcess:
             msg += f' for cluster {self.cluster}'
         self.log.info(msg)
 
-    def setStopFlag(self):
-        """Set flag for process termination."""
-        self.terminate.set()
-
     def stopWithException(self):
         """Raise exception for process termination."""
-        self.setStopFlag()
+        self.terminate.set()
         raise ExitProcessException()
-
-    def isStopFlagSet(self):
-        """Return the state of termination flag."""
-        return self.terminate.is_set()
 
     def stopOnFlag(self):
         """Exit with exception on termination flag."""
-        if self.isStopFlagSet():
+        if self.terminate.is_set():
             raise ExitProcessException()
 
     def run(self):
@@ -173,7 +164,7 @@ class aCTProcess:
 
     def exitHandler(self, signum, frame):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        self.setStopFlag()
+        self.terminate.set()
 
 
 # The reason for inheriting from BaseException instead of recommended Exception
