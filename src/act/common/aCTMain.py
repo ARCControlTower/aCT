@@ -89,11 +89,11 @@ class aCTMain(aCTProcess):
 
     def sigintHandler(self, signum, frame):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        self.stopWithException()
+        self.terminate.set()
 
     def sigtermHandler(self, signum, frame):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        self.stopWithException()
+        self.terminate.set()
 
 
 def main():
