@@ -346,6 +346,7 @@ class aCTAutopilot(aCTATLASProcess):
 
         aCTUtils.RunThreadsSplit(tlist, self.nthreads)
 
+        tstamp = self.dbpanda.getTimeStamp()
         for t in tlist:
             if t.result == None:
                 continue
@@ -359,7 +360,7 @@ class aCTAutopilot(aCTATLASProcess):
                 jd['actpandastatus']='donefailed'
             if 'pilotErrorCode' in t.args and t.args['pilotErrorCode'] == 1144:
                 jd['actpandastatus']='donecancelled'
-            jd['theartbeat']=self.dbpanda.getTimeStamp()
+            jd['theartbeat'] = tstamp
 
             self.dbpanda.updateJob(t.id,jd)
             # Send done message to APFMon
@@ -440,6 +441,7 @@ class aCTAutopilot(aCTATLASProcess):
             return
 
         self.log.info(f'Archiving {len(jobs)} jobs')
+        tstamp = self.dbpanda.getTimeStamp()
         for job in jobs:
             self.stopOnFlag()
             self.log.info(f"Archiving panda job appjob({job['pandaid']})")
@@ -450,8 +452,8 @@ class aCTAutopilot(aCTATLASProcess):
             elif job['endtime']:
                 job['starttime'] = job['endtime']
             else:
-                job['starttime'] = self.dbpanda.getTimeStamp()
-                job['endtime'] = self.dbpanda.getTimeStamp()
+                job['starttime'] = tstamp
+                job['endtime'] = tstamp
 
             # archive table doesn't have modified
             jobarchive = job.copy()

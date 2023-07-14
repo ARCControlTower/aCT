@@ -77,6 +77,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         if not cancelledjobs:
             return
 
+        canceldesc = {"arcstate": "tocancel", "tarcstate": self.dbarc.getTimeStamp()}
         for job in cancelledjobs:
 
             self.stopOnFlag()
@@ -89,8 +90,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
             if arcjob:
                 self.log.info(f"Cancelling arc job {arcjob['id']}")
                 select = "id='{}'".format(job['arcjobid'])
-                desc = {"arcstate": "tocancel", "tarcstate": self.dbarc.getTimeStamp()}
-                self.dbarc.updateArcJobs(desc, select)
+                self.dbarc.updateArcJobs(canceldesc, select)
                 if arcjob['JobID']:
                     # Job was submitted to wait for it to be cancelled
                     self.dbldmx.updateJob(job['id'], {'ldmxstatus': 'cancelling'})
@@ -118,6 +118,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         if not toresubmitjobs:
             return
 
+        canceldesc = {"arcstate": "tocancel", "tarcstate": self.dbarc.getTimeStamp()}
         for job in toresubmitjobs:
 
             self.stopOnFlag()
@@ -131,8 +132,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
             if arcjob:
                 self.log.info(f"Cancelling arc job {arcjob['id']}")
                 select = "id='{}'".format(job['arcjobid'])
-                desc = {"arcstate": "tocancel", "tarcstate": self.dbarc.getTimeStamp()}
-                self.dbarc.updateArcJobs(desc, select)
+                self.dbarc.updateArcJobs(canceldesc, select)
             else:
                 self.log.info(f"Job {job['id']} has no arc job")
 
@@ -153,11 +153,11 @@ class aCTLDMXStatus(aCTLDMXProcess):
         columns = ['id']
         arcjobs = self.dbarc.getArcJobsInfo(select, columns)
         if arcjobs:
+            fetchdesc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
             for aj in arcjobs:
                 self.stopOnFlag()
-                select = "id='{}'".format(str(aj["id"]))
-                desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
-                self.dbarc.updateArcJobs(desc, select)
+                select = f"id={aj['id']}"
+                self.dbarc.updateArcJobs(fetchdesc, select)
 
         # Look for failed final states in ARC which are still starting or running in LDMX
         select = "arcstate in ('donefailed', 'cancelled', 'lost') and arcjobs.id=ldmxjobs.arcjobid"
@@ -242,7 +242,7 @@ class aCTLDMXStatus(aCTLDMXProcess):
         select = "(arcstate='done' or arcstate='lost' or arcstate='cancelled' or arcstate='donefailed') \
                     and arcjobs.id not in (select arcjobid from ldmxjobs where arcjobid is not NULL)"
         jobs = self.dbarc.getArcJobsInfo(select, ['id', 'appjobid', 'arcstate', 'JobID'])
-        cleandesc = {"arcstate":"toclean", "tarcstate": self.dbarc.getTimeStamp()}
+        cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
         for job in jobs:
             self.stopOnFlag()
             # done jobs should not be there, log a warning

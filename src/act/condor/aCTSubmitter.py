@@ -125,8 +125,8 @@ class aCTSubmitter(aCTCondorProcess):
 
                 # mark submitting in db
                 jobs_taken = []
+                jd = {'cluster': self.cluster, 'condorstate': 'submitting', 'tcondorstate': self.db.getTimeStamp()}
                 for j in jobs:
-                    jd = {'cluster': self.cluster, 'condorstate': 'submitting', 'tcondorstate': self.db.getTimeStamp()}
                     self.db.updateCondorJobLazy(j['id'], jd)
                     jobs_taken.append(j)
                 jobs = jobs_taken
@@ -234,12 +234,13 @@ class aCTSubmitter(aCTCondorProcess):
         """
         jobs = self.db.getCondorJobsInfo(f"condorstate='submitting' and cluster='{self.cluster}'", ["id"])
 
+        desc = {"condorstate": "toresubmit", "tcondorstate": self.db.getTimeStamp()}
         for job in jobs:
             self.stopOnFlag()
             # set to toresubmit and the application should figure out what to do
             self.db.updateCondorJob(
                 job['id'],
-                {"condorstate": "toresubmit", "tcondorstate": self.db.getTimeStamp()}
+                desc
             )
 
     def processToCancel(self):
@@ -256,6 +257,7 @@ class aCTSubmitter(aCTCondorProcess):
         if not jobstocancel:
             return
 
+        tstamp = self.db.getTimeStamp()
         for job in jobstocancel:
 
             self.stopOnFlag()
@@ -266,7 +268,7 @@ class aCTSubmitter(aCTCondorProcess):
                 # Job not submitted
                 self.log.info(f"appjob({job['appjobid']}): Marking unsubmitted job cancelled")
                 self.db.updateCondorJob(job['id'], {"condorstate": "cancelled",
-                                                    "tcondorstate": self.db.getTimeStamp()})
+                                                    "tcondorstate": tstamp})
                 continue
 
             try:
@@ -276,7 +278,7 @@ class aCTSubmitter(aCTCondorProcess):
                 continue
             self.log.debug(f"appjob({job['appjobid']}): Cancellation returned {remove}")
             self.db.updateCondorJob(job['id'], {"condorstate": "cancelling",
-                                                "tcondorstate": self.db.getTimeStamp()})
+                                                "tcondorstate": tstamp})
             # TODO deal with failed cancel
             continue
 
@@ -291,6 +293,7 @@ class aCTSubmitter(aCTCondorProcess):
             f"condorstate='toresubmit' and cluster='{self.cluster}'",
             ['id', 'appjobid', 'ClusterId']
         )
+        desc = {"condorstate": "tosubmit", "tcondorstate": self.db.getTimeStamp(), "cluster": None, "ClusterId": None}
         for job in jobstoresubmit:
             self.stopOnFlag()
             # Clean up jobs which were submitted
@@ -303,7 +306,7 @@ class aCTSubmitter(aCTCondorProcess):
 
             self.db.updateCondorJob(
                 job['id'],
-                {"condorstate": "tosubmit", "tcondorstate": self.db.getTimeStamp(), "cluster": None, "ClusterId": None}
+                desc
             )
 
     def process(self):

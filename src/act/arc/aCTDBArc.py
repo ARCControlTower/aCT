@@ -176,7 +176,8 @@ class aCTDBArc(aCTDB):
         jobdescid = c.fetchone()['LAST_INSERT_ID()']
 
         j = self._job2db(job)
-        c.execute("insert into arcjobs (created,tstate,jobdesc"+",".join(j.keys())+") values ('"+str(self.getTimeStamp())+"','"+str(self.getTimeStamp())+"','"+str(jobdescid)+"','"+"','".join(j.values())+"')")
+        tstamp = self.getTimeStamp()
+        c.execute("insert into arcjobs (created,tstate,jobdesc"+",".join(j.keys())+") values ('"+str(tstamp)+"','"+str(tstamp)+"','"+str(jobdescid)+"','"+"','".join(j.values())+"')")
         c.execute("SELECT LAST_INSERT_ID()")
         row = c.fetchone()
         self.Commit()

@@ -281,6 +281,7 @@ class JobManager(object):
         if not jobs:
             return []
 
+        tstamp = self.arcdb.getTimeStamp()
         for job in jobs:
             if job['a_arcstate'] == 'failed':
                 patch = {'arcstate': 'tofetch'}
@@ -303,7 +304,7 @@ class JobManager(object):
                     patch = {'arcstate': 'tofetch'}
 
             where = f' id = {job["a_id"]}'
-            patch['tarcstate'] = self.arcdb.getTimeStamp()
+            patch['tarcstate'] = tstamp
             self.arcdb.updateArcJobs(patch, where)
 
         return [job['c_id'] for job in jobs]

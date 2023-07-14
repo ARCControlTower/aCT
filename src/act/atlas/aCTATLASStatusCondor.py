@@ -241,10 +241,10 @@ class aCTATLASStatusCondor(aCTATLASProcess):
         columns = ["id"]
         condorjobs = self.dbcondor.getCondorJobsInfo(select, columns)
 
+        desc = {"condorstate": "tofetch", "tcondorstate": self.dbcondor.getTimeStamp()}
         for cj in condorjobs:
             self.stopOnFlag()
-            select = "id='"+str(cj["id"])+"'"
-            desc = {"condorstate":"tofetch", "tcondorstate": self.dbcondor.getTimeStamp()}
+            select = f"id={cj['id']}"
             self.dbcondor.updateCondorJobs(desc, select)
 
         for cj in failedjobs:

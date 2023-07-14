@@ -25,12 +25,13 @@ class aCTFetcher(aCTCondorProcess):
 
         self.log.info(f"Fetching {len(jobstofetch)} jobs")
 
+        desc = {"condorstate": nextcondorstate, "tcondorstate": self.db.getTimeStamp()}
         for job in jobstofetch:
             self.stopOnFlag()
             self.log.info(f"appjob({job['appjobid']}): Finished with condorjob({job['ClusterId']})")
             self.db.updateCondorJob(
                 job['id'],
-                {"condorstate": nextcondorstate, "tcondorstate": self.db.getTimeStamp()}
+                desc
             )
 
     def process(self):

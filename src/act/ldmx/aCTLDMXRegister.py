@@ -61,6 +61,7 @@ class aCTLDMXRegister(aCTLDMXProcess):
         '''
         Do the registration and output file handling
         '''
+        cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
         for aj in arcjobs:
             select = f"id={int(aj['appjobid'])}"
             jobid = aj.get('JobID')
@@ -91,8 +92,7 @@ class aCTLDMXRegister(aCTLDMXProcess):
 
             # Set arc job to clean
             select = f"id={aj['id']}"
-            desc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
-            self.dbarc.updateArcJobs(desc, select)
+            self.dbarc.updateArcJobs(cleandesc, select)
 
             # Clean input files
             self.cleanInputFiles(aj)

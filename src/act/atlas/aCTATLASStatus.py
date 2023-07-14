@@ -456,10 +456,10 @@ class aCTATLASStatus(aCTATLASProcess):
         select = "arcstate='failed'"
         columns = ["id"]
         arcjobs = self.dbarc.getArcJobsInfo(select, columns)
+        desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
         for aj in arcjobs:
             self.stopOnFlag()
             select = f"id={aj['id']}"
-            desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
             self.dbarc.updateArcJobs(desc, select)
 
         # TODO: HARDCODED limit

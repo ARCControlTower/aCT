@@ -124,7 +124,6 @@ class aCTFetcher(aCTARCProcess):
                 arcrest.close()
 
             # process results
-            tstamp = self.db.getTimeStamp()
             for job, errors in zip(dbjobs, results):
                 isError = False
                 for error in errors:
@@ -142,8 +141,8 @@ class aCTFetcher(aCTARCProcess):
                         isError = True
                         self.log.error(f"Error fetching appjob({job['appjobid']}): {error}")
 
+                jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
                 if not isError:
-                    jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
                     self.db.updateArcJob(job["id"], jobdict)
                     self.log.info(f"Successfully fetched appjob({job['appjobid']})")
 
