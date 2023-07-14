@@ -30,7 +30,7 @@ class aCTARCProcess(aCTProcess):
     def getARCClient(self, proxyid):
         proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
         try:
-            return ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log)
+            return ARCRest.getClient(url=self.cluster, proxypath=proxypath, log=self.log, timeout=900)
         except Exception as exc:
             self.log.error(f"Error creating REST client for proxy ID {proxyid}: {exc}")
             return None
