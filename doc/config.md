@@ -60,3 +60,7 @@ also true for a sequence of nested attributes. The first nonexistent attribute
 will return an empty DictObj. The returned empty DictObj equals to False in
 boolean context. The developer should always handle the case of nonexistent
 value by either checking for existence or using the default value.
+
+IMPORTANT: developers should use default values for optional or specific values
+where defaults are fine to make them opt-in and not require basic setups to have
+to configure useless values.

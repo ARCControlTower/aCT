@@ -273,8 +273,8 @@ class aCTATLASStatus(aCTATLASProcess):
                 continue
             resubmit = False
             # TODO: errors part of aCTConfigARC should probably be moved to aCTConfigAPP.
-            for error in self.arcconf.errors.toresubmit.arcerrors:
-                if aj["Error"].find(error) != -1:
+            for error in self.arcconf.errors.toresubmit.arcerrors or []:
+                if error in aj["Error"]:
                     resubmit = True
             if resubmit:
                 self.log.info(f"appjob({aj['appjobid']}): Resubmitting arcjob({aj['arcjobid']}) arcid({aj['JobID']}) {aj['Error']}")

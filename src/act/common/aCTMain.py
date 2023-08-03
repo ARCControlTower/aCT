@@ -58,7 +58,7 @@ class aCTMain(aCTProcess):
                 daily
                 dateext
                 missingok
-                rotate {self.conf.logger.rotate}
+                rotate {self.conf.logger.rotate or 25}
                 maxsize 100M
                 nocreate
                 nocompress

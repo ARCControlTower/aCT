@@ -281,8 +281,11 @@ class aCTLDMXStatus(aCTLDMXProcess):
             return
 
         self.log.info(f"{arcjob['appjobid']}: error: {arcjob['Error']}")
-        resub = [err for err in self.arcconf.errors.toresubmit.arcerrors if err in arcjob['Error']]
-        if not resub:
+        resubmit = False
+        for error in self.arcconf.errors.toresubmit.arcerrors or []:
+            if error in arcjob['Error']:
+                resubmit = True
+        if not resubmit:
             self.log.info(f"{arcjob['appjobid']} failed with permanent error")
             self.cleanInputFiles(arcjob)
             return

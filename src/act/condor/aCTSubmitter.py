@@ -95,7 +95,7 @@ class aCTSubmitter(aCTCondorProcess):
         global queuelist
 
         # check for stopsubmission flag
-        if self.conf.downtime.stopsubmission:
+        if self.conf.downtime.stopsubmission or False:
             self.log.info('Submission suspended due to downtime')
             return 0
 
@@ -166,8 +166,8 @@ class aCTSubmitter(aCTCondorProcess):
 
             # Set number of submitted jobs to (running * qfraction + qoffset/num of shares)/num CEs
             # Note: assumes only a few shares are used and all jobs in the fairshare have the same clusterlist
-            qfraction = self.conf.jobs.queuefraction if self.conf.jobs.queuefraction else 0.15
-            qoffset = self.conf.jobs.queueoffset if self.conf.jobs.queueoffset else 100
+            qfraction = self.conf.jobs.queuefraction or 0.15
+            qoffset = self.conf.jobs.queueoffset or 100
             jlimit = (len(rjobs)*qfraction + qoffset/len(fairshares)) / len(jobs[0]['clusterlist'].split(','))
             self.log.debug(f"running {len(rjobs)}, queued {len(qjobs)}, queue limit {jlimit}")
 

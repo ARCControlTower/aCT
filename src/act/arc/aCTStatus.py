@@ -319,11 +319,13 @@ class aCTStatus(aCTARCProcess):
         patchDict = {"arcstate": "failed"}
 
         # a list of job errors for job should be resubmission
-        resub = []
+        resubmit = False
         if "Error" in jobInfo:
-            errors = ";".join(jobInfo["Error"])
-            resub = [err for err in self.conf.errors.toresubmit.arcerrors if err in errors]
-            self.log.info(f"appjob({job['appjobid']}) failed with error: {errors}")
+            jobErrors = ";".join(jobInfo["Error"])
+            for error in self.conf.errors.toresubmit.arcerrors or []:
+                if error in jobErrors:
+                    resubmit = True
+            self.log.info(f"appjob({job['appjobid']}) failed with error: {jobErrors}")
         else:
             self.log.info(f"appjob({job['appjobid']}) failed, no error given")
 
@@ -335,7 +337,7 @@ class aCTStatus(aCTARCProcess):
                 self.log.info(f"Will rerun appjob({job['appjobid']})")
 
         # resubmit if certain errors
-        elif resub:
+        elif resubmit:
             if job["attemptsleft"] <= 0:
                 self.log.info(f"appjob({job['appjobid']}) out of retries")
             else:
