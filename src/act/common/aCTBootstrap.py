@@ -46,8 +46,7 @@ def bootstrap_db():
 def bootstrap_app():
     '''Set up app-specific things'''
     appconf = aCTConfigAPP()
-    apps = appconf.modules.app
-    for app in apps:
+    for app in appconf.modules:
         print(f'Setting up app from {app}...')
         try:
             ap = importlib.import_module(f'{app}.aCTBootstrap').bootstrap
