@@ -557,6 +557,13 @@ class aCTATLASStatus(aCTATLASProcess):
                 desc["pandastatus"] = "transferring"
                 desc["actpandastatus"] = "toclean"
                 desc["error"] = aj["Error"]
+
+            # Jobs that fail submitting to ARC are cancelled. Such jobs should
+            # not be resubmitted.
+            elif not aj["JobID"]:
+                desc["pandastatus"] = "transferring"
+                desc["actpandastatus"] = "toclean"
+
             else:
                 self.log.info(f"appjob({aj['appjobid']}): Resubmitting cancelled arcjob({aj['arcjobid']}) arcid({aj['JobID']})")
                 desc["pandastatus"] = "starting"
