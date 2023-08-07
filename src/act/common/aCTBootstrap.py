@@ -51,7 +51,7 @@ def bootstrap_app():
         try:
             ap = importlib.import_module(f'{app}.aCTBootstrap').bootstrap
             ap()
-        except ModuleNotFoundError as e:
+        except ModuleNotFoundError:
             print(f'No bootstrap in module {app}')
         except AttributeError:
             print(f'aCTBootstrap.bootstrap() not found in {app}')
