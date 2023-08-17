@@ -9,7 +9,7 @@ import os
 
 import arc
 from act.arc.aCTDBArc import aCTDBArc
-from act.common.aCTConfig import aCTConfigARC
+from act.common.aCTConfig import aCTConfigARC, aCTConfigAPP
 from act.client.clientdb import ClientDB, createMysqlEscapeList
 from act.client.errors import NoSuchProxyError, NoJobDirectoryError
 from act.client.errors import ConfigError, InvalidJobDescriptionError
@@ -65,6 +65,7 @@ class JobManager(object):
         # TODO: if and when sites from arc config are used, move everything
         # that uses arc config to this class
         self.arcconf = aCTConfigARC()
+        self.appconf = aCTConfigAPP()
 
     def checkProxy(self, proxyid):
         """
@@ -583,7 +584,7 @@ class JobManager(object):
             raise NoJobDirectoryError(actJobDir)
 
     def getJobDataDir(self, jobid):
-        datapath = self.arcconf.actlocation.datman
+        datapath = self.appconf.user.datman or None
         if not datapath:
             raise ConfigError("config/actlocation/datman")
         return os.path.join(datapath, str(jobid))
