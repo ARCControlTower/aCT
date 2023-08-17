@@ -1,1 +1,22 @@
 site_name: My Docs
+
+nav:
+  - Home: index.md
+  - Install: tutorial-actrest.md
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - content.code.select
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
