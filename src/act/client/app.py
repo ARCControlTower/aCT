@@ -705,6 +705,8 @@ def getToken():
             raise RESTError('Proxy from token does not exist in database or is expired', 401)
     except jwt.ExpiredSignatureError:
         raise RESTError('Auth token is expired', 401)
+    except jwt.InvalidSignatureError:
+        raise RESTError('Invalid token signature', 401)
     else:
         return token
 
