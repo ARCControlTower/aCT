@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from flask import Flask, jsonify, request, send_file
 from pyarcrest.arc import isLocalInputFile
 from pyarcrest.x509 import checkRFCProxy, createProxyCSR
-from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 # TODO: see if checkJobExists should be used anywhere else
 # TODO: implement proper logging
@@ -237,7 +237,7 @@ def create_jobs():
     except RESTError as e:
         print(f'{errpref}{e}')
         return {'msg': str(e)}, e.httpCode
-    except BadRequest as e:  # raised for invalid JSON
+    except (BadRequest, UnsupportedMediaType) as e:  # raised for invalid JSON
         print(f'{errpref}{e}')
         return {'msg': str(e)}, 400
     except Exception as e:
@@ -295,7 +295,7 @@ def confirm_jobs():
         token = getToken()
         proxyid = token['proxyid']
         submissions = request.get_json()
-    except BadRequest as e:
+    except (BadRequest, UnsupportedMediaType) as e:
         print(f'{errpref}{e}')
         return {'msg': str(e)}, 400
     except RESTError as e:
@@ -470,7 +470,7 @@ def getCSR():
     # get issuer cert string from request
     try:
         jsonData = request.get_json()
-    except BadRequest as e:
+    except (BadRequest, UnsupportedMediaType) as e:
         print(f'error: POST /proxies: {e}')
         return {'msg': str(e)}, 400
     except Exception as e:
@@ -546,7 +546,7 @@ def uploadSignedProxy():
     except RESTError as e:
         print(f'error: PUT /proxies: {e}')
         return {'msg': str(e)}, e.httpCode
-    except BadRequest as e:
+    except (BadRequest, UnsupportedMediaType) as e:
         print(f'error: PUT /proxies: {e}')
         return {'msg': str(e)}, 400
     except Exception as e:
