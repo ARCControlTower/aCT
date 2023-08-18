@@ -153,7 +153,7 @@ class JobManager(object):
             # remove results folder; if none, just log and don't notify user
             if job['a_arcstate'] in ('done', 'donefailed'):
                 try:
-                    jobdir = self.getACTJobDir(job['a_JobID'])
+                    jobdir = self.getJobOutputDir(job['a_JobID'])
                     shutil.rmtree(jobdir, ignore_errors=True)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
@@ -288,7 +288,7 @@ class JobManager(object):
                 patch = {'arcstate': 'tofetch'}
             else:
                 try:
-                    jobdir = self.getACTJobDir(job['a_JobID'])
+                    jobdir = self.getJobOutputDir(job['a_JobID'])
                     shutil.rmtree(jobdir, ignore_errors=True)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
@@ -359,7 +359,7 @@ class JobManager(object):
         # assemble results
         for job in jobs:
             try:
-                srcdir = self.getACTJobDir(job['a_JobID'])
+                srcdir = self.getJobOutputDir(job['a_JobID'])
             except NoJobDirectoryError:
                 srcdir = None
             results.arcIDs.append(job['a_id'])
@@ -558,7 +558,7 @@ class JobManager(object):
 
         return jobs
 
-    def getACTJobDir(self, arcid):
+    def getJobOutputDir(self, arcid):
         """
         Return job's directory name in aCT.
 
