@@ -10,11 +10,6 @@ from pyarcrest.errors import (ARCHTTPError, DescriptionParseError,
                               InputUploadError, MatchmakingError,
                               NoValueInARCResult)
 
-# TODO: HARDCODED
-HTTP_BUFFER_SIZE = 2 ** 23  # 8MB
-HTTP_TIMEOUT = 60
-UPLOAD_WORKERS = 10
-
 
 class aCTSubmitter(aCTARCProcess):
 
@@ -167,7 +162,14 @@ class aCTSubmitter(aCTARCProcess):
             # submit jobs to ARC
             try:
                 delegationID = arcrest.createDelegation()
-                results = arcrest.submitJobs(descs, self.queue, delegationID, workers=UPLOAD_WORKERS, blocksize=HTTP_BUFFER_SIZE, timeout=HTTP_TIMEOUT)
+                results = arcrest.submitJobs(
+                    descs,
+                    self.queue,
+                    delegationID,
+                    workers=self.conf.rest.upload_workers or 10,
+                    sendsize=self.conf.rest.upload_size or 8388608,  # 8MB
+                    timeout=self.conf.rest.timeout or 60,
+                )
             except JSONDecodeError as exc:
                 self.setJobsArcstate(jobs, "tosubmit")
                 self.log.error(f"Invalid JSON response from ARC: {exc}")
@@ -511,7 +513,7 @@ class aCTSubmitter(aCTARCProcess):
                         # renewing the first delegation from the list works
                         # for aCT use case
                         if result[0] not in renewed:
-                            arcrest.renewDelegation(result[0])
+                            arcrest.refreshDelegation(result[0])
                             renewed.add(result[0])
                     except Exception as exc:
                         self.log.error(f"Failed to renew delegation for appjob({job['appjobid']}): {exc}")
