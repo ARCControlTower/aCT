@@ -142,7 +142,8 @@ class aCTValidator(aCTATLASProcess):
             worker.thread.join()
         for worker in self.resubers.values():
             worker.thread.join()
-        self.heartbeatDownloader.thread.join()
+        if self.heartbeatDownloader.thread.is_alive():
+            self.heartbeatDownloader.thread.join()
 
         self.recoverIntermediateStates()
 
