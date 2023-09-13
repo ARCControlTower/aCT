@@ -674,7 +674,7 @@ def checkJobDesc(jobdesc):
         InvalidJobDescriptionError: Job description is invalid.
     """
     jobdescs = arc.JobDescriptionList()
-    if not arc.JobDescription_Parse(str(jobdesc), jobdescs):
+    if not arc.JobDescription.Parse(str(jobdesc), jobdescs):
         logger.error('Job description is not valid')
         raise InvalidJobDescriptionError()
 

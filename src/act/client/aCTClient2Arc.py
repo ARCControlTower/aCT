@@ -53,7 +53,7 @@ class aCTClient2Arc(aCTProcess):
         jobdescs = arc.JobDescriptionList()
         for job in jobs:
             # create downloads list
-            arc.JobDescription_Parse(job['jobdesc'], jobdescs)
+            arc.JobDescription.Parse(job['jobdesc'], jobdescs)
 
             # TODO: this should be done according to the xRSL output files
             # all files from session dir

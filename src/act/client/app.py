@@ -351,7 +351,7 @@ def confirm_jobs():
             print(f'{errpref}No job description given')
             job['msg'] = 'No job description given'
             continue
-        if not arc.JobDescription_Parse(job['desc'], jobdescs):
+        if not arc.JobDescription.Parse(job['desc'], jobdescs):
             print(f'{errpref}Invalid job description')
             job['msg'] = 'Invalid job description'
             continue
@@ -395,7 +395,7 @@ def confirm_jobs():
         # input files
         desc = jobdescs[-1].UnParse('nordugrid:xrsl')[1]
         #desc = jobdescs[0].UnParse('emies:adl')[1]
-        if not arc.JobDescription_Parse(desc, jobdescs):
+        if not arc.JobDescription.Parse(desc, jobdescs):
             print(f'{errpref}Invalid modified job description')
             job['msg'] = 'Server error'
             continue

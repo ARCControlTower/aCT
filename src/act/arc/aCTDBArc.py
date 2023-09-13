@@ -191,7 +191,7 @@ class aCTDBArc(aCTDB):
         '''
         # extract priority from job desc (also checks if desc is valid)
         jobdescs = arc.JobDescriptionList()
-        if not arc.JobDescription_Parse(str(jobdesc), jobdescs):
+        if not arc.JobDescription.Parse(str(jobdesc), jobdescs):
             self.log.error("%s: Failed to prepare job description" % appjobid)
             return None
         priority = jobdescs[0].Application.Priority
@@ -565,7 +565,7 @@ if __name__ == '__main__':
 
     # Parse job description
     jobdescs = arc.JobDescriptionList()
-    if not arc.JobDescription_Parse(jobdescstring, jobdescs):
+    if not arc.JobDescription.Parse(jobdescstring, jobdescs):
         logging.error("Invalid job description")
         exit(1)
 
