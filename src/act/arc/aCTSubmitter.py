@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.aCTStatus import ARC_STATE_MAPPING
-from pyarcrest.errors import (ARCHTTPError, DescriptionParseError,
+from pyarcrest.errors import (ARCError, ARCHTTPError, DescriptionParseError,
                               DescriptionUnparseError, InputFileError,
                               InputUploadError, MatchmakingError,
                               NoValueInARCResult)
@@ -190,32 +190,20 @@ class aCTSubmitter(aCTARCProcess):
             # log submission results and set job state
             for job, result in zip(jobs, results):
                 jobdict = {}
-                if isinstance(result, list):  # a list of errors
-                    for error in result:
-                        if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError, MatchmakingError):
-                            jobdict["arcstate"] = "cancelled"
-                            self.log.error(f"Error submitting appjob({job['appjobid']}): {error}")
-                            break
-                        elif isinstance(error, InputUploadError):
-                            jobdict["arcstate"] = "tocancel"
-                            jobdict["cluster"] = self.cluster
-                            jobdict["IDFromEndpoint"] = error.jobid
-                            for exc in error.errors:
-                                self.log.error(f"Error uploading input files for appjob({job['appjobid']}): {exc}")
-                            self.log.info(f"Cancelling appjob({job['appjobid']}) due to upload errors")
-                            break
-                        # Errors covered in else branch are not a reason to
-                        # cancel the job which is why else does not break from
-                        # the for loop. if and elif branches above do because
-                        # they cancel the job properly (and differently one
-                        # from another!) and exit the loop early, which does
-                        # not print all potential errors of the job. Creating
-                        # boolean flags or enums to avoid breaks from loop to
-                        # print every error is currently decided to not be
-                        # worth the effort.
-                        else:
-                            jobdict["arcstate"] = "tosubmit"
-                            self.log.error(f"Error submitting appjob({job['appjobid']}): {error}")
+                if isinstance(result, ARCError):
+                    if type(result) in (InputFileError, DescriptionParseError, DescriptionUnparseError, MatchmakingError):
+                        jobdict["arcstate"] = "cancelled"
+                        self.log.error(f"Error submitting appjob({job['appjobid']}): {result}")
+                    elif isinstance(result, InputUploadError):
+                        jobdict["arcstate"] = "tocancel"
+                        jobdict["cluster"] = self.cluster
+                        jobdict["IDFromEndpoint"] = result.jobid
+                        for exc in result.errors:
+                            self.log.error(f"Error uploading input files for appjob({job['appjobid']}): {exc}")
+                        self.log.info(f"Cancelling appjob({job['appjobid']}) due to upload errors")
+                    else:
+                        jobdict["arcstate"] = "tosubmit"
+                        self.log.error(f"Error submitting appjob({job['appjobid']}): {result}")
                 else:
                     jobid, state = result
                     jobdict["arcstate"] = "submitted"
