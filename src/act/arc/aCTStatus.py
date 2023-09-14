@@ -193,19 +193,21 @@ class aCTStatus(aCTARCProcess):
                         continue
 
                 # cancel 404 jobs and log errors
-                if isinstance(result, ARCHTTPError):
-                    if result.status == 404:
-                        jobdict.update({"arcstate": "tocancel"})
-                        self.db.updateArcJob(job["id"], jobdict)
-                        self.log.warning(f"appjob({job['appjobid']}) not found, cancelling")
-                    else:
-                        self.log.error(f"Error fetching info for appjob({job['appjobid']}): {result.status} {result.text}")
-                    continue
-                elif isinstance(result, NoValueInARCResult):
-                    self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF INFO FOR appjob({job['appjobid']})")
-                    continue
+                if result.error:
+                    error = result.value
+                    if isinstance(error, ARCHTTPError):
+                        if error.status == 404:
+                            jobdict.update({"arcstate": "tocancel"})
+                            self.db.updateArcJob(job["id"], jobdict)
+                            self.log.warning(f"appjob({job['appjobid']}) not found, cancelling")
+                        else:
+                            self.log.error(f"Error fetching info for appjob({job['appjobid']}): {error.status} {error.text}")
+                        continue
+                    elif isinstance(error, NoValueInARCResult):
+                        self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF INFO FOR appjob({job['appjobid']})")
+                        continue
 
-                jobInfo = result
+                jobInfo = result.value
 
                 # process state change
                 state = jobInfo.get("state", None)
@@ -501,17 +503,18 @@ class aCTStatus(aCTARCProcess):
                     continue
 
                 # process errors
-                if isinstance(result, ARCError):
-                    if isinstance(result, ARCHTTPError):
-                        if result.status == 404:
+                if result.error:
+                    error = result.value
+                    if isinstance(error, ARCHTTPError):
+                        if error.status == 404:
                             self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
                             self.log.warning(f"appjob({job['appjobid']}) not found, considering cancelled")
                             continue
-                    self.log.error(f"Error fetching info of cancelling appjob({job['appjobid']}): {result}")
+                    self.log.error(f"Error fetching info of cancelling appjob({job['appjobid']}): {error}")
                     continue
 
                 # set to cancelled if in terminal state
-                state = result.get("state", None)
+                state = result.value.get("state", None)
                 if state:
                     try:
                         mappedState = ARC_STATE_MAPPING[state]
