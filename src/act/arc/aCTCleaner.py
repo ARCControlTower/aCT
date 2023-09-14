@@ -77,8 +77,10 @@ class aCTCleaner(aCTARCProcess):
 
             # log results
             for job, result in zip(arcjobs, results):
-                if isinstance(result, ARCHTTPError):
-                    self.log.error(f"Error cleaning appjob({job['appjobid']}) from ARC: {result.status} {result.text}")
+                if result.error:
+                    error = result.value
+                    if isinstance(error, ARCHTTPError):
+                        self.log.error(f"Error cleaning appjob({job['appjobid']}) from ARC: {error.status} {error.text}")
                 else:
                     self.log.info(f"Successfully cleaned appjob({job['appjobid']}) from ARC")
 
