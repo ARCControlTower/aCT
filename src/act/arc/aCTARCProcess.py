@@ -33,9 +33,26 @@ class aCTARCProcess(aCTProcess):
         pyarcrestLogger = logging.getLogger("pyarcrest")
         level = LEVELS.get(self.conf.logger.level or logging.NOTSET)
         pyarcrestLogger.setLevel(level)
+
+        # the object nesting of handlers var is this:
         # self.aCTLogger.LoggerAdapter.Logger.handlers
         for handler in self.logger.logger.logger.handlers:
+            handler.addFilter(self.logFilter)
             pyarcrestLogger.addHandler(handler)
+
+    def logFilter(self, record):
+        """
+        Add cluster attribute to log record.
+
+        aCT logging infrastructure adds a custom value to log messages and
+        format to include cluster URL in logs. LoggerAdapter is used for that.
+        However, this adapter cannot be used for the pyarcrest logger.
+
+        This method is a custom filter that is added to pyarcrest logger
+        handlers to add cluster attribute to all log records.
+        """
+        record.cluster = self.cluster
+        return True
 
     def finish(self):
         self.db.close()
