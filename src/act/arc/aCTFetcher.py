@@ -72,6 +72,7 @@ class aCTFetcher(aCTARCProcess):
                 arcid = dbjob["IDFromEndpoint"]
                 arcids.append(arcid)
                 downloadfiles = dbjob.get("downloadfiles", None)
+                refilter = ""
                 if downloadfiles:
                     # If there are multiple conflicting diagnose= entries,
                     # weird things can happen. Since this is internal to
@@ -98,7 +99,16 @@ class aCTFetcher(aCTARCProcess):
 
                             diagnoseFiles.setdefault(arcid, []).append(parts[-1])
                         else:
-                            outputFilters.setdefault(arcid, []).append(pattern)
+                            if pattern == "/":
+                                refilter = ".*"
+                            else:
+                                refilter += f"|{pattern}"
+                                if pattern.endswith("/"):
+                                    refilter += ".*"
+
+                    refilter.lstrip("|")
+                    if refilter:
+                        outputFilters[arcid] = refilter
 
                 # remove existing downloads (if previous failed)
                 resdir = os.path.join(self.tmpdir, arcid)
