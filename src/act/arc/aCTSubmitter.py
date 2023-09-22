@@ -233,7 +233,7 @@ class aCTSubmitter(aCTARCProcess):
         self.log.info("Done")
 
     def setJobsArcstate(self, jobs, arcstate):
-        self.log.debug(f"Setting arcstate of jobs to {arcstate}")
+        self.log.info(f"Setting arcstate of jobs to {arcstate}")
         tstamp = self.db.getTimeStamp()
         for job in jobs:
             updateDict = {"arcstate": arcstate, "tarcstate": tstamp}

@@ -41,7 +41,7 @@ class aCTStatus(aCTCondorProcess):
         """
         # minimum time between checks
         if time.time() < self.checktime + self.conf.jobs.checkmintime:
-            self.log.debug("mininterval not reached")
+            self.log.info("mininterval not reached")
             return
         self.checktime = time.time()
 

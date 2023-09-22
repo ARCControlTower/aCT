@@ -76,10 +76,10 @@ class aCTMain(aCTProcess):
                 self.log.warning(f'Failed to run logrotate: {e}')
 
     def process(self):
-        self.log.debug("Rotating logs ...")
+        self.log.info("Rotating logs ...")
         self.logrotate()
 
-        self.log.debug("Updating running processes ...")
+        self.log.info("Updating running processes ...")
         self.procmanager.update()
 
     def finish(self):

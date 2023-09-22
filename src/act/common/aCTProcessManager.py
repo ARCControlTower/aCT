@@ -165,7 +165,7 @@ class aCTProcessManager:
             procName = procClass.__name__
             # do not start if process disabled in config
             if procName in self.appconf.get('disabledProcs', {}).get(module, {}).get(procType, {}).get(cluster, []):
-                self.log.debug(f'Not running disabled process {procName} for cluster {cluster}')
+                self.log.debug(f'Process {procName} for cluster {cluster} disabled')
                 continue
             # create process if it doesn't exist
             elif procName not in clusterProcs:
@@ -217,7 +217,7 @@ class aCTProcessManager:
             procName = procClass.__name__
             # do not start if process disabled in config
             if procName in self.appconf.get('disabledProcs', {}).get(module, {}).get('single', []):
-                self.log.debug(f'Not running disabled process {procName}')
+                self.log.debug(f'Process {procName} disabled')
                 continue
             # create process if it doesn't exist
             if procName not in singleProcs:
