@@ -40,6 +40,7 @@ class aCTARCProcess(aCTProcess):
             handler.addFilter(self.logFilter)
             pyarcrestLogger.addHandler(handler)
 
+    # TODO: filter for contextual information in (at latest) 3.11 is different
     def logFilter(self, record):
         """
         Add cluster attribute to log record.
