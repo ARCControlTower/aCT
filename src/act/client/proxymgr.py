@@ -175,7 +175,7 @@ class ProxyManager(object):
             return None
         else:
             row = c.fetchone()
-            return row['proxy']
+            return row['proxy'].decode()
         finally:
             c.close()
 

@@ -13,13 +13,10 @@ from act.client.jobmgr import JobManager, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from act.db.aCTDBMS import getDB
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 from flask import Flask, jsonify, request, send_file
 from pyarcrest.arc import isLocalInputFile
-from pyarcrest.x509 import checkRFCProxy, createProxyCSR
+from pyarcrest.x509 import (checkRFCProxy, createProxyCSR, csrToPEM,
+                            generateKey, keyToPEM, pemToCert)
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 # TODO: see if checkJobExists should be used anywhere else
@@ -481,61 +478,51 @@ def getCSR():
         print('error: POST /proxies: No JSON data')
         return {'msg': 'No JSON data'}, 400
     else:
-        issuer_pem = jsonData.get('cert', None)
-        if not issuer_pem:
+        issuerPEM = jsonData.get('cert', None)
+        if not issuerPEM:
             print('error: POST /proxies: missing issuer certificate')
             return {'msg': 'Missing issuer certificate'}, 400
-        chain_pem = jsonData.get('chain', None)
-        if not chain_pem:
+        chainPEM = jsonData.get('chain', None)
+        if not chainPEM:
             print('error: POST /proxies: missing certificate chain')
             return {'msg': 'Missing certificate chain'}, 400
 
-    dn, exptime = pmgr.readProxyString(issuer_pem)
+    dn, exptime = pmgr.readProxyString(issuerPEM)
     if datetime.utcnow() >= exptime:
         print('error: POST /proxies: expired certificate')
         return {'msg': 'Given certificate is expired'}, 400
-    attr = getVOMSProxyAttributes(issuer_pem, chain_pem)
+    attr = getVOMSProxyAttributes(issuerPEM, chainPEM)
     if not attr or not dn:
         print('error: POST /proxies: DN or VOMS attribute extraction failure')
         return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
 
     try:
-        # load certificate string and check proxy
-        issuer = x509.load_pem_x509_certificate(issuer_pem.encode("utf-8"), default_backend())
+        # load proxy string and check validity
+        issuer = pemToCert(issuerPEM)
         if not checkRFCProxy(issuer):
             print('error: POST /proxies: issuer cert is not a valid proxy')
             return {'msg': 'Issuer cert is not a valid proxy'}, 400
 
         # generate private key for delegated proxy
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
-        )
+        key = generateKey()
 
         # generate CSR
-        csr = createProxyCSR(issuer, private_key)
+        csr = createProxyCSR(issuer, key)
         print(f'CSR generated: DN: {dn}, attr: {attr}, expiration: {exptime}')
 
         # put private key into string and store in db
-        pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        ).decode('utf-8')
-        proxyid = pmgr.actproxy.updateProxy(pem, dn, attr, exptime)
+        proxyid = pmgr.actproxy.updateProxy(keyToPEM(key), dn, attr, exptime)
         if proxyid is None:
             print('error: POST /proxies: proxy insertion failure')
             return {'msg': 'Server error'}, 500
 
         # generate CSR string and auth token
-        csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode('utf-8')
         token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, appconf.user.jwt_secret, algorithm='HS256')
     except Exception as e:
         print(f'error: POST /proxies: {e}')
         return {'msg': 'Server error'}, 500
 
-    return {'token': token, 'csr': csr_pem}, 200
+    return {'token': token, 'csr': csrToPEM(csr)}, 200
 
 
 @app.route('/proxies', methods=['PUT'])
@@ -558,29 +545,29 @@ def uploadSignedProxy():
         return {'msg': 'No JSON data'}, 400
 
     proxyid = token['proxyid']
-    cert_pem = jsonData.get('cert', None)
-    chain_pem = jsonData.get('chain', None)
-    if cert_pem is None:
+    certPEM = jsonData.get('cert', None)
+    chainPEM = jsonData.get('chain', None)
+    if certPEM is None:
         print('error: PUT /proxies: No signed certificate')
         return {'msg': 'No signed certificate'}, 400
-    if chain_pem is None:
+    if chainPEM is None:
         print('error: PUT /proxies: No cert chain')
         return {'msg': 'No cert chain'}, 400
 
-    key_pem = pmgr.getProxyKeyPEM(proxyid)
-    dn, exptime = pmgr.readProxyString(cert_pem)
+    keyPEM = pmgr.getProxyKeyPEM(proxyid)
+    dn, exptime = pmgr.readProxyString(certPEM)
     if datetime.utcnow() >= exptime:
         return {'msg': 'Given certificate is expired'}, 400
-    attr = getVOMSProxyAttributes(cert_pem, chain_pem)
+    attr = getVOMSProxyAttributes(certPEM, chainPEM)
     if not attr or not dn:
         return {'msg': 'Failed to extract DN or VOMS attributes'}, 400
-    proxy_pem = cert_pem + key_pem.decode('utf-8') + chain_pem
+    proxyPEM = certPEM + keyPEM + chainPEM
 
     try:
-        proxy_obj = x509.load_pem_x509_certificate(proxy_pem.encode('utf-8'), backend=default_backend())
-        if not checkRFCProxy(proxy_obj):
+        proxy = pemToCert(proxyPEM)
+        if not checkRFCProxy(proxy):
             return {'msg': 'cert is not a valid proxy'}, 400
-        proxyid = pmgr.actproxy.updateProxy(proxy_pem, dn, attr, exptime)
+        proxyid = pmgr.actproxy.updateProxy(proxyPEM, dn, attr, exptime)
         token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, appconf.user.jwt_secret, algorithm='HS256')
     except Exception as e:
         print(f'error: PUT /proxies: {e}')
