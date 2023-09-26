@@ -1,6 +1,7 @@
 import datetime
 from act.db import aCTDBMS
 from act.common.aCTConfig import aCTConfigARC
+from contextlib import contextmanager
 
 class aCTDB(object):
     '''Superclass representing a general table in the DB'''
@@ -51,3 +52,33 @@ class aCTDB(object):
     def close(self):
         self.db.close()
 
+    # WARNING! Assumes the use of aCTDBMySQL!!! Other DB might not be
+    # handled correctly. The proper solution would be to improve the entire
+    # database model.
+    @contextmanager
+    def namedLock(self, name, timeout=10):
+        """
+        Handle named DB lock in a context with automatic release.
+
+        Returns:
+            A boolean indicating whether the lock could be acquired.
+
+        with db.namedLock('lockname', timeout=5) as lock:
+            if not lock:
+                # handle case of not getting lock
+            else:
+                # do whatever in DB
+        """
+        try:
+            res = False
+            res = self.db.getMutexLock(name, timeout)
+            if not res:
+                yield False
+            else:
+                res = True
+                yield True
+        finally:
+            if res:
+                res = self.db.releaseMutexLock(name)
+                if not res:
+                    self.log.warning(f'Could not release named lock {name}')

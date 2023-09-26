@@ -31,15 +31,15 @@ class aCTClient2Arc(aCTProcess):
         proxies = self.clidb.getProxies()
         for proxyid in proxies:
             self.stopOnFlag()
-            self.insertNewJobs(proxyid, 1000)
+            # aCTClient2Arc races with jobmgr.killJobs so lock is required
+            with self.arcdb.namedLock('nulljobs', timeout=10) as lock:
+                if lock:
+                    self.insertNewJobs(proxyid, 1000)
+                else:
+                    self.log.warning('Could not acquire lock to insert jobs')
 
     def insertNewJobs(self, proxyid, num):
         """Insert new jobs to ARC table for proxy."""
-        # client2arc races with jobmgr.killJobs for jobs that have no arcjobid
-        res = self.arcdb.db.getMutexLock('nulljobs')
-        if not res:
-            raise Exception("Could not acquire lock to insert jobs")
-
         # Get jobs that haven't been inserted to ARC table yet
         # (they don't have reference to ARC table, arcjobid is null).
         jobs = self.clidb.getJobsInfo(
@@ -86,10 +86,6 @@ class aCTClient2Arc(aCTProcess):
                     'modified': self.clidb.getTimeStamp()
                 })
                 self.log.info(f'Successfully inserted appjob({job["id"]}) {row["LAST_INSERT_ID()"]} to ARC engine')
-
-        res = self.arcdb.db.releaseMutexLock('nulljobs')
-        if not res:
-            raise Exception("Could not release lock after inserting jobs")
 
     def finish(self):
         self.clidb.close()
