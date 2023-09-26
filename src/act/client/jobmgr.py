@@ -407,59 +407,47 @@ class JobManager(object):
         where, where_params = self._addIDFilter(jobids, where, where_params)
         where = where.rstrip('AND ')
 
-        # This lock is for race with client2arc.
-        # Locking could otherwise be handled more systematically, elegantly and
-        # granularly for the entire aCT.
-        res = self.arcdb.db.getMutexLock('nulljobs', timeout=10)
-        if not res:
-            raise Exception("Could not lock null jobs")
+        # nlock is for race with aCTClient2Arc, alock is for race with aCTSubmitter
+        with self.arcdb.namedLock('nulljobs', timeout=10) as nlock, self.arcdb.namedLock('arcjobs', timeout=10) as alock:
+            if not nlock:
+                raise Exception("Could not lock null jobs")
+            if not alock:
+                raise Exception("Could not lock table for killing jobs")
 
-        res = self.arcdb.db.getMutexLock('arcjobs', timeout=10)
-        if not res:
-            raise Exception("Could not lock table for killing jobs")
+            jobs = self.clidb.getLeftJoinJobsInfo(
+                    clicols=['id'],
+                    arccols=['id', 'arcstate'],
+                    where=where,
+                    where_params=where_params)
 
-        jobs = self.clidb.getLeftJoinJobsInfo(
-                clicols=['id'],
-                arccols=['id', 'arcstate'],
-                where=where,
-                where_params=where_params)
+            if not jobs:
+                return []
 
-        if not jobs:
-            return []
+            arc_ids = []
+            client_ids = []
+            for job in jobs:
+                if job['a_id'] == None:
+                    # If id from arcjobs is NULL, then job is either waiting or in
+                    # inconsistent state. The job has to be deleted.
+                    client_ids.append(int(job['c_id']))
+                elif job['a_arcstate'] == 'tosubmit':
+                    # 'tosubmit' jobs cannot be set to tocancel, they have to be deleted
+                    # immediately.
+                    client_ids.append(int(job['c_id']))
+                    self.arcdb.deleteArcJob(job['a_id'])
+                else:
+                    # If there is entry in arcjobs, the job can be killed by
+                    # setting its state to 'tocancel'
+                    arc_ids.append(int(job['a_id']))
 
-        arc_ids = []
-        client_ids = []
-        for job in jobs:
-            if job['a_id'] == None:
-                # If id from arcjobs is NULL, then job is either waiting or in
-                # inconsistent state. The job has to be deleted.
-                client_ids.append(int(job['c_id']))
-            elif job['a_arcstate'] == 'tosubmit':
-                # 'tosubmit' jobs cannot be set to tocancel, they have to be deleted
-                # immediately.
-                client_ids.append(int(job['c_id']))
-                self.arcdb.deleteArcJob(job['a_id'])
-            else:
-                # If there is entry in arcjobs, the job can be killed by
-                # setting its state to 'tocancel'
-                arc_ids.append(int(job['a_id']))
+            if arc_ids:
+                arc_where = f' id IN ({self._createMysqlIntList(arc_ids)})'
 
-        if arc_ids:
-            arc_where = f' id IN ({self._createMysqlIntList(arc_ids)})'
-
-            patch = {'arcstate': 'tocancel', 'tarcstate': self.arcdb.getTimeStamp()}
-            self.arcdb.updateArcJobs(patch, arc_where)
-        if client_ids:
-            client_where = f' id IN ({createMysqlEscapeList(len(client_ids))})'
-            self.clidb.deleteJobs(client_where, client_ids)
-
-        res = self.arcdb.db.releaseMutexLock('arcjobs')
-        if not res:
-            raise Exception("Could not release lock after killing jobs")
-
-        res = self.arcdb.db.releaseMutexLock('nulljobs')
-        if not res:
-            raise Exception("Could not release lock for null jobs")
+                patch = {'arcstate': 'tocancel', 'tarcstate': self.arcdb.getTimeStamp()}
+                self.arcdb.updateArcJobs(patch, arc_where)
+            if client_ids:
+                client_where = f' id IN ({createMysqlEscapeList(len(client_ids))})'
+                self.clidb.deleteJobs(client_where, client_ids)
 
         return jobs
 
