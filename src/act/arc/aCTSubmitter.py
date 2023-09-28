@@ -77,39 +77,23 @@ class aCTSubmitter(aCTARCProcess):
                 self.log.info(f"CE is at limit of {clustermaxjobs} submitted jobs, exiting")
                 break
 
-            try:
-                # catch any exceptions here to avoid leaving lock
-                if self.cluster:
-                    # Lock row for update in case multiple clusters are specified
-                    #jobs=self.db.getArcJobsInfo("arcstate='tosubmit' and ( clusterlist like '%{0}' or clusterlist like '%{0},%' ) and fairshare='{1}' order by priority desc limit 10".format(self.cluster, fairshare),
-                    jobs = self.db.getArcJobsInfo(
-                        "arcstate='tosubmit' and ( clusterlist like '%{0}' or clusterlist like '%{0},%' ) and fairshare='{1}' and proxyid='{2}' limit {3}".format(self.cluster, fairshare, proxyid, limit),
-                        columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"], lock=True
-                    )
-                    if jobs:
-                        self.log.debug(f"started lock for writing {len(jobs)} jobs")
+            # Get jobs to submit and set them to "submitting". Lock is required
+            # for race with other submitters and act.client.jobmgr.killJobs().
+            jobs = []
+            with self.db.namedLock('arcjobs', timeout=20) as lock:
+                if not lock:
+                    self.log.warning("Could not lock jobs to submit")
                 else:
                     jobs = self.db.getArcJobsInfo(
-                        "arcstate='tosubmit' and clusterlist='' and fairshare='{0} and proxyid={1}' limit {2}".format(fairshare, proxyid, limit),
-                        columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"]
+                        "arcstate='tosubmit' and ( clusterlist like '%{0}' or clusterlist like '%{0},%' ) and fairshare='{1}' and proxyid='{2}' limit {3}".format(self.cluster, fairshare, proxyid, limit),
+                        columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"],
                     )
-                # mark submitting in db
-                tstamp = self.db.getTimeStamp()
-                jobs_taken = []
-                for j in jobs:
-                    jd = {'cluster': self.cluster, 'arcstate': 'submitting', 'tarcstate': tstamp}
-                    self.db.updateArcJob(j['id'], jd)
-                    jobs_taken.append(j)
-                jobs = jobs_taken
-            finally:
-                try:
-                    self.db.Commit(lock=True)
-                    self.log.debug("ended lock")
-                except:
-                    self.log.warning("Failed to release DB lock")
+                    jd = {'cluster': self.cluster, 'arcstate': 'submitting', 'tarcstate': self.db.getTimeStamp()}
+                    for job in jobs:
+                        self.db.updateArcJob(job['id'], jd)
 
-            if len(jobs) == 0:
-                #self.log.debug("No jobs to submit")
+            if not jobs:
+                self.log.debug("No jobs to submit")
                 continue
 
             self.log.info(f"Submitting {len(jobs)} jobs for fairshare {fairshare} and proxyid {proxyid}")
