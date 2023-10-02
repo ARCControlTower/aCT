@@ -57,8 +57,8 @@ class ProxyManager(object):
         """
         try:
             proxyInfo =  self.actproxy.getProxyInfo(dn, attribute, columns)
-        except: # probably some sort of mysql error; log and raise
-            self.logger.exception(f'Error getting info for proxy dn={dn} attribute={attribute}')
+        except Exception as exc:
+            self.logger.error(f'Error getting info for proxy dn={dn} attribute={attribute}: {exc}')
             raise
         else:
             if not proxyInfo:
@@ -85,8 +85,8 @@ class ProxyManager(object):
             raise NoProxyFileError(proxyPath)
         try:
             proxystr, dn, expirytime = self.actproxy._readProxyFromFile(proxyPath)
-        except:  # probably some file reading error
-            self.logger.exception(f'Error reading proxy file {proxyPath}')
+        except Exception as exc:
+            self.logger.error(f'Error reading proxy file {proxyPath}: {exc}')
             raise
         if expirytime < datetime.datetime.utcnow():
             raise ProxyFileExpiredError()
@@ -170,8 +170,8 @@ class ProxyManager(object):
         c = self.arcdb.db.getCursor()
         try:
             c.execute('SELECT proxy FROM proxies WHERE id = %s', (proxyid,))
-        except:
-            self.logger.exception('Error retrieving private key PEM from database')
+        except Exception as exc:
+            self.logger.error(f'Error retrieving private key PEM from database: {exc}')
             return None
         else:
             row = c.fetchone()
@@ -183,8 +183,8 @@ class ProxyManager(object):
         try:
             c = self.arcdb.db.getCursor()
             c.execute('SELECT id,expirytime FROM proxies WHERE id = %s LIMIT 1', (proxyid,))
-        except Exception as e:
-            self.logger.exception('Error checking existence of proxy')
+        except Exception as exc:
+            self.logger.error(f'Error checking existence of proxy: {exc}')
             return None
         else:
             proxy = c.fetchone()

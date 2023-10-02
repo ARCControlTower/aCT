@@ -290,12 +290,12 @@ class JobManager(object):
                 try:
                     jobdir = self.getJobOutputDir(job['a_JobID'])
                     shutil.rmtree(jobdir, ignore_errors=True)
-                except OSError:
+                except OSError as exc:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception(f'Could not clean job results in {jobdir}')
-                except NoJobDirectoryError as e:
+                    self.logger.error(f'Could not clean job results in {jobdir}: {exc}')
+                except NoJobDirectoryError as exc:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.exception(f'Could not clean job results in {e.jobdir}')
+                    self.logger.error(f'Could not clean job results in {exc.jobdir}: {exc}')
 
                 # finished jobs become done, tofetch jobs become donefailed;
                 # the job status should be preserved
@@ -685,8 +685,8 @@ def checkSite(siteName, confpath='/etc/act/sites.json'):
         for site in sites:
             if site == siteName:
                 return
-    except Exception:
-        logger.exception('Problem reading configuration')
+    except Exception as exc:
+        logger.error(f'Problem reading configuration: {exc}')
         raise
 
     raise NoSuchSiteError(siteName)

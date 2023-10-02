@@ -77,8 +77,8 @@ class aCTClient2Arc(aCTProcess):
                     job['id'],
                     ';'.join(downloads)
                 )
-            except:
-                self.log.exception(f'Error inserting appjob({job["id"]}) to arc table')
+            except Exception as exc:
+                self.log.error(f'Error inserting appjob({job["id"]}) to arc table: {exc}')
             else:
                 # create a reference to job in client table
                 self.clidb.updateJob(job['id'], {

@@ -46,8 +46,8 @@ class ClientDB(aCTDB):
         try:
             c.execute('DROP TABLE IF EXISTS clientjobs')
             self.Commit()
-        except:
-            self.log.exception('Error dropping clientjobs table')
+        except Exception as exc:
+            self.log.error(f'Error dropping clientjobs table: {exc}')
             c.close()
             raise
 
@@ -66,8 +66,8 @@ class ClientDB(aCTDB):
             c.execute(query)
             c.execute('ALTER TABLE clientjobs ADD INDEX (arcjobid)')
             self.Commit()
-        except:
-            self.log.exception('Error creating clientjobs table')
+        except Exception as exc:
+            self.log.error(f'Error creating clientjobs table: {exc}')
             raise
         finally:
             c.close()
@@ -79,8 +79,8 @@ class ClientDB(aCTDB):
         c = self.db.getCursor()
         try:
             c.execute('DROP TABLE clientjobs')
-        except:
-            self.log.exception('Error dropping clientjobs table')
+        except Exception as exc:
+            self.log.error(f'Error dropping clientjobs table: {exc}')
             raise
         else:
             self.Commit()
@@ -113,8 +113,8 @@ class ClientDB(aCTDB):
             c.execute(query, [self.getTimeStamp(), clusterlist, proxyid])
             c.execute('SELECT LAST_INSERT_ID()')
             jobid = c.fetchone()['LAST_INSERT_ID()']
-        except:
-            self.log.exception('Error while inserting new job')
+        except Exception as exc:
+            self.log.error(f'Error inserting new job: {exc}')
             raise
         else:
             if not lazy:
@@ -150,8 +150,8 @@ class ClientDB(aCTDB):
             c.execute(query, [jobdesc])
             c.execute('SELECT LAST_INSERT_ID()')
             jobdescid = c.fetchone()['LAST_INSERT_ID()']
-        except:
-            self.log.exception('Error inserting job description')
+        except Exception as exc:
+            self.log.error(f'Error inserting job description: {exc}')
             c.close()
             raise
 
@@ -170,8 +170,8 @@ class ClientDB(aCTDB):
             c.execute(query, [self.getTimeStamp(), jobname, jobdescid, clusterlist, proxyid])
             c.execute('SELECT LAST_INSERT_ID()')
             jobid = c.fetchone()['LAST_INSERT_ID()']
-        except:
-            self.log.exception('Error while inserting new job')
+        except Exception as exc:
+            self.log.error(f'Error inserting new job: {exc}')
             raise
         else:
             if not lazy:
@@ -246,8 +246,8 @@ class ClientDB(aCTDB):
         c = self.db.getCursor()
         try:
             c.execute(query, params)
-        except:
-            self.log.exception(f'Error deleting jobs with query: "{where}"')
+        except Exception as exc:
+            self.log.error(f'Error deleting job: {exc}')
             raise
         else:
             self.Commit()
@@ -293,8 +293,8 @@ class ClientDB(aCTDB):
         c = self.db.getCursor()
         try:
             c.execute(query, params)
-        except:
-            self.log.exception('Error getting job info')
+        except Exception as exc:
+            self.log.error(f'Error getting job info: {exc}')
             raise
         else:
             return c.fetchall()
@@ -306,8 +306,8 @@ class ClientDB(aCTDB):
         c = self.db.getCursor()
         try:
             c.execute('SELECT DISTINCT(proxyid) AS proxyid FROM clientjobs')
-        except:
-            self.log.exception('Error getting proxies')
+        except Exception as exc:
+            self.log.error(f'Error getting proxies: {exc}')
             raise
         else:
             rows = c.fetchall()
@@ -343,8 +343,8 @@ class ClientDB(aCTDB):
         c = self.db.getCursor()
         try:
             c.execute(query, params)
-        except:
-            self.log.exception(f'Error updating job {jobid}')
+        except Exception as exc:
+            self.log.error(f'Error updating job {jobid}: {exc}')
             raise
         else:
             if not lazy:
@@ -407,8 +407,8 @@ class ClientDB(aCTDB):
         c = self.db.getCursor()
         try:
             c.execute(query, params)
-        except:
-            self.log.exception(f'Error getting inner join for query {query}')
+        except Exception as exc:
+            self.log.error(f'Error getting inner join for query {query}: {exc}')
             raise
         else:
             return c.fetchall()
@@ -475,8 +475,8 @@ class ClientDB(aCTDB):
         c = self.db.getCursor()
         try:
             c.execute(query, params)
-        except:
-            self.log.exception(f'Error getting left join for query {query}')
+        except Exception as exc:
+            self.log.error(f'Error getting left join for query {query}: {exc}')
             raise
         else:
             return c.fetchall()
@@ -502,8 +502,8 @@ class ClientDB(aCTDB):
         query = f'SHOW columns FROM {tableName}'
         try:
             c.execute(query)
-        except:
-            self.log.exception(f'Error getting columns for table {tableName}')
+        except Exception as exc:
+            self.log.error(f'Error getting columns for table {tableName}: {exc}')
             raise
         else:
             rows = c.fetchall()
