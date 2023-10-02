@@ -36,9 +36,9 @@ class ProxyManager(object):
 
     def __init__(self, db=None):
         """Initialize object."""
-        self.logger = logging.getLogger(__name__)
-        self.actproxy = aCTProxy(self.logger, db=db)
-        self.arcdb = aCTDBArc(self.logger, db=db)
+        self.log = logging.getLogger(__name__)
+        self.actproxy = aCTProxy(self.log, db=db)
+        self.arcdb = aCTDBArc(self.log, db=db)
 
     def getProxyInfo(self, dn, attribute='', columns=[]):
         """
@@ -58,11 +58,11 @@ class ProxyManager(object):
         try:
             proxyInfo =  self.actproxy.getProxyInfo(dn, attribute, columns)
         except Exception as exc:
-            self.logger.error(f'Error getting info for proxy dn={dn} attribute={attribute}: {exc}')
+            self.log.error(f'Error getting info for proxy dn={dn} attribute={attribute}: {exc}')
             raise
         else:
             if not proxyInfo:
-                self.logger.error(f'No proxy with dn={dn} and attribute={attribute}')
+                self.log.error(f'No proxy with dn={dn} and attribute={attribute}')
                 raise NoSuchProxyError(dn, attribute)
             else:
                 return proxyInfo
@@ -86,7 +86,7 @@ class ProxyManager(object):
         try:
             proxystr, dn, expirytime = self.actproxy._readProxyFromFile(proxyPath)
         except Exception as exc:
-            self.logger.error(f'Error reading proxy file {proxyPath}: {exc}')
+            self.log.error(f'Error reading proxy file {proxyPath}: {exc}')
             raise
         if expirytime < datetime.datetime.utcnow():
             raise ProxyFileExpiredError()
@@ -171,7 +171,7 @@ class ProxyManager(object):
         try:
             c.execute('SELECT proxy FROM proxies WHERE id = %s', (proxyid,))
         except Exception as exc:
-            self.logger.error(f'Error retrieving private key PEM from database: {exc}')
+            self.log.error(f'Error retrieving private key PEM from database: {exc}')
             return None
         else:
             row = c.fetchone()
@@ -184,7 +184,7 @@ class ProxyManager(object):
             c = self.arcdb.db.getCursor()
             c.execute('SELECT id,expirytime FROM proxies WHERE id = %s LIMIT 1', (proxyid,))
         except Exception as exc:
-            self.logger.error(f'Error checking existence of proxy: {exc}')
+            self.log.error(f'Error checking existence of proxy: {exc}')
             return None
         else:
             proxy = c.fetchone()

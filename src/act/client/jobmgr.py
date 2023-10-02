@@ -58,9 +58,9 @@ class JobManager(object):
 
     def __init__(self, db=None):
         """Initialize object's attributes."""
-        self.logger = logging.getLogger(__name__)
-        self.arcdb = aCTDBArc(self.logger, db=db)
-        self.clidb = ClientDB(self.logger, db=db)
+        self.log = logging.getLogger(__name__)
+        self.arcdb = aCTDBArc(self.log, db=db)
+        self.clidb = ClientDB(self.log, db=db)
 
         # TODO: if and when sites from arc config are used, move everything
         # that uses arc config to this class
@@ -157,10 +157,10 @@ class JobManager(object):
                     shutil.rmtree(jobdir, ignore_errors=True)
                 except OSError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.error(f'Could not clean job results in {jobdir}')
+                    self.log.error(f'Could not clean job results in {jobdir}')
                 except NoJobDirectoryError:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.info(f'Job {job["c_id"]} has no job results to clean')
+                    self.log.info(f'Job {job["c_id"]} has no job results to clean')
 
             # add job to removal query
             arc_where += f'{job["a_id"]}, '
@@ -292,10 +292,10 @@ class JobManager(object):
                     shutil.rmtree(jobdir, ignore_errors=True)
                 except OSError as exc:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.error(f'Could not clean job results in {jobdir}: {exc}')
+                    self.log.error(f'Could not clean job results in {jobdir}: {exc}')
                 except NoJobDirectoryError as exc:
                     # just log this problem, user doesn't need results anyway
-                    self.logger.error(f'Could not clean job results in {exc.jobdir}: {exc}')
+                    self.log.error(f'Could not clean job results in {exc.jobdir}: {exc}')
 
                 # finished jobs become done, tofetch jobs become donefailed;
                 # the job status should be preserved
@@ -562,7 +562,7 @@ class JobManager(object):
         """
         tmpdir = self.arcconf.tmp.dir
         if not tmpdir:
-            self.logger.error('tmp directory is not in config')
+            self.log.error('tmp directory is not in config')
             raise ConfigError("config/tmp/dir")
         jobdir = arcid.rsplit('/', 1)[-1]
         actJobDir = os.path.join(tmpdir, jobdir)
