@@ -26,9 +26,6 @@ class aCTARCProcess(aCTProcess):
         self.db = aCTDBArc(self.log)
 
         # see docstring of aCTProcess.setup() for why loadConf is required
-        #
-        # the pyarcrest logs will be without cluster for now, some effort
-        # is required to add cluster URL to logs
         self.loadConf()
         pyarcrestLogger = logging.getLogger("pyarcrest")
         level = LEVELS.get(self.conf.logger.level or logging.NOTSET)
