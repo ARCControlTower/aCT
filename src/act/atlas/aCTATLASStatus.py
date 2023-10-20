@@ -382,7 +382,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 try:
                     shutil.copy(os.path.join(localdir, pilotlog),
                                 os.path.join(outd, f"{aj['appjobid']}.out"))
-                    os.chmod(os.path.join(outd, f"{aj['appjobid']}.out", 0o644))
+                    os.chmod(os.path.join(outd, f"{aj['appjobid']}.out"), 0o644)
                 except Exception as e:
                     self.log.warning(f"appjob({aj['appjobid']}): Failed to copy job output for arcid({jobid}): {e}")
 
