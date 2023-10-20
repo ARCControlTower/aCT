@@ -106,7 +106,7 @@ class aCTFetcher(aCTARCProcess):
                                 if pattern.endswith("/"):
                                     refilter += ".*"
 
-                    refilter.lstrip("|")
+                    refilter = refilter.lstrip("|")
                     if refilter:
                         outputFilters[arcid] = refilter
 
