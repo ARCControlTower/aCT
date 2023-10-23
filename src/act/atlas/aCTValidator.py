@@ -1004,9 +1004,11 @@ class OutputChecker(ARCWorker):
                                 f"arcjob({jobid}): File {dpurl}: expected size {fsize}, checksum {checksum}, "
                                 f"actual size {statsize}, checksum {statsum}"
                             )
-                        except:
-                            import traceback
-                            self.log.warning(f"arcjob({jobid}): Unhandled issue: {traceback.format_exc()}")
+                        except BaseException as exc:
+                            # catching BaseException is better than bare except
+                            # and allows to print exception instead of using
+                            # traceback or similar
+                            self.log.warning(f"arcjob({jobid}): Unhandled issue: {exc}")
                             self.resultQueue.put((jobid, url, JobStatus.FAILED))
                             continue
                         if fsize != statsize:
