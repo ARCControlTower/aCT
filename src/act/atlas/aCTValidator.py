@@ -696,7 +696,6 @@ class aCTValidator(aCTATLASProcess):
                 self.log.error(f"Failed deleting outputs for arcjob({jobid}), setting to failed")
                 self.cleanDownloadedJob(jobid)
                 self.dbarc.updateArcJob(jobid, cleandesc)
-                desc = {"actpandastatus": "failed", "pandastatus": "failed"}
                 self.dbpanda.updateJobs(f"arcjobid={jobid}", faildesc)
                 self.cleanDownloadedJob(jobid)
 
