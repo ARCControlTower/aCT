@@ -381,7 +381,7 @@ class aCTATLASStatus(aCTATLASProcess):
             else:
                 pupdate.node = aj["ExecutionNode"]
             pupdate.node = aj['ExecutionNode']
-            pupdate.pilotLog = self.createPilotLog(outd, aj['pandaid'])
+            pupdate.pilotLog = self.createPilotLog(localdir, aj['pandaid'])
             pupdate.cpuConsumptionTime = aj['UsedTotalCPUTime']
             pupdate.cpuConsumptionUnit = 'seconds'
             pupdate.cpuConversionFactor = 1
