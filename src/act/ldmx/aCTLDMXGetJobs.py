@@ -22,30 +22,35 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
     def generateJobs(self, config):
 
         #pull the user id to use for all subsequent user based scopes (images, analysis job output)
-        config['UserID'] = "user."+os.environ['USER'] if os.environ['USER']!='centos' else "prod"
-        self.log.info(f'Setting UserID {config["UserID"]}')
+        if config['Scope'] and "user." in config['Scope'] :
+                config['UserID']=config['Scope']
+        else :
+            config['UserID'] = "user."+os.environ['USER'] if os.environ['USER']!='centos' else "prod"
+        self.log.info(f'Set UserID {config["UserID"]}')
 
         #first, set up to use a specific image. modify config --> copied to all later newconfig
         if 'LdmxImage' in config:
             # Jobs will use specified image rather than one based on RTE
-            if ";" not in config['LdmxImage'] : #no scope defined. assume user's scope
+            if ":" not in config['LdmxImage'] : #no scope defined. assume user's scope
                 name=config['LdmxImage']
                 if ".sif" not in name :
                     name=name+".sif"
-                scope=config['UserID']+".image"
+                imageScope=config['UserID']+".image"
             else :
                 try:
-                    scope, name = config['LdmxImage'].split(':')
+                    imageScope, name = config['LdmxImage'].split(':')
                 except ValueError: #normally we should never end up here 
                     raise Exception(f'{config["LdmxImage"]} is not correctly formatted as scope:name')
             #now enforce this naming scheme for metadata preservation, and error message
-            config["LdmxImage"]=scope+':'+name 
+            config["LdmxImage"]=imageScope+':'+name 
             self.log.info(f'Setting LdmxImage={config["LdmxImage"]}')
             # List dataset replica (should be just one) and set filename in the config
             try:
-                imageList = list(self.rucio.list_replicas([{'scope': scope, 'name': name}]))
+                imageList = list(self.rucio.list_replicas([{'scope': imageScope, 'name': name}]))
             except RucioException as e:
                 raise Exception(f'Rucio exception while looking up image {config["LdmxImage"]}: {e}')
+            self.log.info(f'Found image ... ')
+            self.log.info(f'Found image {imageList[0]}')
             image=imageList[0]
             # Always use remote copy so that it is cached                                                                           
             for rep in image['rses'].values():
@@ -57,7 +62,9 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             config['ImageLocationLocal'] = f'{image["name"]}'  #try removing ./
             config['ImageFile'] = f'{image["scope"]}:{image["name"]}'
 
+        numFiles=int(config["NumberofJobs"]) 
 
+        #if 'InputDataset' in config : #or 'PileupDataset' in config :
         if 'InputDataset' in config:
             # Jobs with input files: generate one job per file
             try:
@@ -67,7 +74,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
             # List dataset replicas and set filename and RSE in the config
             files = list(self.rucio.list_replicas([{'scope': scope, 'name': name}]))
-
+            numFiles=len(files)
             # Check if pileup is also needed
             if 'PileupDataset' in config:
                 self.log.info(f'Using pileup dataset {config["PileupDataset"]}')
@@ -78,10 +85,10 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                     raise Exception(f'{config["PileupDataset"]} is not correctly formatted as scope:name')
 
                 pileup = list(self.rucio.list_replicas([{'scope': pscope, 'name': pname}]))
-                if len(pileup) < len(files):
-                    self.log.info(f'Pileup dataset {config["PileupDataset"]} is smaller than input \
+                if len(pileup) < numFiles :
+                    self.log.info(f'Pileup dataset {config["PileupDataset"]} is smaller than sim/input \
                                     dataset {config["InputDataset"]}, will have to reuse some events!')
-                    pileup *= len(files) // len(pileup) + 1
+                    pileup *= numFiles // len(pileup) + 1
                 random.shuffle(pileup)
 
             # List dataset replicas and group based on local replicas
@@ -114,14 +121,54 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                             for rep in pfile['rses'].values():
                                 if not rep[0].startswith('file://'):
                                     newconfig['PileupLocation'] = rep[0]
-                            if not newconfig.get('PileupLocation'):
-                                raise Exception(f'No suitable locations found for pileup file {pfile["scope"]}:{pfile["name"]}')
-                            newconfig['PileupLocationLocal'] = f'./{pfile["name"]}'
-                            newconfig['PileupFile'] = f'{pfile["scope"]}:{pfile["name"]}'
+                                    if not newconfig.get('PileupLocation'):
+                                        raise Exception(f'No suitable locations found for pileup file {pfile["scope"]}:{pfile["name"]}')
+                                    newconfig['PileupLocationLocal'] = f'./{pfile["name"]}'
+                                    newconfig['PileupFile'] = f'{pfile["scope"]}:{pfile["name"]}'
 
                         yield newconfig
                         newconfig = config.copy()
                         runnumber += 1
+
+        elif 'PileupDataset' in config : #( implies and not 'InputDataset' in config):
+            self.log.info(f'Using pileup dataset {config["PileupDataset"]}')
+            pileup = []
+            try:
+                pscope, pname = config['PileupDataset'].split(':')
+            except ValueError:
+                raise Exception(f'{config["PileupDataset"]} is not correctly formatted as scope:name')
+
+            pileup = list(self.rucio.list_replicas([{'scope': pscope, 'name': pname}]))
+            if len(pileup) < numFiles :
+                self.log.info(f'Pileup dataset {config["PileupDataset"]} is smaller than number \
+                of sim jobs {numFiles}, will have to reuse some events!')
+                pileup *= numFiles // len(pileup) + 1
+            random.shuffle(pileup)
+
+            # Jobs with no input sim file: generate jobs based on specified number of jobs
+            randomseed1 = int(config['RandomSeed1SequenceStart'])
+            randomseed2 = int(config['RandomSeed2SequenceStart'])
+            njobs = int(config['NumberofJobs'])
+            self.log.info(f'Creating {njobs} jobs')
+            for n in range(njobs):
+                newconfig = config
+                newconfig['RandomSeed1'] = randomseed1+n
+                newconfig['RandomSeed2'] = randomseed2+n
+                newconfig['runNumber']   = randomseed1+n
+                # Add pileup 
+                pfile = pileup[n-1] #i-1]
+                # Always use remote copy so that it is cached                                                                                 
+                for rep in pfile['rses'].values():
+                    if not rep[0].startswith('file://'):
+                        newconfig['PileupLocation'] = rep[0]
+                        if not newconfig.get('PileupLocation'):
+                            raise Exception(f'No suitable locations found for pileup file {pfile["scope"]}:{pfile["name"]}')
+                        newconfig['PileupLocationLocal'] = f'./{pfile["name"]}'
+                        newconfig['PileupFile'] = f'{pfile["scope"]}:{pfile["name"]}'
+
+                yield newconfig
+
+
 
         elif 'IsImage' in config and config['IsImage']=="Yes":
             self.log.info(f'Preparing image generating job with FileName={config["FileName"]}')
@@ -142,7 +189,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             except RucioException as e:
                 raise Exception(f'Rucio exception while looking up image {f["FileName"]}: {e}')
             if len(image) > 0 : 
-                raise Exception(f'A file named  {f["FileName"]} has already been defined in rucio. Choose a different name.')
+                raise Exception(f'A file named  {config["FileName"]} has already been defined in rucio. Choose a different name.')
             #else. all is good!
             newconfig = config.copy()
             yield newconfig
@@ -264,9 +311,11 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
                 # Get base path for output storage if necessary
                 output_base = self.getOutputBase(config)
 
+                self.log.info(f"Setting up job configs")
                 # Generate copies of config and template
                 jobfiles = []
                 for jobconfig in self.generateJobs(config):
+                    self.log.info(f"Setting up job config for new job")
                     newjobfile = os.path.join(self.tmpdir, os.path.basename(configfile))
                     with tempfile.NamedTemporaryFile(mode='w', prefix=f'{newjobfile}.', delete=False, encoding='utf-8') as njf:
                         newjobfile = njf.name
@@ -281,6 +330,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
 
                         if 'Scope' not in jobconfig:
                             njf.write(f'Scope=user.{user["ruciouser"]}\n')
+                            self.log.info(f'Scope not defined in config, using default scope user.{user["ruciouser"]}')
 
                         if 'BatchID' not in jobconfig:
                             njf.write(f'BatchID={batch["batchname"]}\n')
