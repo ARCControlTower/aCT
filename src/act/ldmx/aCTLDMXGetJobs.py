@@ -50,7 +50,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             # Always use remote copy so that it is cached                                                                           
             for rep in image['rses'].values():
                 if not rep[0].startswith('file://'):
-                    self.log.debug(f'Found remote replica of {image} in {rep}')
+                    self.log.debug(f'Found remote replica of {config["LdmxImage"]} in {rep[0]}')
                     config['ImageLocation'] = rep[0]
             if not config.get('ImageLocation'):
                 raise Exception(f'No suitable locations found for image file {image["scope"]}:{image["name"]}')
@@ -142,7 +142,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
             except RucioException as e:
                 raise Exception(f'Rucio exception while looking up image {f["FileName"]}: {e}')
             if len(image) > 0 : 
-                raise Exception(f'A file named  {f["FileName"]} has already been defined in rucio. Choose a different name.')
+                raise Exception(f'A file named  {config["FileName"]} has already been defined in rucio. Choose a different name.')
             #else. all is good!
             newconfig = config.copy()
             yield newconfig
