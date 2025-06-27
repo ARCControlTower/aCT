@@ -22,7 +22,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
     def generateJobs(self, config):
 
         #pull the user id to use for all subsequent user based scopes (images, analysis job output)
-        config['UserID'] = "user."+os.environ['USER'] if os.environ['USER']!='centos' else "prod"
+        config['UserID'] = "user."+os.environ['USER'] if os.environ['USER']!='almalinux' else "prod"
         self.log.info(f'Setting UserID {config["UserID"]}')
 
         #first, set up to use a specific image. modify config --> copied to all later newconfig
