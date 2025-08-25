@@ -285,6 +285,9 @@ class aCTATLASStatus(aCTATLASProcess):
         import glob
         lf=glob.glob(outd+"/log*")
         try:
+            if(os.path.size(lf[0]) > 10485760):
+                self.log.info("%s: Log file too big: %s", pandaid, lf[0])
+                raise Exception("Log file too big")
             f=open(lf[0],"r")
             lines=f.readlines()
             log+="---------------------------------------------------------------\n"
@@ -381,7 +384,7 @@ class aCTATLASStatus(aCTATLASProcess):
             else:
                 pupdate.node = aj["ExecutionNode"]
             pupdate.node = aj['ExecutionNode']
-            pupdate.pilotLog = self.createPilotLog(outd, aj['pandaid'])
+            pupdate.pilotLog = self.createPilotLog(localdir, aj['pandaid'])
             pupdate.cpuConsumptionTime = aj['UsedTotalCPUTime']
             pupdate.cpuConsumptionUnit = 'seconds'
             pupdate.cpuConversionFactor = 1
