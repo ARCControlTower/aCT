@@ -217,7 +217,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
         # Get RSE URL with basepath. Exceptions will be caught by the caller
         rse_info = self.rucio.get_protocols(output_rse)
         if not rse_info or len(rse_info) < 1:
-            raise f"Empty info returned by Rucio for RSE {output_rse}"
+            raise Exception('Empty info returned by Rucio for RSE {output_rse}')
 
         return '{scheme}://{hostname}:{port}{prefix}'.format(**rse_info[0])
 
