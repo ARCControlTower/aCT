@@ -25,7 +25,7 @@ class aCTLDMXGetJobs(aCTLDMXProcess):
         if config['Scope'] and "user." in config['Scope'] :
                 config['UserID']=config['Scope']
         else :
-            config['UserID'] = "user."+os.environ['USER'] if os.environ['USER']!='centos' else "prod"
+            config['UserID'] = "user."+os.environ['USER'] if os.environ['USER']!='almalinux' else "prod"
         self.log.info(f'Set UserID {config["UserID"]}')
 
         #first, set up to use a specific image. modify config --> copied to all later newconfig
