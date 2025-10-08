@@ -149,7 +149,7 @@ class ClientDB(aCTDB):
 
         # get job name from xRSL
         jobdescs = arc.JobDescriptionList()
-        arc.JobDescription_Parse(str(jobdesc), jobdescs)
+        arc.JobDescription.Parse(str(jobdesc), jobdescs)
         jobname = jobdescs[0].Identification.JobName
 
         # insert job
@@ -184,7 +184,7 @@ class ClientDB(aCTDB):
         '''
         # extract priority from job desc (also checks if desc is valid)
         jobdescs = arc.JobDescriptionList()
-        if not arc.JobDescription_Parse(str(jobdesc), jobdescs):
+        if not arc.JobDescription.Parse(str(jobdesc), jobdescs):
             self.log.error("%s: Failed to prepare job description" % appjobid)
             return None
         priority = jobdescs[0].Application.Priority
