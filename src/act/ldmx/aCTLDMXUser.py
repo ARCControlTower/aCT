@@ -75,7 +75,8 @@ def submit(args):
         logger.error(f"Failed to submit {args.conffile}: {str(e)}")
         return 1
 
-    logger.info(f"Submitted job configuration at {args.conffile} to create {config.get('NumberofJobs', '')} jobs")
+    logger.info(f"Submitted job configuration in {args.conffile} to create {config.get('NumberofJobs', '')} jobs")
+    logger.info(f'Submission time: {time.strftime("%Y-%m-%d  %H:%M:%S UTC")}')
     return 0
 
 def cancel(args):
@@ -101,14 +102,21 @@ def cancel(args):
             return 1
         constraints.append(f"sitename='{args.site}'")
 
+    # Check if there are jobs to cancel 
+    # TODO: put in the protection of other's jobs (unless the loop over uid later does this)
+    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()}")
+    #jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
+    #                       "")
     # Check if there are jobs to cancel and if they are all owned by the current user
-    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
-                           columns=['ldmxjobs.userid'])
+    #jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
+    #                       columns=['ldmxjobs.userid'])
 
     if not jobs:
         logger.error('No matching jobs found')
         return 0
 
+    #TODO: here we need to have a list of jobs owned by the user trying to cancel
+    #they should be able to legitimately cancel them 
     if [j for j in jobs if j['userid'] != args.uid]:
         logger.error('Found jobs owned by another user which cannot be cancelled')
         return 1
@@ -118,7 +126,8 @@ def cancel(args):
         logger.info('Aborting..')
         return 0
 
-    dbldmx.updateJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
+    #dbldmx.updateJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
+    dbldmx.updateJobs(f"ldmxstatus in {job_not_final_states()}",
                       {'ldmxstatus': 'tocancel'})
     logger.info(f'Cancelled {len(jobs)} jobs')
     return 0
@@ -147,7 +156,8 @@ def resubmit(args):
         constraints.append(f"sitename='{args.site}'")
 
     # Check if there are jobs to resubmit and if they are all owned by the current user
-    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
+#    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()} AND {' AND '.join(constraints)}",
+    jobs = dbldmx.getJobs(f"ldmxstatus in {job_not_final_states()}",
                           columns=['ldmxjobs.userid'])
 
     if not jobs:

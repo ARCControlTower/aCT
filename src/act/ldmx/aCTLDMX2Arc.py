@@ -82,9 +82,12 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         if 'SimExecutable' in config :
             wpath, wname = os.path.split(wrapper)
             wrapper = os.path.join(wpath, config.get('SimExecutable'))
- 
+        #else :
+        #    wrapper = 'ldmxsim.sh'
         #keep executable naming as is but point to actual wrapper script
         xrsl['executable'] = f"(executable = ldmxsim.sh)"
+        #xrsl['executable'] = f"(executable = {wrapper})"
+        #inputfiles = f'({wrapper} {wrapper})\n \
         inputfiles = f'(ldmxsim.sh {wrapper})\n \
                        (ldmxproduction.config {descriptionfile})\n \
                        (ldmxjob.py {templatefile})\n \
@@ -113,7 +116,8 @@ class aCTLDMX2Arc(aCTLDMXProcess):
         xrsl['stdout'] = '(stdout = stdout)'
         xrsl['gmlog'] = '(gmlog = gmlog)'
         xrsl['join'] = '(join = yes)'
-        xrsl['rerun'] = '(rerun = 2)'
+        #xrsl['rerun'] = '(rerun = 2)'
+        xrsl['rerun'] = '(rerun = 0)'
         xrsl['count'] = '(count = 1)'
         xrsl['jobName'] = '(jobname = "LDMX Prod Simulation")'
 

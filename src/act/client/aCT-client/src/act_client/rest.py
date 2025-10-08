@@ -230,7 +230,7 @@ class ARCRest:
             job.delegid = delegationID
 
             # parse job description
-            if not arc.JobDescription_Parse(job.descstr, jobdescs):
+            if not arc.JobDescription.Parse(job.descstr, jobdescs):
                 job.errors.append(DescriptionParseError("Failed to parse description"))
                 continue
 

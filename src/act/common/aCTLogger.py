@@ -41,11 +41,11 @@ class aCTLogger:
             else:
                 self.arclog = arc.LogFile(str(logfile))
             self.arclog.setFormat(arc.LongFormat)
-            arc.Logger_getRootLogger().addDestination(self.arclog)
+            arc.Logger.getRootLogger().addDestination(self.arclog)
             if self.conf.logger.arclevel:
-                arc.Logger_getRootLogger().setThreshold(arc.string_to_level(self.conf.logger.arclevel.upper()))
+                arc.Logger.getRootLogger().setThreshold(arc.string_to_level(self.conf.logger.arclevel.upper()))
             else:
-                arc.Logger_getRootLogger().setThreshold(arc.ERROR)
+                arc.Logger.getRootLogger().setThreshold(arc.ERROR)
 
     def log(self,level,message,*args, **kwargs):
         lvl = LEVELS.get(level, logging.NOTSET)

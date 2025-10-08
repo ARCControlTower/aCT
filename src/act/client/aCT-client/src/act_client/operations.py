@@ -251,7 +251,7 @@ class ACTRest:
             jobs[i]['cleanup'] = True
 
             # parse job description
-            if not arc.JobDescription_Parse(jobs[i]['descstr'], jobdescs):
+            if not arc.JobDescription.Parse(jobs[i]['descstr'], jobdescs):
                 jobs[i]['msg'] = f'Parsing fail for job description {jobs[i]["descpath"]}'
                 jobs.pop(i)
             else:

@@ -115,7 +115,7 @@ class Client2Arc(object):
         for job in jobs:
 
             # create downloads list
-            arc.JobDescription_Parse(job['jobdesc'], jobdescs)
+            arc.JobDescription.Parse(job['jobdesc'], jobdescs)
             # all files from session dir
             downloads = ['/']
             # all diagnose files if log dir is specified
