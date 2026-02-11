@@ -3,9 +3,7 @@ import signal
 
 
 def getIDParam(args):
-    if not args.all and not args.id:
-        raise ACTClientError("No job ID given (use -a/--all) or --id")
-    elif args.id:
+    if args.id:
         return getIDsFromStr(args.id)
     else:
         []

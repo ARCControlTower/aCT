@@ -8,7 +8,7 @@ import queue
 import shutil
 
 from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
-                               getWebDAVBase, verifyFiles)
+                               getWebDAVBase)
 from act_client.config import checkConf, expandPaths, loadConf
 from act_client.httpclient import HTTP_BUFFER_SIZE, HTTPClient
 from act_client.operations import (SubmissionInterrupt, getACTRestClient,
@@ -47,7 +47,7 @@ def addCommonJobFilterArgs(parser):
         '-a',
         '--all',
         action='store_true',
-        help='all jobs that match other criteria'
+        help='DEPRECATED: no longer used'
     )
     parser.add_argument(
         '-i',
