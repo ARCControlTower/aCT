@@ -8,7 +8,7 @@ import queue
 import shutil
 
 from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
-                               getWebDAVBase)
+                               getWebDAVBase, verifyFilesExist)
 from act_client.config import checkConf, expandPaths, loadConf
 from act_client.httpclient import HTTP_BUFFER_SIZE, HTTPClient
 from act_client.operations import (SubmissionInterrupt, getACTRestClient,
@@ -366,6 +366,7 @@ def subcommandGet(args, conf, workers=10):
 
     try:
         jobs = actrest.getDownloadableJobs(jobids=ids, name=args.name, state=args.state)
+        verifyFilesExist(ids, jobs)
 
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
         futures = []

@@ -43,6 +43,13 @@ def getIDsFromStr(listStr):
     return ids
 
 
+def verifyFilesExist(jobids, JSONdata):
+    present_ids = {job["c_id"] for job in JSONdata}
+    missing_ids = set(jobids) - present_ids
+    for missing in missing_ids:
+        print(f"Job with ID {missing:8} does not exist or is not in proper state")
+
+
 def deleteFile(filename):
     try:
         if os.path.isfile(filename):
