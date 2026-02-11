@@ -366,7 +366,8 @@ def subcommandGet(args, conf, workers=10):
 
     try:
         jobs = actrest.getDownloadableJobs(jobids=ids, name=args.name, state=args.state)
-        verifyFilesExist(ids, jobs)
+        if ids is not None:
+            verifyFilesExist(ids, jobs)
 
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
         futures = []
@@ -414,7 +415,8 @@ def subcommandGet(args, conf, workers=10):
     finally:
         disableSIGINT()
 
-        pool.shutdown(wait=False)
+        if pool is not None:
+            pool.shutdown(wait=False)
 
         for client in clientList:
             client.close()
