@@ -2,9 +2,13 @@ import argparse
 import json
 import os
 import sys
+import threading
+import concurrent.futures
+import queue
+import shutil
 
 from act_client.common import (ACTClientError, disableSIGINT, getIDParam,
-                               getWebDAVBase)
+                               getWebDAVBase, verifyFiles)
 from act_client.config import checkConf, expandPaths, loadConf
 from act_client.httpclient import HTTP_BUFFER_SIZE, HTTPClient
 from act_client.operations import (SubmissionInterrupt, getACTRestClient,
@@ -325,14 +329,46 @@ def subcommandFetch(args, conf):
     print(f'Will fetch {len(jsonData)} jobs')
 
 
-def subcommandGet(args, conf):
-    checkConf(conf, ['server', 'token'])
+def process_one_job(job, cancel, clientQueue, downloadDir=None):
+    if cancel.is_set():
+        return
+    
+    worker_client = clientQueue.get()
+    try:
+        anyResults, errors = worker_client.downloadJobResults(job["c_id"], cancel, downloadDir)
+    except Exception as e:
+        anyResults = False
+        errors = [e]
+    finally:
+        clientQueue.put(worker_client)
 
+    if cancel.is_set():
+        shutil.rmtree(downloadDir)
+        return
+    return job, downloadDir, anyResults, errors
+
+
+def subcommandGet(args, conf, workers=10):
+    checkConf(conf, ['server', 'token'])
     actrest = getACTRestClient(args, conf)
     ids = getIDParam(args)
     toclean = []
+
+    cancel = threading.Event()
+    clientQueue = queue.Queue()
+    clientList = []
+    for _ in range(workers):
+        client = getACTRestClient(args, conf)
+        clientQueue.put(client)
+        clientList.append(client)
+
+    pool = None
+
     try:
         jobs = actrest.getDownloadableJobs(jobids=ids, name=args.name, state=args.state)
+
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+        futures = []
         for job in jobs:
             try:
                 if args.use_jobname:
@@ -348,31 +384,42 @@ def subcommandGet(args, conf):
                         if dirnum > sys.maxsize:
                             raise ACTClientError('Extraction directory already exists')
                     dirname = f'{dirname}_{dirnum}'
-
-                anyResults, errors = actrest.downloadJobResults(job['c_id'], downloadDir=dirname)
             except Exception as e:
                 print(f'Error downloading job {job["c_jobname"]}: {e}')
                 continue
+            
+            futures.append(pool.submit(process_one_job, job, cancel, clientQueue, downloadDir=dirname))
 
-            if errors:
+        for future in concurrent.futures.as_completed(futures):
+            job, dirname, anyResults, errors = future.result()
+            if not errors:
+                toclean.append(job["c_id"])
+            else:
                 print(f'Errors downloading job {job["c_jobname"]}:')
                 for error in errors:
                     print(f'    {error}')
                 continue
-            elif not anyResults:
+
+            if not anyResults:
                 print(f'No output files for job {job["c_jobname"]}')
             else:
                 print(f'Results for job {job["c_jobname"]} stored in {dirname}')
-            toclean.append(job["c_id"])
+      
     except Exception as exc:
         raise ACTClientError(f'Error downloading jobs: {exc}')
     except KeyboardInterrupt:
         print('Stopping job download ...')
+        cancel.set()
     finally:
+        disableSIGINT()
+
+        pool.shutdown(wait=False)
+
+        for client in clientList:
+            client.close()
+            
         if args.noclean:
             return
-
-        disableSIGINT()
 
         # reconnect in case KeyboardInterrupt left connection in a weird state
         actrest.close()

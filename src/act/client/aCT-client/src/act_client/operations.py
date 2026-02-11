@@ -119,7 +119,7 @@ class ACTRest:
             jobs.extend(self.getJobStats(jobids=jobids, name=name, state='donefailed', clienttab=clienttab, arctab=arctab))
         return jobs
 
-    def downloadJobResults(self, jobid, downloadDir=None):
+    def downloadJobResults(self, jobid, cancel, downloadDir=None):
         transferQueue = queue.Queue()
         transferQueue.put({
             "url": f"/jobs/{jobid}/results/",
@@ -128,7 +128,7 @@ class ACTRest:
         })
         errors = []
         anyResults = False
-        while not transferQueue.empty():
+        while not transferQueue.empty() and not cancel.is_set():
             trdict = transferQueue.get()
             try:
                 resp = self.httpClient.request('GET', trdict["url"], token=self.token)
