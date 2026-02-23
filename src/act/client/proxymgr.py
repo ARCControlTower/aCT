@@ -214,8 +214,14 @@ def getVOMSProxyAttributes(certPEM, chainPEM):
         trustList = arc.VOMSTrustList()
         trustList.AddRegex(".*")
         acList = arc.VOMSACInfoVector()
-        if not arc.parseVOMSAC(cr, uc.CACertificatesDirectory(), "", "/etc/grid-security/vomsdir", trustList, acList):
-            continue
+        
+        if arc.ARC_VERSION_MAJOR > 6:
+            if not arc.parseVOMSAC(cr, uc.CACertificatesDirectory(), "", True, "/etc/grid-security/vomsdir", trustList, acList):
+                continue
+        else:
+            if not arc.parseVOMSAC(cr, uc.CACertificatesDirectory(), "", "/etc/grid-security/vomsdir", trustList, acList):
+                continue
+
         # These loops go over values of interest. They mimic this code snippet:
         # https://source.coderefinery.org/nordugrid/arc/-/blob/master/src/clients/credentials/arcproxy.cpp#L684-724
         for ac in acList:
