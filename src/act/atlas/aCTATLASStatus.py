@@ -6,6 +6,8 @@ import json
 import os
 import re
 import shutil
+import gc
+
 from urllib.parse import urlparse
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
@@ -49,6 +51,7 @@ class aCTATLASStatus(aCTATLASProcess):
         for job in jobs:
 
             self.stopOnFlag()
+            gc.collect()
 
             self.log.info(f"Cancelling arcjob({job['id']}) for appjob({job['pandaid']})")
             select = f"id={job['id']}"
@@ -120,6 +123,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         for aj in jobstoupdate:
             self.stopOnFlag()
+            gc.collect()
             select = f"arcjobid={aj['id']}"
             desc = {}
             desc["pandastatus"] = "starting"
@@ -164,6 +168,7 @@ class aCTATLASStatus(aCTATLASProcess):
         for aj in jobstoupdate:
 
             self.stopOnFlag()
+            gc.collect()
 
             select = f"arcjobid={aj['id']}"
             desc = {}
@@ -231,6 +236,7 @@ class aCTATLASStatus(aCTATLASProcess):
         for aj in jobstoupdate:
 
             self.stopOnFlag()
+            gc.collect()
 
             select = f"arcjobid={aj['id']}"
             desc = {}
@@ -266,6 +272,7 @@ class aCTATLASStatus(aCTATLASProcess):
         for aj in arcjobs:
 
             self.stopOnFlag()
+            gc.collect()
 
             if self.sites[aj["siteName"]]["truepilot"]:
                 self.log.info(f"appjob({aj['appjobid']}): No resubmission for true pilot job")
@@ -300,6 +307,7 @@ class aCTATLASStatus(aCTATLASProcess):
         log = ""
         try:
             f = open(outd+"/gmlog/failed", "r")
+            self.log.info(f"GMLOGFAILED: {outd}")
             log += "---------------------------------------------------------------\n"
             log += "GMLOG: failed\n"
             log += "---------------------------------------------------------------\n"
@@ -311,6 +319,9 @@ class aCTATLASStatus(aCTATLASProcess):
         import glob
         lf = glob.glob(outd+"/log*")
         try:
+            if(os.path.size(lf[0]) > 1048576):
+                self.log.info(f"Log file too big: {lf[0]}")
+                raise Exception("Log file too big")
             f = open(lf[0],"r")
             lines = f.readlines()
             log += "---------------------------------------------------------------\n"
@@ -349,6 +360,7 @@ class aCTATLASStatus(aCTATLASProcess):
         for aj in arcjobs:
 
             self.stopOnFlag()
+            gc.collect()
 
             jobid = aj["JobID"]
             if not jobid:
@@ -408,7 +420,7 @@ class aCTATLASStatus(aCTATLASProcess):
             else:
                 pupdate.node = aj["ExecutionNode"]
             pupdate.node = aj["ExecutionNode"]
-            pupdate.pilotLog = self.createPilotLog(outd, aj["pandaid"])
+            pupdate.pilotLog = self.createPilotLog(localdir, aj["pandaid"])
             pupdate.cpuConsumptionTime = aj["UsedTotalCPUTime"]
             pupdate.cpuConsumptionUnit = "seconds"
             pupdate.cpuConversionFactor = 1
@@ -459,6 +471,7 @@ class aCTATLASStatus(aCTATLASProcess):
         desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
         for aj in arcjobs:
             self.stopOnFlag()
+            gc.collect()
             select = f"id={aj['id']}"
             self.dbarc.updateArcJobs(desc, select)
 
@@ -466,7 +479,7 @@ class aCTATLASStatus(aCTATLASProcess):
         # Look for failed final states in ARC which are still starting or running in panda
         select = "(arcstate='donefailed' or arcstate='cancelled' or arcstate='lost')"
         select += " and actpandastatus in ('sent', 'starting', 'running', 'transferring')"
-        select += f" and pandajobs.arcjobid = arcjobs.id and siteName in {self.sitesselect} limit 100000"
+        select += f" and pandajobs.arcjobid = arcjobs.id and siteName in {self.sitesselect} limit 1000"
         columns = ["arcstate", "arcjobid", "appjobid", "JobID", "arcjobs.Error", "arcjobs.EndTime",
                    "siteName", "ExecutionNode", "pandaid", "UsedTotalCPUTime", "pandajobs.created",
                    "UsedTotalWallTime", "ExitCode", "sendhb", "stdout", "metadata", "cluster", "corecount"]
@@ -502,6 +515,7 @@ class aCTATLASStatus(aCTATLASProcess):
 
         for aj in failedjobs:
             self.stopOnFlag()
+            gc.collect()
             select = f"arcjobid={aj['arcjobid']}"
             desc = {}
             desc["pandastatus"] = "transferring"
@@ -527,6 +541,7 @@ class aCTATLASStatus(aCTATLASProcess):
         # clean lost pilot jobs or resubmit other lost jobs
         for aj in lostjobs:
             self.stopOnFlag()
+            gc.collect()
             select = f"arcjobid={aj['arcjobid']}"
             desc = {}
 
@@ -547,6 +562,7 @@ class aCTATLASStatus(aCTATLASProcess):
         # clean cancelled pilot jobs and resubmit other cancelled jobs
         for aj in cancelledjobs:
             self.stopOnFlag()
+            gc.collect()
             # Jobs were unexpectedly killed in arc, resubmit and clean
             select = f"arcjobid={aj['arcjobid']}"
             desc = {}
@@ -590,6 +606,7 @@ class aCTATLASStatus(aCTATLASProcess):
         jobs = self.dbarc.getArcJobsInfo(select, ["id", "appjobid"])
         for job in jobs:
             self.stopOnFlag()
+            gc.collect()
             self.log.info(f"appjob({job['appjobid']}): Deleting from arcjobs unsubmitted arcjob({job['id']})")
             self.dbarc.deleteArcJob(job["id"])
 
@@ -599,6 +616,7 @@ class aCTATLASStatus(aCTATLASProcess):
         cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
         for job in jobs:
             self.stopOnFlag()
+            gc.collect()
             # done jobs should not be there, log a warning
             if job["arcstate"] == "done":
                 self.log.warning(f"appjob({job['appjobid']}): Removing orphaned done arcjob({job['id']})")
@@ -616,6 +634,7 @@ class aCTATLASStatus(aCTATLASProcess):
         jobs = self.dbarc.getArcJobsInfo(select, ["arcjobs.id", "arcjobs.appjobid", "arcjobs.JobID"], tables="arcjobs, pandajobs")
         for job in jobs:
             self.stopOnFlag()
+            gc.collect()
             self.log.info(f"appjob({job['appjobid']}): Cleaning cancelled arcjob({job['id']})")
             self.dbarc.updateArcJob(job["id"], cleandesc)
             if job["JobID"] and job["JobID"].rfind("/") != -1:
@@ -628,6 +647,7 @@ class aCTATLASStatus(aCTATLASProcess):
         Main loop
         """
         self.log.info("Running")
+        #gc.set_debug(gc.DEBUG_STATS)# | gc.DEBUG_COLLECTABLE | gc.DEBUG_UNCOLLECTABLE)
         self.setSites()
         # Check for jobs that panda told us to kill and cancel them in ARC
         self.checkJobstoKill()

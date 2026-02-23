@@ -164,7 +164,8 @@ class aCTSubmitter(aCTARCProcess):
                 continue
             except Exception as exc:
                 self.setJobsArcstate(jobs, "tosubmit")
-                self.log.error(f"Error submitting jobs to ARC: {exc}")
+                self.log.error(f"Error submitting jobs to ARC: {exc}", exc_info=True, stack_info=True)
+                #self.log.error(f"Error submitting jobs to ARC: {exc}")
                 continue
             finally:
                 arcrest.close()

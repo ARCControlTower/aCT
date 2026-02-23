@@ -109,7 +109,8 @@ class aCTReport:
             rows=c.fetchall()
             for r in rows:
 
-                reg=re.search('.+//([^:]+)',str(r[0]))
+                #AF not all have port# reg=re.search('.+//([^:]+)',str(r[0]))
+                reg=re.search('.+//([^/]+)',str(r[0]))
                 cl=""
                 try:
                     cl=reg.group(1)
