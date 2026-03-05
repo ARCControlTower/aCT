@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timezone, timedelta
 from act.db import aCTDBMS
 from act.common.aCTConfig import aCTConfigARC
 from contextlib import contextmanager
@@ -33,18 +33,18 @@ class aCTDB(object):
 
     def getTimeStamp(self, seconds=None):
         if seconds:
-            return datetime.datetime.fromtimestamp(datetime.UTC, seconds).isoformat()
+            return datetime.fromtimestamp(timezone.UTC, seconds)
         else:
-            return datetime.datetime.now(datetime.UTC).isoformat()
+            return datetime.now(timezone.UTC)
 
     def timeStampLessThan(column, seconds, utc=True):
-        now = datetime.now(datetime.timezone.utc) if utc else datetime.now()
-        cutoff = now - datetime.timedelta(seconds=seconds)
+        now = datetime.now(timezone.utc) if utc else datetime.now()
+        cutoff = now - timedelta(seconds=seconds)
         return column < cutoff
 
     def timeStampGreaterThan(column, seconds, utc=True):
-        now = datetime.now(datetime.timezone.utc) if utc else datetime.now()
-        cutoff = now - datetime.timedelta(seconds=seconds)
+        now = datetime.now(timezone.utc) if utc else datetime.now()
+        cutoff = now - timedelta(seconds=seconds)
         return column > cutoff
     
     #stmt = select(MyTable).where(timeStampLessThan(MyTable.created_at, 60))

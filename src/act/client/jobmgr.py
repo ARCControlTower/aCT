@@ -181,11 +181,7 @@ class JobManager(object):
                 arc_ids.append(a_id)
 
             if arc_ids:
-                session.execute(
-                    update(ArcJob)
-                    .where(ArcJob.id.in_(arc_ids))
-                    .values(arcstate='toclean', tarcstate=self.arcdb.getTimeStamp())
-                )
+                session.execute(update(ArcJob).where(ArcJob.id.in_(arc_ids)).values(arcstate='toclean', tarcstate=self.arcdb.getTimeStamp()))
                 session.execute(delete(ClientJob).where(ClientJob.id.in_(client_ids)))
 
         return deletedIDs
