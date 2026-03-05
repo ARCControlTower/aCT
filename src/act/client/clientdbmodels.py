@@ -5,6 +5,8 @@ from act.arc.aCTDBARCModels import Base, ArcJob, Proxy
 from typing import Optional
 
 class ClientJob(Base):
+    __tablename__ = 'clientjobs'
+    
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     modified: Mapped[datetime.datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.datetime.now(datetime.UTC), onupdate=lambda: datetime.datetime.now(datetime.UTC))
     created: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP)
