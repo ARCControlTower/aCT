@@ -3,6 +3,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship,
 import datetime
 import re
 import arc
+from typing import Optional
 
 class Base(DeclarativeBase):
     pass
@@ -10,19 +11,19 @@ class Base(DeclarativeBase):
 class ArcJobMixin:
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     modified: Mapped[datetime.datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.datetime.now(datetime.UTC), onupdate=lambda: datetime.datetime.now(datetime.UTC))
-    created: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP)
-    arcstate: Mapped[str | None] = mapped_column(String(12), index=True)
-    tarcstate: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP)
-    tstate: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP)
-    cluster: Mapped[str | None] = mapped_column(String(255))
-    clusterlist: Mapped[str | None] = mapped_column(String(1024))
-    jobdesc: Mapped[int | None] = mapped_column(Integer, ForeignKey('jobdescriptions.id')) # rename to jobdescid
-    attemptsleft: Mapped[int | None] = mapped_column(Integer)
-    downloadfiles: Mapped[str | None] = mapped_column(String(255))
-    proxyid: Mapped[int | None] = mapped_column(Integer, ForeignKey('proxies.id'))
-    appjobid: Mapped[str | None] = mapped_column(String(16))
-    priority: Mapped[int | None] = mapped_column(SmallInteger)
-    fairshare: Mapped[str | None] = mapped_column(String(50))
+    created: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP)
+    arcstate: Mapped[Optional[str]] = mapped_column(String(12), index=True)
+    tarcstate: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP)
+    tstate: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP)
+    cluster: Mapped[Optional[str]] = mapped_column(String(255))
+    clusterlist: Mapped[Optional[str]] = mapped_column(String(1024))
+    jobdesc: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('jobdescriptions.id')) # rename to jobdescid
+    attemptsleft: Mapped[Optional[int]] = mapped_column(Integer)
+    downloadfiles: Mapped[Optional[str]] = mapped_column(String(255))
+    proxyid: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('proxies.id'))
+    appjobid: Mapped[Optional[str]] = mapped_column(String(16))
+    priority: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    fairshare: Mapped[Optional[str]] = mapped_column(String(50))
 
     @declared_attr
     def jobdescobj(col):
@@ -70,7 +71,7 @@ class JobDescription(Base):
     __tablename__ = 'jobdescriptions'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    jobdescription: Mapped[str | None] = mapped_column(Text)
+    jobdescription: Mapped[Optional[str]] = mapped_column(Text)
 
     arcjob: Mapped['ArcJob'] = relationship(back_populates='jobdescobj')
 
@@ -78,12 +79,12 @@ class Proxy(Base):
     __tablename__ = 'proxies'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    proxy: Mapped[str | None] = mapped_column(LargeBinary)
-    expirytime: Mapped[datetime.datetime | None] = mapped_column(DateTime)
-    proxypath: Mapped[str | None] = mapped_column(String(255))
-    dn: Mapped[str | None] = mapped_column(String(255))
-    attribute: Mapped[str | None] = mapped_column(String(255))
-    proxytype: Mapped[str | None] = mapped_column(String(255))
-    myproxyid: Mapped[str | None] = mapped_column(String(255))
+    proxy: Mapped[Optional[str]] = mapped_column(LargeBinary)
+    expirytime: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    proxypath: Mapped[Optional[str]] = mapped_column(String(255))
+    dn: Mapped[Optional[str]] = mapped_column(String(255))
+    attribute: Mapped[Optional[str]] = mapped_column(String(255))
+    proxytype: Mapped[Optional[str]] = mapped_column(String(255))
+    myproxyid: Mapped[Optional[str]] = mapped_column(String(255))
 
     arcjobs: Mapped[list['ArcJob']] = relationship('ArcJob', back_populates='proxy')
