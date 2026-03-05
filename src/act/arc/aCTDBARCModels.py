@@ -10,11 +10,11 @@ class Base(DeclarativeBase):
 
 class ArcJobMixin:
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    modified: Mapped[datetime.datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.now(timezone.UTC), onupdate=lambda: datetime.now(timezone.UTC))
-    created: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP)
+    modified: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.now(timezone.UTC), onupdate=lambda: datetime.now(timezone.UTC))
+    created: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
     arcstate: Mapped[Optional[str]] = mapped_column(String(12), index=True)
-    tarcstate: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP)
-    tstate: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP)
+    tarcstate: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
+    tstate: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
     cluster: Mapped[Optional[str]] = mapped_column(String(255))
     clusterlist: Mapped[Optional[str]] = mapped_column(String(1024))
     jobdesc: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('jobdescriptions.id')) # rename to jobdescid
@@ -80,7 +80,7 @@ class Proxy(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     proxy: Mapped[Optional[str]] = mapped_column(LargeBinary)
-    expirytime: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime)
+    expirytime: Mapped[Optional[datetime]] = mapped_column(DateTime)
     proxypath: Mapped[Optional[str]] = mapped_column(String(255))
     dn: Mapped[Optional[str]] = mapped_column(String(255))
     attribute: Mapped[Optional[str]] = mapped_column(String(255))
