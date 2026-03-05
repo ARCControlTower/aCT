@@ -258,7 +258,7 @@ def create_jobs():
             clusterlist = checkClusters(job['clusterlist'])
 
             # insert job
-            jobid = jmgr.clidb.insertJob(token['proxyid'], ','.join(clusterlist))
+            jobid = jmgr.clidb.insertJob(token['proxyid'], ','.join(clusterlist)) # TODO
         except UnknownClusterError as e:
             print(f'{errpref}Unknown cluster {e.name}')
             result['msg'] = f'Unknown cluster {e.name}'
@@ -399,7 +399,7 @@ def confirm_jobs():
 
         # update job entry and confirm job for submission
         try:
-            jmgr.clidb.updateJob(job['id'], {
+            jmgr.clidb.updateJob(job['id'], { # TODO
                 'jobdesc': desc,
                 'jobname': job['name'],
                 'modified': jmgr.clidb.getTimeStamp()
@@ -511,7 +511,7 @@ def getCSR():
         print(f'CSR generated: DN: {dn}, attr: {attr}, expiration: {exptime}')
 
         # put private key into string and store in db
-        proxyid = pmgr.actproxy.updateProxy(keyToPEM(key), dn, attr, exptime)
+        proxyid = pmgr.actproxy.updateProxy(keyToPEM(key), dn, attr, exptime) # TODO maybe
         if proxyid is None:
             print('error: POST /proxies: proxy insertion failure')
             return {'msg': 'Server error'}, 500
@@ -567,7 +567,7 @@ def uploadSignedProxy():
         proxy = pemToCert(proxyPEM)
         if not checkRFCProxy(proxy):
             return {'msg': 'cert is not a valid proxy'}, 400
-        proxyid = pmgr.actproxy.updateProxy(proxyPEM, dn, attr, exptime)
+        proxyid = pmgr.actproxy.updateProxy(proxyPEM, dn, attr, exptime) # TODO maybe
         token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, appconf.user.jwt_secret, algorithm='HS256')
     except Exception as e:
         print(f'error: PUT /proxies: {e}')

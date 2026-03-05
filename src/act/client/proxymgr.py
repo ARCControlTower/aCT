@@ -153,7 +153,7 @@ class ProxyManager(object):
             raise ProxyDBExpiredError()
         return proxyinfo["id"]
 
-    def getProxiesWithDN(self, dn, columns=[]):
+    def getProxiesWithDN(self, dn, columns=[]): # TODO
         """
         Get info for proxies with given dn.
 
@@ -166,7 +166,7 @@ class ProxyManager(object):
         """
         return self.arcdb.getProxiesInfo(f" dn = '{dn}' ", columns)
 
-    def getProxyKeyPEM(self, proxyid):
+    def getProxyKeyPEM(self, proxyid): # TODO
         c = self.arcdb.db.getCursor()
         try:
             c.execute('SELECT proxy FROM proxies WHERE id = %s', (proxyid,))
@@ -179,7 +179,7 @@ class ProxyManager(object):
         finally:
             c.close()
 
-    def checkProxyExists(self, proxyid):
+    def checkProxyExists(self, proxyid): # TODO
         try:
             c = self.arcdb.db.getCursor()
             c.execute('SELECT id,expirytime FROM proxies WHERE id = %s LIMIT 1', (proxyid,))
