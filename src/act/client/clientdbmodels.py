@@ -8,7 +8,7 @@ class ClientJob(Base):
     __tablename__ = 'clientjobs'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    modified: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.now(timezone.UTC), onupdate=lambda: datetime.now(timezone.UTC))
+    modified: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     created: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
     jobname: Mapped[Optional[str]] = mapped_column(String(255))
     jobdesc: Mapped[Optional[str]] = mapped_column(Text)

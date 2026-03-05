@@ -33,9 +33,9 @@ class aCTDB(object):
 
     def getTimeStamp(self, seconds=None):
         if seconds:
-            return datetime.fromtimestamp(timezone.UTC, seconds)
+            return datetime.fromtimestamp(timezone.utc, seconds)
         else:
-            return datetime.now(timezone.UTC)
+            return datetime.now(timezone.utc)
 
     def timeStampLessThan(column, seconds, utc=True):
         now = datetime.now(timezone.utc) if utc else datetime.now()
