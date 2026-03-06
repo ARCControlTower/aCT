@@ -18,6 +18,8 @@ from pyarcrest.arc import isLocalInputFile
 from pyarcrest.x509 import (checkRFCProxy, createProxyCSR, csrToPEM,
                             generateKey, keyToPEM, pemToCert)
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
+from act.client.clientdbmodels import ClientJob
+from sqlalchemy import insert, update
 
 # TODO: see if checkJobExists should be used anywhere else
 # TODO: implement proper logging
@@ -245,30 +247,32 @@ def create_jobs():
         return jsonify([])
 
     results = []
-    for job in jobs:
-        result = {}
-        results.append(result)
+    with jmgr.arcdb.Session.begin() as session:
+        for job in jobs:
+            result = {}
+            results.append(result)
 
-        try:
-            # check clusters
-            if 'clusterlist' not in job or not job['clusterlist']:
-                print(f'{errpref}No clusters given')
-                result['msg'] = 'No clusters given'
+            try:
+                # check clusters
+                if 'clusterlist' not in job or not job['clusterlist']:
+                    print(f'{errpref}No clusters given')
+                    result['msg'] = 'No clusters given'
+                    continue
+                clusterlist = checkClusters(job['clusterlist'])
+
+                # insert job
+                stmt = insert(ClientJob).values(proxyid=token['proxyid'], clusterlist=','.join(clusterlist)).returning(ClientJob.id)
+                jobid = session.execute(stmt).scalar_one()
+            except UnknownClusterError as e:
+                print(f'{errpref}Unknown cluster {e.name}')
+                result['msg'] = f'Unknown cluster {e.name}'
                 continue
-            clusterlist = checkClusters(job['clusterlist'])
+            except Exception as e:
+                print(f'{errpref}{e}')
+                result['msg'] = 'Server error'
+                continue
 
-            # insert job
-            jobid = jmgr.clidb.insertJob(token['proxyid'], ','.join(clusterlist)) # TODO
-        except UnknownClusterError as e:
-            print(f'{errpref}Unknown cluster {e.name}')
-            result['msg'] = f'Unknown cluster {e.name}'
-            continue
-        except Exception as e:
-            print(f'{errpref}{e}')
-            result['msg'] = 'Server error'
-            continue
-
-        result['id'] = jobid
+            result['id'] = jobid
 
     return jsonify(results)
 
@@ -341,75 +345,73 @@ def confirm_jobs():
 
     jobdescs = arc.JobDescriptionList()
 
-    for job in tosubmit:
+    with jmgr.arcdb.Session.begin() as session:
+        for job in tosubmit:
 
-        # parse job description
-        if 'desc' not in job:
-            print(f'{errpref}No job description given')
-            job['msg'] = 'No job description given'
-            continue
-        if not arc.JobDescription.Parse(job['desc'], jobdescs):
-            print(f'{errpref}Invalid job description')
-            job['msg'] = 'Invalid job description'
-            continue
-
-        job['name'] = jobdescs[-1].Identification.JobName
-
-        # get job's data directory
-        try:
-            jobDataDir = jmgr.getJobDataDir(job['id'])
-        except ConfigError as e:
-            print(f'{errpref}{e}')
-            job['msg'] = 'Server error'
-            continue
-
-        # modify job description for local input files
-        #
-        # InputFiles need to be accessed through index otherwise
-        # the changes do not survive outside of for loop.
-        for i in range(len(jobdescs[-1].DataStaging.InputFiles)):
-            filename = jobdescs[-1].DataStaging.InputFiles[i].Name
-            filepath = isLocalInputFile(
-                jobdescs[-1].DataStaging.InputFiles[i].Name,
-                jobdescs[-1].DataStaging.InputFiles[i].Sources[0].fullstr()
-            )
-            if not filepath:  # remote file
+            # parse job description
+            if 'desc' not in job:
+                print(f'{errpref}No job description given')
+                job['msg'] = 'No job description given'
+                continue
+            if not arc.JobDescription.Parse(job['desc'], jobdescs):
+                print(f'{errpref}Invalid job description')
+                job['msg'] = 'Invalid job description'
                 continue
 
-            path = os.path.abspath(os.path.join(jobDataDir, filename))
-            if not os.path.isfile(path):
-                job['msg'] = f'Input file {filepath} missing'
-                break
+            job['name'] = jobdescs[-1].Identification.JobName
 
-            jobdescs[-1].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(path)
+            # get job's data directory
+            try:
+                jobDataDir = jmgr.getJobDataDir(job['id'])
+            except ConfigError as e:
+                print(f'{errpref}{e}')
+                job['msg'] = 'Server error'
+                continue
 
-        # errors on missing input files
-        if 'msg' in job:
-            print(f'{errpref}{job["msg"]}')
-            continue
+            # modify job description for local input files
+            #
+            # InputFiles need to be accessed through index otherwise
+            # the changes do not survive outside of for loop.
+            for i in range(len(jobdescs[-1].DataStaging.InputFiles)):
+                filename = jobdescs[-1].DataStaging.InputFiles[i].Name
+                filepath = isLocalInputFile(
+                    jobdescs[-1].DataStaging.InputFiles[i].Name,
+                    jobdescs[-1].DataStaging.InputFiles[i].Sources[0].fullstr()
+                )
+                if not filepath:  # remote file
+                    continue
 
-        # TODO: ADL unparsing works but it doesn't unparse modified
-        # input files
-        desc = jobdescs[-1].UnParse('nordugrid:xrsl')[1]
-        #desc = jobdescs[0].UnParse('emies:adl')[1]
-        if not arc.JobDescription.Parse(desc, jobdescs):
-            print(f'{errpref}Invalid modified job description')
-            job['msg'] = 'Server error'
-            continue
+                path = os.path.abspath(os.path.join(jobDataDir, filename))
+                if not os.path.isfile(path):
+                    job['msg'] = f'Input file {filepath} missing'
+                    break
 
-        # update job entry and confirm job for submission
-        try:
-            jmgr.clidb.updateJob(job['id'], { # TODO
-                'jobdesc': desc,
-                'jobname': job['name'],
-                'modified': jmgr.clidb.getTimeStamp()
-            })
-        except Exception as e:
-            print(f'{errpref}{e}')
-            job['msg'] = 'Server error'
-            continue
+                jobdescs[-1].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(path)
 
-        del job['desc']  # don't want to return description in result
+            # errors on missing input files
+            if 'msg' in job:
+                print(f'{errpref}{job["msg"]}')
+                continue
+
+            # TODO: ADL unparsing works but it doesn't unparse modified
+            # input files
+            desc = jobdescs[-1].UnParse('nordugrid:xrsl')[1]
+            #desc = jobdescs[0].UnParse('emies:adl')[1]
+            if not arc.JobDescription.Parse(desc, jobdescs):
+                print(f'{errpref}Invalid modified job description')
+                job['msg'] = 'Server error'
+                continue
+
+            # update job entry and confirm job for submission
+            try:
+                stmt = update(ClientJob).where(ClientJob.id==job['id']).values(jobdesc=desc,jobname=job['name'],modified=jmgr.arcdb.getTimeStamp())
+                session.execute(stmt)
+            except Exception as e:
+                print(f'{errpref}{e}')
+                job['msg'] = 'Server error'
+                continue
+
+            del job['desc']  # don't want to return description in result
 
     return jsonify(jobs)
 

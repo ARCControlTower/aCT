@@ -11,7 +11,7 @@ class Base(DeclarativeBase):
 class ArcJobMixin:
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     modified: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    created: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
+    created: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False, default=lambda: datetime.now(timezone.utc))
     arcstate: Mapped[Optional[str]] = mapped_column(String(12), index=True)
     tarcstate: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
     tstate: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)

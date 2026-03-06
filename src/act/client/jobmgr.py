@@ -417,7 +417,7 @@ class JobManager(object):
             escaped_filter = name_filter.replace('_', r'\_')
             stmt = stmt.where(ClientJob.jobname.like(f'%{escaped_filter}%', escape='\\'))
 
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update(of=(ArcJob), skip_locked=True)
 
         with self.arcdb.Session.begin() as session:
             jobs = session.execute(stmt).all()
