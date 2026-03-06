@@ -73,7 +73,28 @@ clusters = parseClusters()
 app = Flask(__name__)
 
 
-@app.route('/jobs', methods=['GET'])
+def process_request(wrapperFunction):
+    token = getToken()
+    proxyid = token['proxyid']
+
+    name_filter = request.args.get('name', None)
+    state_filter = request.args.get('state', None)
+    jobids = getIDs()
+    clicols = request.args.get('client', None)
+    if clicols is not None:
+        clicols = clicols.split(',')
+    arccols = request.args.get('arc', None)
+    if arccols is not None:
+        arccols = arccols.split(',')
+
+    return wrapperFunction(proxyid=proxyid, jobids=jobids,
+                           name_filter=name_filter,
+                           state_filter=state_filter,
+                           clicols=clicols,
+                           arccols=arccols)
+
+
+@app.route('/jobs', methods=['GET']) # id name state
 def stat():
     '''
     Return status info for jobs in JSON format.
@@ -93,20 +114,8 @@ def stat():
         status 200: A JSON list of JSON objects with jobs' status info.
         status 4**: A string with error message.
     '''
-    name_filter = request.args.get('name', default='')
-    state_filter = request.args.get('state', default='')
-    clicols = request.args.get('client', default=[])
-    if clicols:
-        clicols = clicols.split(',')
-    arccols = request.args.get('arc', default=[])
-    if arccols:
-        arccols = arccols.split(',')
-
     try:
-        token = getToken()
-        proxyid = token['proxyid']
-        jobids = getIDs()
-        jobdicts = jmgr.getJobStats(proxyid, jobids, state_filter, name_filter, clicols, arccols)
+        jobdicts = process_request(jmgr.getJobStats)
     except InvalidColumnError as e:
         print(f'error: GET /jobs: {e}')
         return {'msg': str(e)}, 400

@@ -417,7 +417,7 @@ class JobManager(object):
             escaped_filter = name_filter.replace('_', r'\_')
             stmt = stmt.where(ClientJob.jobname.like(f'%{escaped_filter}%', escape='\\'))
 
-        stmt = stmt.with_for_update(of=(ArcJob), skip_locked=True)
+        stmt = stmt.with_for_update(of=ArcJob)#, skip_locked=True) mariadb 10.6+
 
         with self.arcdb.Session.begin() as session:
             jobs = session.execute(stmt).all()
@@ -512,6 +512,13 @@ class JobManager(object):
             will have 'c_' prepended for columns from client engine's table
             and 'a_' for columns from ARC engine's table.
         """
+        with self.arcdb.Session() as session:
+            result = self.make_select(proxyid, jobids, state_filter, name_filter, clicols, arccols, jobname, session)
+
+        jobs = [dict(row._mapping) for row in result]
+        return jobs
+    
+    def make_select(self, proxyid, jobids, state_filter, name_filter, clicols, arccols, jobname, session):
         selected_columns = []
         for colname in clicols:
             col = getattr(ClientJob, colname)
@@ -520,11 +527,10 @@ class JobManager(object):
             col = getattr(ArcJob, colname)
             selected_columns.append(col.label(f'a_{colname}'))
 
-        # create query with filters
         stmt = select(*selected_columns)
 
         if state_filter:
-            stmt = stmt.join(ClientJob.arcjob).where(ArcJob.arcstate==state_filter)
+            stmt = stmt.join(ClientJob.arcjob).where(ArcJob.arcstate.in_(state_filter))
         else:
             stmt = stmt.outerjoin(ClientJob.arcjob)
         stmt = stmt.where(ClientJob.proxyid==proxyid)
@@ -538,12 +544,8 @@ class JobManager(object):
         if jobids:
             stmt = stmt.where(ClientJob.id.in_(jobids))
 
-        with self.arcdb.Session() as session:
-            result = session.execute(stmt)
+        return session.execute(stmt).all()
 
-        jobs = [dict(row._mapping) for row in result]
-
-        return jobs
 
     def getJobOutputDir(self, arcid):
         """
