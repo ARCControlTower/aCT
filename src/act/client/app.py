@@ -147,9 +147,6 @@ def clean():
     '''
     try:
         deleted = process_request(jmgr.cleanJobs)
-        for job in deleted:
-            jobdir = jmgr.getJobOutputDir(job)
-            shutil.rmtree(jobdir, ignore_errors=True)
     except RESTError as e:
         print(f'error: DELETE /jobs: {e}')
         return {'msg': str(e)}, e.httpCode

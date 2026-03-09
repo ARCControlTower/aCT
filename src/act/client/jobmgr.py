@@ -160,6 +160,8 @@ class JobManager(object):
                         self.log.error(f'Could not clean job results in {jobdir}')
                     except NoJobDirectoryError:
                         self.log.info(f'Job {c_id} has no job results to clean')
+                jobdir = self.getJobDataDir(c_id)
+                shutil.rmtree(self.getJobDataDir(jobdir), ignore_errors=True)
 
                 client_ids.append(c_id)
                 arc_ids.append(a_id)
