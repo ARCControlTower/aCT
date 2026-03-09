@@ -110,7 +110,7 @@ class JobManager(object):
         #return self.clidb.getColumns('arcjobs') # TODO
 
     # TODO: return a list of IDs rather than number
-    def cleanJobs(self, proxyid, jobids=[], state_filter='', name_filter=''):
+    def cleanJobs(self, proxyid, jobids=[], state_filter='', name_filter='', clicols=[], arccols=[], jobname=''):
         """
         Clean given jobs that match optional filters.
 
@@ -137,28 +137,13 @@ class JobManager(object):
         # Forgot why is '' used here ...
         if state_filter not in ('', 'done', 'donefailed', 'cancelled', 'failed', 'lost'):
             return []
-
-        deletedIDs = []
+        if state_filter:
+            state_filter = [state_filter]
+        else:
+            state_filter = ['done', 'donefailed', 'cancelled', 'failed', 'lost']
 
         with self.arcdb.Session.begin() as session:
-            # Only select needed columns
-            stmt = select(ClientJob.id, ArcJob.id, ArcJob.arcstate, ArcJob.JobID).join(ClientJob.arcjob).where(ClientJob.proxyid==proxyid)
-
-            if state_filter:
-                stmt = stmt.where(ArcJob.arcstate==state_filter)
-            else:
-                stmt = stmt.where(ArcJob.arcstate.in_(['done', 'donefailed', 'cancelled', 'failed', 'lost']))
-
-            if jobids:
-                stmt = stmt.where(ClientJob.id.in_(jobids))
-
-            if name_filter:
-                escaped_filter = name_filter.replace('_', r'\_')
-                stmt = stmt.where(ClientJob.jobname.like(f'%{escaped_filter}%', escape='\\'))
-
-            # Execute query, returns tuples of (client_id, arc_id, arcstate, JobID)
-            jobs = session.execute(stmt).all()
-
+            jobs = self.make_select(proxyid, jobids, state_filter, None, ['id'], ['id', 'arcstate', 'JobID'], None)
             if not jobs:
                 return []
 
@@ -170,21 +155,29 @@ class JobManager(object):
                 if arcstate in ('done', 'donefailed'):
                     try:
                         jobdir = self.getJobOutputDir(jobid)
-                        shutil.rmtree(jobdir, ignore_errors=True)
+                        shutil.rmtree(jobdir)
                     except OSError:
                         self.log.error(f'Could not clean job results in {jobdir}')
                     except NoJobDirectoryError:
                         self.log.info(f'Job {c_id} has no job results to clean')
+                else:
+                    jobdir = self.getJobOutputDir(jobid)
+                    shutil.rmtree(jobdir, ignore_errors=True)
 
-                deletedIDs.append(c_id)
                 client_ids.append(c_id)
                 arc_ids.append(a_id)
 
             if arc_ids:
-                session.execute(update(ArcJob).where(ArcJob.id.in_(arc_ids)).values(arcstate='toclean', tarcstate=self.arcdb.getTimeStamp()))
-                session.execute(delete(ClientJob).where(ClientJob.id.in_(client_ids)))
+                self.updateArcstate(arc_ids, 'toclean', session)
+                self.deleteClientJobs(client_ids, session) # questions questions move this to before removing folders??
 
-        return deletedIDs
+        return client_ids
+    
+    def updateArcstate(self, jobids, arcstate, session):
+        session.execute(update(ArcJob).where(ArcJob.id.in_(jobids)).values(arcstate=arcstate, tarcstate=self.clidb.getTimeStamp()))
+
+    def deleteClientJobs(self, jobids, session):
+        session.execute(delete(ClientJob).where(ClientJob.id.in_(jobids)))
 
     def forceCleanJobs(self, results):
         """
@@ -512,6 +505,8 @@ class JobManager(object):
             will have 'c_' prepended for columns from client engine's table
             and 'a_' for columns from ARC engine's table.
         """
+        if state_filter:
+            state_filter = [state_filter]
         with self.arcdb.Session() as session:
             result = self.make_select(proxyid, jobids, state_filter, name_filter, clicols, arccols, jobname, session)
 

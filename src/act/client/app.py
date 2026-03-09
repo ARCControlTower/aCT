@@ -144,21 +144,10 @@ def clean():
         status 401: A string with error message.
     '''
     try:
-        token = getToken()
-        jobids = getIDs()
+        deleted = process_request(jmgr.cleanJobs)
     except RESTError as e:
         print(f'error: DELETE /jobs: {e}')
         return {'msg': str(e)}, e.httpCode
-    proxyid = token['proxyid']
-
-    name_filter = request.args.get('name', default='')
-    state_filter = request.args.get('state', default='')
-
-    try:
-        deleted = jmgr.cleanJobs(proxyid, jobids, state_filter, name_filter)
-        for jobid in deleted:
-            datadir = jmgr.getJobDataDir(jobid)
-            shutil.rmtree(jmgr.getJobDataDir(datadir), ignore_errors=True)
     except Exception as e:
         print(f'error: DELETE /jobs: {e}')
         return {'msg': 'Server error'}, 500
