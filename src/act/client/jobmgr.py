@@ -168,10 +168,6 @@ class JobManager(object):
                 self.updateArcstate(arc_ids, 'toclean', session)
                 self.deleteClientJobs(client_ids, session)
 
-        for c_id in client_ids:
-            jobdir = self.getJobOutputDir(str(c_id))
-            shutil.rmtree(jobdir, ignore_errors=True)
-
         return client_ids
     
     def updateArcstate(self, jobids, arcstate, session):
