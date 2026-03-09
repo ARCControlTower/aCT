@@ -79,6 +79,8 @@ def process_request(wrapperFunction):
 
     name_filter = request.args.get('name', None)
     state_filter = request.args.get('state', None)
+    if not state_filter:
+        state_filter=''
     jobids = getIDs()
     clicols = request.args.get('client', None)
     if clicols is not None:

@@ -143,7 +143,7 @@ class JobManager(object):
             state_filter = ['done', 'donefailed', 'cancelled', 'failed', 'lost']
 
         with self.arcdb.Session.begin() as session:
-            jobs = self.make_select(proxyid, jobids, state_filter, None, ['id'], ['id', 'arcstate', 'JobID'], None)
+            jobs = self.make_select(proxyid, jobids, state_filter, None, ['id'], ['id', 'arcstate', 'JobID'], None, session)
             if not jobs:
                 return []
 
@@ -160,16 +160,17 @@ class JobManager(object):
                         self.log.error(f'Could not clean job results in {jobdir}')
                     except NoJobDirectoryError:
                         self.log.info(f'Job {c_id} has no job results to clean')
-                else:
-                    jobdir = self.getJobOutputDir(jobid)
-                    shutil.rmtree(jobdir, ignore_errors=True)
 
                 client_ids.append(c_id)
                 arc_ids.append(a_id)
 
-            if arc_ids:
+            if client_ids:
                 self.updateArcstate(arc_ids, 'toclean', session)
-                self.deleteClientJobs(client_ids, session) # questions questions move this to before removing folders??
+                self.deleteClientJobs(client_ids, session)
+
+        for c_id in client_ids:
+            jobdir = self.getJobOutputDir(str(c_id))
+            shutil.rmtree(jobdir, ignore_errors=True)
 
         return client_ids
     
