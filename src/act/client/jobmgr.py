@@ -110,7 +110,7 @@ class JobManager(object):
         #return self.clidb.getColumns('arcjobs') # TODO
 
     # TODO: return a list of IDs rather than number
-    def cleanJobs(self, proxyid, jobids=[], state_filter=None, name_filter=None):
+    def cleanJobs(self, proxyid, jobids=[], state_filter=None, name_filter=None, **_):
         """
         Clean given jobs that match optional filters.
 
@@ -207,7 +207,7 @@ class JobManager(object):
             if result['dir']:
                 shutil.rmtree(result['dir'])
 
-    def fetchJobs(self, proxyid, jobids=[], name_filter=''):
+    def fetchJobs(self, proxyid, jobids=[], name_filter='', **_):
         """
         Assign given failed jobs that match optional filter for fetching.
 
@@ -363,7 +363,7 @@ class JobManager(object):
             })
         return results
 
-    def killJobs(self, proxyid, jobids=None, state_filter=None, name_filter=None):
+    def killJobs(self, proxyid, jobids=None, state_filter=None, name_filter=None, **_):
         """
         Kill jobs that match optional filters.
 
@@ -432,7 +432,7 @@ class JobManager(object):
 
         return [{"c_id": c, "a_id": a, "a_arcstate": s} for c, a, s in jobs]
 
-    def resubmitJobs(self, proxyid, jobids=[], name_filter=''):
+    def resubmitJobs(self, proxyid, jobids=[], name_filter='', **_):
         """
         Assign given jobs that match optional filter for resubmission.
 
@@ -461,7 +461,7 @@ class JobManager(object):
 
         return [job.c_id for job in jobs]
 
-    def getJobStats(self, proxyid, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[]):
+    def getJobStats(self, proxyid, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[], **_):
         """
         Return info for jobs that match optional filters.
 
@@ -488,7 +488,9 @@ class JobManager(object):
         if state_filter:
             state_filter = [state_filter]
         with self.arcdb.Session() as session:
-            result = self.make_select(proxyid, session, jobids=jobids, state_filter=state_filter, name_filter=name_filter, clicold=clicols, arccols=arccols)
+            result = self.make_select(proxyid, session, jobids=jobids,
+                                      state_filter=state_filter, name_filter=name_filter,
+                                      clicols=clicols, arccols=arccols)
 
         jobs = [dict(row._mapping) for row in result]
         return jobs

@@ -75,25 +75,23 @@ app = Flask(__name__)
 
 def process_request(wrapperFunction):
     token = getToken()
-    proxyid = token['proxyid']
 
-    name_filter = request.args.get('name', None)
-    state_filter = request.args.get('state', None)
-    if not state_filter:
-        state_filter=''
-    jobids = getIDs()
-    clicols = request.args.get('client', None)
-    if clicols is not None:
-        clicols = clicols.split(',')
-    arccols = request.args.get('arc', None)
-    if arccols is not None:
-        arccols = arccols.split(',')
+    args = {
+        "proxyid": token['proxyid'],
+        "jobids": getIDs(),
+        "name_filter": request.args.get('name'),
+        "state_filter": request.args.get('state'),
+        "clicols": request.args.get('client'),
+        "arccols": request.args.get('arc'),
+    }
 
-    return wrapperFunction(proxyid=proxyid, jobids=jobids,
-                           name_filter=name_filter,
-                           state_filter=state_filter,
-                           clicols=clicols,
-                           arccols=arccols)
+    if args["clicols"]:
+        args["clicols"] = args["clicols"].split(',')
+
+    if args["arccols"]:
+        args["arccols"] = args["arccols"].split(',')
+
+    return wrapperFunction(**args)
 
 
 @app.route('/jobs', methods=['GET']) # id name state
@@ -185,16 +183,7 @@ def patch():
         if action == 'fetch':
             jobs = process_request(jmgr.fetchJobs)
         elif action == 'cancel':
-            # One state in which a job can be killed is before it is passed
-            # to ARC. Such jobs have None as arcid. Data dirs for jobs are
-            # otherwise cleaned by cleaning operation but this is one exception
-            # where killing destroys the job immediately and has to remove the
-            # data dir as well.
             jobs = process_request(jmgr.killJobs)
-            for job in jobs:
-                if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting'):
-                    datadir = jmgr.getJobDataDir(job['c_id'])
-                    shutil.rmtree(jmgr.getJobDataDir(datadir), ignore_errors=True)
         elif action == 'resubmit':
             jobs = process_request(jmgr.resubmitJobs)
     except BadRequest as e:
