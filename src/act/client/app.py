@@ -176,41 +176,33 @@ def patch():
         status 4**: A string with error message.
     '''
     try:
-        token = getToken()
-        jobids = getIDs()
-    except BadRequest as e:
-        print(f'error: PATCH /jobs: {e}')
-        return {'msg': str(e)}, 400
-    except RESTError as e:
-        print(f'error: PATCH /jobs: {e}')
-        return {'msg': str(e)}, e.httpCode
-    proxyid = token['proxyid']
-
-    name_filter = request.args.get('name', default='')
-    state_filter = request.args.get('state', default='')
-
-    action = request.args.get('action', None)
-    if action is None:
-        return {'msg': 'Request has no action parameter'}, 400
-    elif action not in ('fetch', 'cancel', 'resubmit'):
-        return {'msg': f'Invalid action "{action}"'}, 400
-
-    try:
+        action = request.args.get('action', None)
+        if action is None:
+            return {'msg': 'Request has no action parameter'}, 400
+        elif action not in ('fetch', 'cancel', 'resubmit'):
+            return {'msg': f'Invalid action "{action}"'}, 400
+        
         if action == 'fetch':
-            jobs = jmgr.fetchJobs(proxyid, jobids, name_filter)
+            jobs = process_request(jmgr.fetchJobs)
         elif action == 'cancel':
             # One state in which a job can be killed is before it is passed
             # to ARC. Such jobs have None as arcid. Data dirs for jobs are
             # otherwise cleaned by cleaning operation but this is one exception
             # where killing destroys the job immediately and has to remove the
             # data dir as well.
-            jobs = jmgr.killJobs(proxyid, jobids, state_filter, name_filter)
+            jobs = process_request(jmgr.killJobs)
             for job in jobs:
                 if job['a_id'] is None or job['a_arcstate'] in ('tosubmit', 'submitting'):
                     datadir = jmgr.getJobDataDir(job['c_id'])
                     shutil.rmtree(jmgr.getJobDataDir(datadir), ignore_errors=True)
         elif action == 'resubmit':
-            jobs = jmgr.resubmitJobs(proxyid, jobids, name_filter)
+            jobs = process_request(jmgr.resubmitJobs)
+    except BadRequest as e:
+        print(f'error: PATCH /jobs: {e}')
+        return {'msg': str(e)}, 400
+    except RESTError as e:
+        print(f'error: PATCH /jobs: {e}')
+        return {'msg': str(e)}, e.httpCode
     except Exception as e:
         print(f'error: PATCH /jobs: {e}')
         return {'msg': 'Server error'}, 500

@@ -110,7 +110,7 @@ class JobManager(object):
         #return self.clidb.getColumns('arcjobs') # TODO
 
     # TODO: return a list of IDs rather than number
-    def cleanJobs(self, proxyid, jobids=[], state_filter='', name_filter='', clicols=[], arccols=[], jobname=''):
+    def cleanJobs(self, proxyid, jobids=[], state_filter=None, name_filter=None):
         """
         Clean given jobs that match optional filters.
 
@@ -135,7 +135,7 @@ class JobManager(object):
         """
         # wrong state filter, return immediately
         # Forgot why is '' used here ...
-        if state_filter not in ('', 'done', 'donefailed', 'cancelled', 'failed', 'lost'):
+        if state_filter not in (None, 'done', 'donefailed', 'cancelled', 'failed', 'lost'):
             return []
         if state_filter:
             state_filter = [state_filter]
@@ -143,7 +143,9 @@ class JobManager(object):
             state_filter = ['done', 'donefailed', 'cancelled', 'failed', 'lost']
 
         with self.arcdb.Session.begin() as session:
-            jobs = self.make_select(proxyid, jobids, state_filter, None, ['id'], ['id', 'arcstate', 'JobID'], None, session)
+            jobs = self.make_select(proxyid, session,
+                                    jobids=jobids, state_filter=state_filter, name_filter=name_filter,
+                                    clicols=['id'], arccols=['id', 'arcstate', 'JobID'], forupdate=True)
             if not jobs:
                 return []
 
@@ -167,18 +169,18 @@ class JobManager(object):
                 arc_ids.append(a_id)
 
             if client_ids:
-                self.updateArcstate(arc_ids, 'toclean', session)
-                self.deleteClientJobs(client_ids, session)
+                self.updateArcstate(session=session, jobids=arc_ids, arcstate='toclean')
+                self.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
 
         return client_ids
     
-    def updateArcstate(self, jobids, arcstate, session):
+    def updateArcstate(self, session, jobids, arcstate):
         session.execute(update(ArcJob).where(ArcJob.id.in_(jobids)).values(arcstate=arcstate, tarcstate=self.clidb.getTimeStamp()))
 
-    def deleteClientJobs(self, jobids, session):
-        session.execute(delete(ClientJob).where(ClientJob.id.in_(jobids)))
+    def deleteJobs(self, session, jobids, table):
+        session.execute(delete(table).where(table.id.in_(jobids)))
 
-    def forceCleanJobs(self, results):
+    def forceCleanJobs(self, results): #unused?
         """
         Clean given rows from aCT tables and results in tmp.
 
@@ -220,25 +222,17 @@ class JobManager(object):
         Returns:
             A list of IDs of fetched jobs.
         """
-        stmt = select(ClientJob.id, ArcJob.id).join(ClientJob.arcjob).where(ClientJob.proxyid==proxyid, ArcJob.arcstate=='failed')
-
-        if jobids:
-            stmt = stmt.where(ClientJob.id.in_(jobids))
-
-        if name_filter:
-            escaped_filter = name_filter.replace('_', r'\_')
-            stmt = stmt.where(ClientJob.jobname.like(f'%{escaped_filter}%', escape='\\'))
-
         with self.arcdb.Session.begin() as session:
-            jobs = session.execute(stmt).all()
+            jobs = self.make_select(proxyid, session, jobids=jobids,
+                                    state_filter=['failed'], name_filter=name_filter,
+                                    clicols=['id'], arccols=['id'], forupdate=True)
 
             if not jobs:
                 return []
             c_ids = [c_id for c_id, _ in jobs]
             a_ids = [a_id for _, a_id in jobs]
-            
-            stmt = update(ArcJob).where(ArcJob.id.in_(a_ids)).values(arcstate='tofetch', tarcstate=self.arcdb.getTimeStamp())
-            session.execute(stmt)
+
+            self.updateArcstate(a_ids, 'tofetch', session)
         return c_ids
 
     def refetchJobs(self, proxyid, jobids=[], name_filter=''):
@@ -369,7 +363,7 @@ class JobManager(object):
             })
         return results
 
-    def killJobs(self, proxyid, jobids=[], state_filter='', name_filter=''):
+    def killJobs(self, proxyid, jobids=None, state_filter=None, name_filter=None):
         """
         Kill jobs that match optional filters.
 
@@ -391,28 +385,16 @@ class JobManager(object):
             A list of job dictionaries.
         """
         # wrong state filter, return immediately
-        valid_states = ('submitted', 'running', '', 'tosubmit', 'submitting')
+        valid_states = (None, 'submitted', 'running', 'tosubmit', 'submitting')
         if state_filter not in valid_states:
             return []
-        
-        stmt = select(ClientJob.id, ArcJob.id, ArcJob.arcstate).outerjoin(ClientJob.arcjob).where(ClientJob.proxyid == proxyid)
-
         if state_filter:
-            stmt = stmt.where(ArcJob.arcstate==state_filter)
-        else:
-            stmt = stmt.where(or_(ArcJob.arcstate.in_(valid_states), ArcJob.arcstate.is_(None)))
-
-        if jobids:
-            stmt = stmt.where(ClientJob.id.in_(jobids))
-
-        if name_filter:
-            escaped_filter = name_filter.replace('_', r'\_')
-            stmt = stmt.where(ClientJob.jobname.like(f'%{escaped_filter}%', escape='\\'))
-
-        stmt = stmt.with_for_update(of=ArcJob)#, skip_locked=True) mariadb 10.6+
+            state_filter = [state_filter]
 
         with self.arcdb.Session.begin() as session:
-            jobs = session.execute(stmt).all()
+            jobs = self.make_select(proxyid, session, jobids=jobids,
+                                    state_filter=state_filter, name_filter=name_filter,
+                                    clicols=['id'], arccols=['id', 'arcstate'], forupdate=True)
 
             if not jobs:
                 return []
@@ -428,18 +410,25 @@ class JobManager(object):
                     # 'tosubmit' jobs cannot be set to tocancel, they have to be deleted
                     # immediately.
                     client_ids.append(c_id)
-                    session.execute(delete(ArcJob).where(ArcJob.id==a_id))
+                    self.deleteJobs(session=session, jobids=[a_id], table=ArcJob)
                 else:
                     # If there is entry in arcjobs, the job can be killed by
                     # setting its state to 'tocancel'
                     arc_ids.append(a_id)
 
             if arc_ids:
-                stmt = update(ArcJob).where(ArcJob.id.in_(arc_ids)).values(arcstate='tocancel', tarcstate=self.arcdb.getTimeStamp())
-                session.execute(stmt)
+                self.updateArcstate(session=session, jobids=arc_ids, arcstate='tocancel')
             if client_ids:
-                stmt = delete(ClientJob).where(ClientJob.id.in_(client_ids))
-                session.execute(stmt)
+                self.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
+
+        # One state in which a job can be killed is before it is passed
+            # to ARC. Such jobs have None as arcid. Data dirs for jobs are
+            # otherwise cleaned by cleaning operation but this is one exception
+            # where killing destroys the job immediately and has to remove the
+            # data dir as well.
+        for c_id in client_ids:
+            datadir = self.getJobDataDir(c_id)
+            shutil.rmtree(self.getJobDataDir(datadir), ignore_errors=True)
 
         return [{"c_id": c, "a_id": a, "a_arcstate": s} for c, a, s in jobs]
 
@@ -459,28 +448,20 @@ class JobManager(object):
             A list of IDs of jobs that will be resubmitted.
         """
         # create query with filters
-        stmt = select(ClientJob.id, ArcJob.id).join(ClientJob.arcjob).where(ArcJob.arcstate.in_(['failed', 'donefailed']), ClientJob.proxyid==proxyid)
-
-        if jobids:
-            stmt = stmt.where(ClientJob.id.in_(jobids))
-
-        if name_filter:
-            escaped_filter = name_filter.replace('_', r'\_')
-            stmt = stmt.where(ClientJob.jobname.like(f'%{escaped_filter}%', escape='\\'))
 
         with self.arcdb.Session.begin() as session:
-            jobs = session.execute(stmt).all()
+            jobs = self.make_select(proxyid, session, jobids=jobids, 
+                                    state_filter=['failed', 'donefailed'], name_filter=name_filter,
+                                    clicols=['id'], arccols=['id'], forupdate=True)
 
             if not jobs:
                 return[]
-            
             #set job state for resubmittion
-            stmt = update(ArcJob).where(ArcJob.id.in_([job.arcjob.id for job in jobs])).values(arcstate='toresubmit', tarcstate=self.arcdb.getTimeStamp())
-            session.execute(stmt)
+            self.updateArcstate(session=session, jobids=[job.a_id for job in jobs], arcstate='toresubmit')
 
-        return [job.id for job in jobs]
+        return [job.c_id for job in jobs]
 
-    def getJobStats(self, proxyid, jobids=[], state_filter='', name_filter='', clicols=[], arccols=[], jobname=''):
+    def getJobStats(self, proxyid, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[]):
         """
         Return info for jobs that match optional filters.
 
@@ -507,12 +488,13 @@ class JobManager(object):
         if state_filter:
             state_filter = [state_filter]
         with self.arcdb.Session() as session:
-            result = self.make_select(proxyid, jobids, state_filter, name_filter, clicols, arccols, jobname, session)
+            result = self.make_select(proxyid, session, jobids=jobids, state_filter=state_filter, name_filter=name_filter, clicold=clicols, arccols=arccols)
 
         jobs = [dict(row._mapping) for row in result]
         return jobs
     
-    def make_select(self, proxyid, jobids, state_filter, name_filter, clicols, arccols, jobname, session):
+
+    def make_select(self, proxyid, session, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[], jobname=None, forupdate=False):
         selected_columns = []
         for colname in clicols:
             col = getattr(ClientJob, colname)
@@ -520,6 +502,9 @@ class JobManager(object):
         for colname in arccols:
             col = getattr(ArcJob, colname)
             selected_columns.append(col.label(f'a_{colname}'))
+        
+        if not selected_columns:
+            return []
 
         stmt = select(*selected_columns)
 
@@ -537,6 +522,9 @@ class JobManager(object):
 
         if jobids:
             stmt = stmt.where(ClientJob.id.in_(jobids))
+
+        if forupdate:
+            stmt = stmt.with_for_update()
 
         return session.execute(stmt).all()
 
