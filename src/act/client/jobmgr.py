@@ -14,11 +14,13 @@ from act.client.clientdb import ClientDB, createMysqlEscapeList
 from act.client.errors import NoSuchProxyError, NoJobDirectoryError
 from act.client.errors import ConfigError, InvalidJobDescriptionError
 from act.client.errors import NoSuchSiteError, InvalidJobRangeError
-from act.client.errors import InvalidJobIDError
+from act.client.errors import InvalidJobIDError, UnknownClusterError
 from act.client.common import readSites
-from sqlalchemy import select, update, delete, inspect, or_, and_
+from sqlalchemy import select, update, delete, inspect, or_, and_, insert
 from act.arc.aCTDBARCModels import ArcJob, Proxy, JobDescription
 from act.client.clientdbmodels import ClientJob
+from urllib.parse import urlparse
+from pyarcrest.arc import isLocalInputFile
 
 
 logger = logging.getLogger(__name__)
@@ -69,6 +71,55 @@ class JobManager(object):
         # that uses arc config to this class
         self.arcconf = aCTConfigARC()
         self.appconf = aCTConfigAPP()
+        self.clusters = self.parseClusters()
+
+    def parseClusters(self):
+        clusters = []
+        for cluster in self.appconf.user.clusters:
+            try:
+                parts = urlparse(cluster, scheme="https")
+            except Exception as exc:
+                raise Exception(f"Error parsing cluster URL {cluster}: {exc}")
+
+            scheme = parts.scheme
+            host = parts.hostname
+            port = parts.port
+            path = parts.path
+
+            if scheme != "https":
+                raise Exception(f"Cluster URL {cluster} not using HTTPS")
+            if host is None:
+                raise Exception(f"Cluster URL {cluster} has no host")
+            if port is None:
+                port = 443
+
+            clusters.append(f"https://{host}:{port}{path}")
+
+        return clusters
+    
+    def checkClusters(self, clusterlist):
+        clist = []
+        for cluster in clusterlist:
+            try:
+                parts = urlparse(cluster, scheme="https")
+            except Exception:
+                raise UnknownClusterError(cluster)
+
+            if parts.scheme != "https":
+                raise UnknownClusterError(cluster)
+
+            host = parts.hostname
+            port = parts.port
+            if port is None:
+                port = 443
+
+            url = f"https://{host}:{port}{parts.path}"
+
+            if url not in self.clusters:
+                raise UnknownClusterError(cluster)
+
+            clist.append(url)
+        return clist
 
     def checkProxy(self, proxyid):
         """
@@ -174,10 +225,10 @@ class JobManager(object):
 
         return client_ids
     
-    def updateArcstate(self, session, jobids, arcstate):
+    def updateArcstate(self, session, jobids, arcstate): # move to clidb
         session.execute(update(ArcJob).where(ArcJob.id.in_(jobids)).values(arcstate=arcstate, tarcstate=self.clidb.getTimeStamp()))
 
-    def deleteJobs(self, session, jobids, table):
+    def deleteJobs(self, session, jobids, table): # move to clidb
         session.execute(delete(table).where(table.id.in_(jobids)))
 
     def forceCleanJobs(self, results): #unused?
@@ -461,7 +512,7 @@ class JobManager(object):
 
         return [job.c_id for job in jobs]
 
-    def getJobStats(self, proxyid, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[], **_):
+    def getJobStats(self, proxyid, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[], jobname=None, **_):
         """
         Return info for jobs that match optional filters.
 
@@ -490,13 +541,13 @@ class JobManager(object):
         with self.arcdb.Session() as session:
             result = self.make_select(proxyid, session, jobids=jobids,
                                       state_filter=state_filter, name_filter=name_filter,
-                                      clicols=clicols, arccols=arccols)
+                                      clicols=clicols, arccols=arccols, jobname=jobname)
 
         jobs = [dict(row._mapping) for row in result]
         return jobs
     
 
-    def make_select(self, proxyid, session, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[], jobname=None, forupdate=False):
+    def make_select(self, proxyid, session, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[], jobname=None, forupdate=False): # move to clidb
         selected_columns = []
         for colname in clicols:
             col = getattr(ClientJob, colname)
@@ -529,6 +580,148 @@ class JobManager(object):
             stmt = stmt.with_for_update()
 
         return session.execute(stmt).all()
+    
+    def createJobs(self, proxyid, jobs, errpref):
+        results = []
+        with self.clidb.Session.begin() as session:
+            for job in jobs:
+                result = {}
+                results.append(result)
+
+                try:
+                    # check clusters
+                    if 'clusterlist' not in job or not job['clusterlist']:
+                        print(f'{errpref}No clusters given')
+                        result['msg'] = 'No clusters given'
+                        continue
+                    clusterlist = self.checkClusters(job['clusterlist'])
+
+                    # insert job
+                    jobid = self.insertClientJob(proxyid=proxyid, session=session, clusterlist=','.join(clusterlist))
+                except UnknownClusterError as e:
+                    print(f'{errpref}Unknown cluster {e.name}')
+                    result['msg'] = f'Unknown cluster {e.name}'
+                    continue
+                except Exception as e:
+                    print(f'{errpref}{e}')
+                    result['msg'] = 'Server error'
+                    continue
+
+                result['id'] = jobid
+        return results
+
+    def insertClientJob(self, proxyid, session, clusterlist): # move to clidb
+        return session.execute(insert(ClientJob).values(proxyid=proxyid, clusterlist=clusterlist).returning(ClientJob.id)).scalar_one()
+    
+    def checkClientJobs(self, proxyid, session, jobids):
+        return session.execute(select(ClientJob.id).where(ClientJob.proxyid==proxyid, ClientJob.id.in_(jobids))).all()
+    
+    def updateClientJob(self, proxyid, session, jobid, jobdesc, jobname):
+        session.execute(update(ClientJob).where(ClientJob.proxyid==proxyid, ClientJob.id==jobid).values(jobdesc=jobdesc, jobname=jobname, ))
+    
+    def confirmJobs(self, proxyid, submissions, errpref):
+        jobs = []
+        jobids = []
+        tocheck = []
+        for submission in submissions:
+            job = {}
+            jobs.append(job)
+            if not isinstance(submission, dict):
+                print(f'{errpref}Job element is not an object: {submission}')
+                job['msg'] = f'Job element is not an object: {submission}'
+            elif 'id' not in submission:
+                print(f'{errpref}No job ID given')
+                job['msg'] = 'No job ID given'
+            else:
+                job.update(submission)
+                jobids.append(job['id'])
+                tocheck.append(job)
+
+        # get info for all jobs and check which ones don't exist
+        tosubmit = []
+        with self.clidb.Session() as session:
+            stats = self.checkClientJobs(proxyid, session=session, jobids=jobids)
+        for job in tocheck:
+            inStats = False
+            for stat in stats:
+                if stat.id == job['id']:
+                    inStats = True
+            if not inStats:
+                print(f'{errpref}Job ID {job["id"]} does not exist')
+                job['msg'] = f'Job ID {job["id"]} does not exist'
+            else:
+                tosubmit.append(job)
+
+        jobdescs = arc.JobDescriptionList()
+
+        with self.clidb.Session.begin() as session:
+            for job in tosubmit:
+
+                # parse job description
+                if 'desc' not in job:
+                    print(f'{errpref}No job description given')
+                    job['msg'] = 'No job description given'
+                    continue
+                if not arc.JobDescription.Parse(job['desc'], jobdescs):
+                    print(f'{errpref}Invalid job description')
+                    job['msg'] = 'Invalid job description'
+                    continue
+
+                job['name'] = jobdescs[-1].Identification.JobName
+
+                # get job's data directory
+                try:
+                    jobDataDir = self.getJobDataDir(job['id'])
+                except ConfigError as e:
+                    print(f'{errpref}{e}')
+                    job['msg'] = 'Server error'
+                    continue
+
+                # modify job description for local input files
+                #
+                # InputFiles need to be accessed through index otherwise
+                # the changes do not survive outside of for loop.
+                for i in range(len(jobdescs[-1].DataStaging.InputFiles)):
+                    filename = jobdescs[-1].DataStaging.InputFiles[i].Name
+                    filepath = isLocalInputFile(
+                        jobdescs[-1].DataStaging.InputFiles[i].Name,
+                        jobdescs[-1].DataStaging.InputFiles[i].Sources[0].fullstr()
+                    )
+                    if not filepath:  # remote file
+                        continue
+
+                    path = os.path.abspath(os.path.join(jobDataDir, filename))
+                    if not os.path.isfile(path):
+                        job['msg'] = f'Input file {filepath} missing'
+                        break
+
+                    jobdescs[-1].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(path)
+
+                # errors on missing input files
+                if 'msg' in job:
+                    print(f'{errpref}{job["msg"]}')
+                    continue
+
+                # TODO: ADL unparsing works but it doesn't unparse modified
+                # input files
+                desc = jobdescs[-1].UnParse('nordugrid:xrsl')[1]
+                #desc = jobdescs[0].UnParse('emies:adl')[1]
+                if not arc.JobDescription.Parse(desc, jobdescs):
+                    print(f'{errpref}Invalid modified job description')
+                    job['msg'] = 'Server error'
+                    continue
+
+                # update job entry and confirm job for submission
+                try:
+                    self.updateClientJob(proxyid=proxyid, session=session, jobid=job['id'], jobdesc=desc, jobname=job['name'])
+                except Exception as e:
+                    print(f'{errpref}{e}')
+                    job['msg'] = 'Server error'
+                    continue
+
+                del job['desc']  # don't want to return description in result
+
+        return jobs
 
 
     def getJobOutputDir(self, arcid):

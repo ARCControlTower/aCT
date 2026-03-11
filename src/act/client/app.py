@@ -214,6 +214,9 @@ def create_jobs():
     try:
         token = getToken()
         jobs = request.get_json()
+        if not jobs:
+            return jsonify([])
+        results = jmgr.createJobs(token['proxyid'], jobs, errpref)
     except RESTError as e:
         print(f'{errpref}{e}')
         return {'msg': str(e)}, e.httpCode
@@ -223,37 +226,6 @@ def create_jobs():
     except Exception as e:
         print(f'{errpref}{e}')
         return {'msg': 'Server error'}, 500
-
-    if not jobs:
-        return jsonify([])
-
-    results = []
-    with jmgr.arcdb.Session.begin() as session:
-        for job in jobs:
-            result = {}
-            results.append(result)
-
-            try:
-                # check clusters
-                if 'clusterlist' not in job or not job['clusterlist']:
-                    print(f'{errpref}No clusters given')
-                    result['msg'] = 'No clusters given'
-                    continue
-                clusterlist = checkClusters(job['clusterlist'])
-
-                # insert job
-                stmt = insert(ClientJob).values(proxyid=token['proxyid'], clusterlist=','.join(clusterlist)).returning(ClientJob.id)
-                jobid = session.execute(stmt).scalar_one()
-            except UnknownClusterError as e:
-                print(f'{errpref}Unknown cluster {e.name}')
-                result['msg'] = f'Unknown cluster {e.name}'
-                continue
-            except Exception as e:
-                print(f'{errpref}{e}')
-                result['msg'] = 'Server error'
-                continue
-
-            result['id'] = jobid
 
     return jsonify(results)
 
@@ -277,6 +249,12 @@ def confirm_jobs():
         token = getToken()
         proxyid = token['proxyid']
         submissions = request.get_json()
+        if not submissions:
+            return jsonify([])
+        elif not isinstance(submissions, list):
+            print(f'{errpref}Input JSON is not a list: {submissions}')
+            return {'msg': 'Input JSON is not a list: {submissions}'}, 400
+        jobs = jmgr.confirmJobs(proxyid, submissions, errpref)
     except (BadRequest, UnsupportedMediaType) as e:
         print(f'{errpref}{e}')
         return {'msg': str(e)}, 400
@@ -286,113 +264,6 @@ def confirm_jobs():
     except Exception as e:
         print(f'{errpref}{e}')
         return {'msg': 'Server error'}, 500
-
-    if not submissions:
-        return jsonify([])
-    elif not isinstance(submissions, list):
-        print(f'{errpref}Input JSON is not a list: {submissions}')
-        return {'msg': 'Input JSON is not a list: {submissions}'}, 400
-
-    jobs = []
-    jobids = []
-    tocheck = []
-    for submission in submissions:
-        job = {}
-        jobs.append(job)
-        if not isinstance(submission, dict):
-            print(f'{errpref}Job element is not an object: {submission}')
-            job['msg'] = f'Job element is not an object: {submission}'
-        elif 'id' not in submission:
-            print(f'{errpref}No job ID given')
-            job['msg'] = 'No job ID given'
-        else:
-            job.update(submission)
-            jobids.append(job['id'])
-            tocheck.append(job)
-
-    # get info for all jobs and check which ones don't exist
-    tosubmit = []
-    stats = jmgr.getJobStats(proxyid, jobids, '', '', ['id',], [], '')
-    for job in tocheck:
-        inStats = False
-        for stat in stats:
-            if stat['c_id'] == job['id']:
-                inStats = True
-        if not inStats:
-            print(f'{errpref}Job ID {job["id"]} does not exist')
-            job['msg'] = f'Job ID {job["id"]} does not exist'
-        else:
-            tosubmit.append(job)
-
-    jobdescs = arc.JobDescriptionList()
-
-    with jmgr.arcdb.Session.begin() as session:
-        for job in tosubmit:
-
-            # parse job description
-            if 'desc' not in job:
-                print(f'{errpref}No job description given')
-                job['msg'] = 'No job description given'
-                continue
-            if not arc.JobDescription.Parse(job['desc'], jobdescs):
-                print(f'{errpref}Invalid job description')
-                job['msg'] = 'Invalid job description'
-                continue
-
-            job['name'] = jobdescs[-1].Identification.JobName
-
-            # get job's data directory
-            try:
-                jobDataDir = jmgr.getJobDataDir(job['id'])
-            except ConfigError as e:
-                print(f'{errpref}{e}')
-                job['msg'] = 'Server error'
-                continue
-
-            # modify job description for local input files
-            #
-            # InputFiles need to be accessed through index otherwise
-            # the changes do not survive outside of for loop.
-            for i in range(len(jobdescs[-1].DataStaging.InputFiles)):
-                filename = jobdescs[-1].DataStaging.InputFiles[i].Name
-                filepath = isLocalInputFile(
-                    jobdescs[-1].DataStaging.InputFiles[i].Name,
-                    jobdescs[-1].DataStaging.InputFiles[i].Sources[0].fullstr()
-                )
-                if not filepath:  # remote file
-                    continue
-
-                path = os.path.abspath(os.path.join(jobDataDir, filename))
-                if not os.path.isfile(path):
-                    job['msg'] = f'Input file {filepath} missing'
-                    break
-
-                jobdescs[-1].DataStaging.InputFiles[i].Sources[0].ChangeFullPath(path)
-
-            # errors on missing input files
-            if 'msg' in job:
-                print(f'{errpref}{job["msg"]}')
-                continue
-
-            # TODO: ADL unparsing works but it doesn't unparse modified
-            # input files
-            desc = jobdescs[-1].UnParse('nordugrid:xrsl')[1]
-            #desc = jobdescs[0].UnParse('emies:adl')[1]
-            if not arc.JobDescription.Parse(desc, jobdescs):
-                print(f'{errpref}Invalid modified job description')
-                job['msg'] = 'Server error'
-                continue
-
-            # update job entry and confirm job for submission
-            try:
-                stmt = update(ClientJob).where(ClientJob.id==job['id']).values(jobdesc=desc,jobname=job['name'],modified=jmgr.arcdb.getTimeStamp())
-                session.execute(stmt)
-            except Exception as e:
-                print(f'{errpref}{e}')
-                job['msg'] = 'Server error'
-                continue
-
-            del job['desc']  # don't want to return description in result
 
     return jsonify(jobs)
 
