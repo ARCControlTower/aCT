@@ -1,6 +1,6 @@
 
 import arc
-from act.arc.aCTDBArc import aCTDBArc
+from act.arc.aCTDBArcNEW import aCTDBArc
 from act.client.clientdb import ClientDB
 from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
@@ -28,32 +28,22 @@ class aCTClient2Arc(aCTProcess):
         Signal handling strategy:
         - termination is checked before handling every proxy
         """
-        proxies = self.clidb.getProxies()
-        for proxyid in proxies:
-            self.stopOnFlag()
-            # aCTClient2Arc races with jobmgr.killJobs so lock is required
-            with self.arcdb.namedLock('nulljobs', timeout=10) as lock:
-                if lock:
-                    self.insertNewJobs(proxyid, 1000)
-                else:
-                    self.log.warning('Could not acquire lock to insert jobs')
+        with self.clidb.Session() as session:
+            proxies = self.clidb.getProxies(session)
+        with self.clidb.Session.begin() as session:
+            for proxyid in proxies:
+                self.stopOnFlag()
+                self.insertNewJobs(proxyid, session, 1000)
 
-    def insertNewJobs(self, proxyid, num):
+    def insertNewJobs(self, proxyid, session, num):
         """Insert new jobs to ARC table for proxy."""
         # Get jobs that haven't been inserted to ARC table yet
         # (they don't have reference to ARC table, arcjobid is null).
-        jobs = self.clidb.getJobsInfo(
-            ['id', 'jobdesc', 'clusterlist'],
-            where='proxyid = %s AND arcjobid IS NULL AND jobdesc IS NOT NULL',
-            where_params=[proxyid],
-            order_by='%s',
-            order_by_params=['id'],
-            limit=num
-        )
+        jobs = self.clidb.getJobsInfo(proxyid, session, num)
         jobdescs = arc.JobDescriptionList()
         for job in jobs:
             # create downloads list
-            arc.JobDescription.Parse(job['jobdesc'], jobdescs)
+            arc.JobDescription.Parse(job.jobdesc, jobdescs)
 
             # TODO: this should be done according to the xRSL output files
             # all files from session dir
@@ -69,23 +59,24 @@ class aCTClient2Arc(aCTProcess):
 
             # insert job to ARC table
             try:
-                row = self.arcdb.insertArcJobDescription(
-                    job['jobdesc'],
+                arcjobid = self.arcdb.insertArcJobDescription(
+                    session,
+                    job.jobdesc,
                     proxyid,
                     0,
-                    job['clusterlist'],
-                    job['id'],
+                    job.clusterlist,
+                    job.id,
                     ';'.join(downloads)
                 )
             except Exception as exc:
-                self.log.error(f'Error inserting appjob({job["id"]}) to arc table: {exc}')
+                self.log.error(f'Error inserting appjob({job.id}) to arc table: {exc}')
             else:
                 # create a reference to job in client table
-                self.clidb.updateJob(job['id'], {
-                    'arcjobid': row['LAST_INSERT_ID()'],
-                    'modified': self.clidb.getTimeStamp()
-                })
-                self.log.info(f'Successfully inserted appjob({job["id"]}) {row["LAST_INSERT_ID()"]} to ARC engine')
+                try:
+                    self.clidb.updateJob(job.id,  arcjobid)
+                    self.log.info(f'Successfully inserted appjob({job.id}) {arcjobid} to ARC engine')
+                except Exception as exc:
+                    self.log.error(f'Error connecting clientjob({job.id}) with arcjob({arcjobid}): {exc}')
 
     def finish(self):
         self.clidb.close()

@@ -18,8 +18,6 @@ from pyarcrest.arc import isLocalInputFile
 from pyarcrest.x509 import (checkRFCProxy, createProxyCSR, csrToPEM,
                             generateKey, keyToPEM, pemToCert)
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
-from act.client.clientdbmodels import ClientJob
-from sqlalchemy import insert, update
 
 # TODO: see if checkJobExists should be used anywhere else
 # TODO: implement proper logging
@@ -39,35 +37,6 @@ logger.addHandler(logging.StreamHandler())
 db = getDB(logger, arcconf)
 pmgr = ProxyManager(db=db)
 jmgr = JobManager(db=db)
-
-
-# can only be called after appconf global var exists
-def parseClusters():
-    clusters = []
-    for cluster in appconf.user.clusters:
-        try:
-            parts = urlparse(cluster, scheme="https")
-        except Exception as exc:
-            raise Exception(f"Error parsing cluster URL {cluster}: {exc}")
-
-        scheme = parts.scheme
-        host = parts.hostname
-        port = parts.port
-        path = parts.path
-
-        if scheme != "https":
-            raise Exception(f"Cluster URL {cluster} not using HTTPS")
-        if host is None:
-            raise Exception(f"Cluster URL {cluster} has no host")
-        if port is None:
-            port = 443
-
-        clusters.append(f"https://{host}:{port}{path}")
-
-    return clusters
-
-
-clusters = parseClusters()
 
 
 app = Flask(__name__)
@@ -489,16 +458,6 @@ def info():
         getToken()
 
         json = {'clusters': appconf.user.clusters}
-
-        c = jmgr.arcdb.db.getCursor()
-        c.execute('SHOW COLUMNS FROM arcjobs')
-        rows = c.fetchall()
-        json['arc'] = [row['Field'] for row in rows]
-        c.execute('SHOW COLUMNS FROM clientjobs')
-        rows = c.fetchall()
-        json['client'] = [row['Field'] for row in rows]
-        c.close()
-
     except RESTError as e:
         print(f'error: GET /info: {e}')
         return {'msg': str(e)}, e.httpCode
@@ -550,28 +509,3 @@ def getToken():
         raise RESTError('Invalid token signature', 401)
     else:
         return token
-
-
-def checkClusters(clusterlist):
-    clist = []
-    for cluster in clusterlist:
-        try:
-            parts = urlparse(cluster, scheme="https")
-        except Exception:
-            raise UnknownClusterError(cluster)
-
-        if parts.scheme != "https":
-            raise UnknownClusterError(cluster)
-
-        host = parts.hostname
-        port = parts.port
-        if port is None:
-            port = 443
-
-        url = f"https://{host}:{port}{parts.path}"
-
-        if url not in clusters:
-            raise UnknownClusterError(cluster)
-
-        clist.append(url)
-    return clist

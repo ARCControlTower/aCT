@@ -1,11 +1,12 @@
 from act.db.aCTDBNEW import aCTDB
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, ForeignKey, select, update, TIMESTAMP, text, Text, SmallInteger, DateTime, LargeBinary
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, ForeignKey, select, update, TIMESTAMP, text, Text, SmallInteger, DateTime, LargeBinary, insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, declared_attr
 from sqlalchemy.sql import func
 import datetime
 import re
 import os
 import arc
+from act.arc.aCTDBARCModels import JobDescription, ArcJob
 
 class aCTDBArc(aCTDB):
 
@@ -157,7 +158,7 @@ class aCTDBArc(aCTDB):
         return row
 
 
-    def insertArcJobDescription(self, jobdesc, proxyid='', maxattempts=0, clusterlist='', appjobid='', downloadfiles='', fairshare=''):
+    def insertArcJobDescription(self, session, jobdesc, proxyid='', maxattempts=0, clusterlist='', appjobid='', downloadfiles='', fairshare=''):
         '''
         Add a new job description for the ARC engine to process. If specified
         the job will be sent to a cluster in the given list.
@@ -172,34 +173,24 @@ class aCTDBArc(aCTDB):
             priority = 50
 
         # todo: find some useful default for proxyid
-        c=self.db.getCursor()
-
-        s = "insert into jobdescriptions (jobdescription) values (%s)"
-        c.execute(s, [jobdesc])
-        c.execute("SELECT LAST_INSERT_ID()")
-        jobdescid = c.fetchone()['LAST_INSERT_ID()']
-
-        desc = {}
-        desc['created'] = self.getTimeStamp()
-        desc['arcstate'] = "tosubmit"
-        desc['tarcstate']  = desc['created']
-        desc['tstate'] = desc['created']
-        desc['cluster']  = ''
-        desc['clusterlist'] = clusterlist
-        desc['jobdesc'] = jobdescid
-        desc['attemptsleft'] = maxattempts
-        desc['proxyid'] = proxyid
-        desc['appjobid'] = appjobid
-        desc['downloadfiles'] = downloadfiles
-        desc['priority'] = priority
-        desc['fairshare'] = fairshare
-        s="insert into arcjobs" + " ( " + ",".join(['%s' % (k) for k in desc.keys()]) + " ) " + " values " + \
-            " ( " + ",".join(['%s' % (k) for k in ["%s"] * len(desc.keys()) ]) + " ) "
-        c.execute(s, list(desc.values()))
-        c.execute("SELECT LAST_INSERT_ID()")
-        row = c.fetchone()
-        self.Commit()
-        return row
+        jobdescid = session.execute(insert(JobDescription).values(jobdescription=jobdesc).returning(JobDescription.id)).scalar_one()
+        tstmp = self.getTimeStamp()
+        arcjobid = session.execute(insert(ArcJob).values(
+            created=tstmp,
+            arcstate='tosubmit',
+            tarcstate=tstmp,
+            tstate=tstmp,
+            cluster='',
+            clusterlist=clusterlist,
+            jobdesc=jobdescid,
+            attemptsleft=maxattempts,
+            proxyid=proxyid,
+            appjobid=appjobid,
+            downloadfiles=downloadfiles,
+            priority=priority,
+            fairshare=fairshare
+        ).returning(ArcJob.id)).scalar_one()
+        return arcjobid
 
     def deleteArcJob(self, id):
         '''

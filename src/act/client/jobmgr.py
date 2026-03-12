@@ -10,14 +10,13 @@ import os
 import arc
 from act.arc.aCTDBArcNEW import aCTDBArc
 from act.common.aCTConfig import aCTConfigARC, aCTConfigAPP
-from act.client.clientdb import ClientDB, createMysqlEscapeList
+from act.client.clientdb import ClientDB
 from act.client.errors import NoSuchProxyError, NoJobDirectoryError
 from act.client.errors import ConfigError, InvalidJobDescriptionError
 from act.client.errors import NoSuchSiteError, InvalidJobRangeError
 from act.client.errors import InvalidJobIDError, UnknownClusterError
 from act.client.common import readSites
-from sqlalchemy import select, update, delete, inspect, or_, and_, insert
-from act.arc.aCTDBARCModels import ArcJob, Proxy, JobDescription
+from act.arc.aCTDBARCModels import ArcJob
 from act.client.clientdbmodels import ClientJob
 from urllib.parse import urlparse
 from pyarcrest.arc import isLocalInputFile
@@ -121,46 +120,6 @@ class JobManager(object):
             clist.append(url)
         return clist
 
-    def checkProxy(self, proxyid):
-        """
-        Check if proxy exists in database.
-
-        Function is a very thin wrapper around aCTDBArc functionality that
-        adds exception instead of checking return value. Does nothing if proxy
-        exists.
-
-        Args:
-            proxyid: An integer ID of proxy.
-
-        Raises:
-            NoSuchProxyError: Proxy does not exist in database.
-        """
-        with self.arcdb.Session() as session:
-            result = session.get(Proxy, proxyid)
-            if result is None:
-                raise NoSuchProxyError(proxyid, None)
-        #if not self.arcdb.getProxy(proxyid): # TODO
-        #    raise NoSuchProxyError(proxyid, None)
-
-    def getClientColumns(self):
-        """Return a list of column names from client engine's table."""
-        # TODO: hardcoded
-        with self.arcdb.Session() as session:
-            inspector = inspect(session.get_bind())
-            columns = inspector.get_columns("clientjobs")
-        return [col['name'] for col in columns]
-        #return self.clidb.getColumns('clientjobs') # TODO
-
-    def getArcColumns(self):
-        """Return a list of column names from ARC engine's table."""
-        # TODO: hardcoded
-        with self.arcdb.Session() as session:
-            inspector = inspect(session.get_bind())
-            columns = inspector.get_columns("arcjobs")
-        return [col['name'] for col in columns]
-        #return self.clidb.getColumns('arcjobs') # TODO
-
-    # TODO: return a list of IDs rather than number
     def cleanJobs(self, proxyid, jobids=[], state_filter=None, name_filter=None, **_):
         """
         Clean given jobs that match optional filters.
@@ -193,8 +152,8 @@ class JobManager(object):
         else:
             state_filter = ['done', 'donefailed', 'cancelled', 'failed', 'lost']
 
-        with self.arcdb.Session.begin() as session:
-            jobs = self.make_select(proxyid, session,
+        with self.clidb.Session.begin() as session:
+            jobs = self.clidb.getJoinJobsInfo(proxyid, session,
                                     jobids=jobids, state_filter=state_filter, name_filter=name_filter,
                                     clicols=['id'], arccols=['id', 'arcstate', 'JobID'], forupdate=True)
             if not jobs:
@@ -220,43 +179,11 @@ class JobManager(object):
                 arc_ids.append(a_id)
 
             if client_ids:
-                self.updateArcstate(session=session, jobids=arc_ids, arcstate='toclean')
-                self.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
+                self.clidb.updateArcstate(session=session, jobids=arc_ids, arcstate='toclean')
+                self.clidb.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
 
         return client_ids
     
-    def updateArcstate(self, session, jobids, arcstate): # move to clidb
-        session.execute(update(ArcJob).where(ArcJob.id.in_(jobids)).values(arcstate=arcstate, tarcstate=self.clidb.getTimeStamp()))
-
-    def deleteJobs(self, session, jobids, table): # move to clidb
-        session.execute(delete(table).where(table.id.in_(jobids)))
-
-    def forceCleanJobs(self, results): #unused?
-        """
-        Clean given rows from aCT tables and results in tmp.
-
-        State of jobs is not checked. Neither is consistency whether ARC
-        table entries really belong to client table entries.
-        Should be used only internally as a part of bigger transaction.
-
-        This method is used when client is getting jobs. Job results can only
-        be cleaned after the client has transfered them. This is what this
-        method does. It relies on :meth:`getJobs` to provide correct IDs.
-
-        More information on getting jobs can be found in :meth:`getJobs`
-
-        Args:
-            results: A :class:`JobGetResults` object with results.
-        """
-        with self.arcdb.Session.begin() as session:
-            if results.arcIDs: # jobs are cleaned from ARC by setting their state
-                session.execute(update(ArcJob).where(ArcJob.id.in_(results.arcIDs)).values(arcstate='toclean', tarcstate=self.arcdb.getTimeStamp()))
-            if results.clientIDs:
-                session.execute(delete(ClientJob).where(ClientJob.id.in_(results.clientIDs)))
-
-        for result in results.jobdicts:
-            if result['dir']:
-                shutil.rmtree(result['dir'])
 
     def fetchJobs(self, proxyid, jobids=[], name_filter='', **_):
         """
@@ -273,8 +200,8 @@ class JobManager(object):
         Returns:
             A list of IDs of fetched jobs.
         """
-        with self.arcdb.Session.begin() as session:
-            jobs = self.make_select(proxyid, session, jobids=jobids,
+        with self.clidb.Session.begin() as session:
+            jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids,
                                     state_filter=['failed'], name_filter=name_filter,
                                     clicols=['id'], arccols=['id'], forupdate=True)
 
@@ -283,78 +210,10 @@ class JobManager(object):
             c_ids = [c_id for c_id, _ in jobs]
             a_ids = [a_id for _, a_id in jobs]
 
-            self.updateArcstate(a_ids, 'tofetch', session)
+            self.clidb.updateArcstate(a_ids, 'tofetch', session)
         return c_ids
 
-    def refetchJobs(self, proxyid, jobids=[], name_filter=''):
-        """
-        Refetch given jobs from cluster.
-
-        Sometimes it happens that downloaded job results are corrupt. It is
-        necessary to fetch results again if that happens. This means that
-        already fetched results have to be deleted as well.
-
-        Jobs that haven't yet been fetched (for instance failed jobs) can also
-        be assigned for fetching in this operation.
-
-        Args:
-            proxyid: An integer ID of proxy.
-            jobids: A list of integer IDs of jobs.
-            name_filter: A string that job names should match.
-
-        Returns:
-            A list of IDs of jobs that will be refetched.
-        """
-        # create filters in query
-        stmt = select(ClientJob.id, ArcJob.id, ArcJob.arcstate, ArcJob.JobID).join(ClientJob.arcjob).where((ClientJob.proxyid==proxyid), ArcJob.arcstate.in_(['done', 'donefailed', 'failed']))
-
-        if jobids:
-            stmt = stmt.where(ClientJob.id.in_(jobids))
-
-        if name_filter:
-            escaped_filter = name_filter.replace('_', r'\_')
-            stmt = stmt.where(ClientJob.jobname.like(f'%{escaped_filter}%', escape='\\'))
-
-        with self.arcdb.Session.begin() as session:
-            jobs = session.execute(stmt).all()
-
-            if not jobs:
-                return []
-            
-            tofetch = []
-            finished = []
-
-            for c_id, a_id, arcstate, JobID in jobs:
-                if arcstate=='failed':
-                    tofetch.append(a_id)
-                else:
-                    try:
-                        jobdir = self.getJobOutputDir(JobID)
-                        shutil.rmtree(jobdir, ignore_errors=True)
-                    except OSError as exc:
-                        # just log this problem, user doesn't need results anyway
-                        self.log.error(f'Could not clean job results in {jobdir}: {exc}')
-                    except NoJobDirectoryError as exc:
-                        # just log this problem, user doesn't need results anyway
-                        self.log.error(f'Could not clean job results in {exc.jobdir}: {exc}')
-                    # finished jobs become done, tofetch jobs become donefailed;
-                    # the job status should be preserved
-                    if arcstate == 'done':
-                        finished.append(a_id)
-                    else:
-                        tofetch.append(a_id)
-
-            tstamp = self.arcdb.getTimeStamp()
-            if tofetch:
-                stmt = update(ArcJob).where(ArcJob.id.in_(tofetch)).values(arcstate='tofetch', tarcstate=tstamp)
-                session.execute(stmt)
-            if finished:
-                stmt = update(ArcJob).where(ArcJob.id.in_(finished)).values(arcstate='finished', tarcstate=tstamp)
-                session.execute(stmt)
-
-        return [job.id for job in jobs]
-
-    def getJobs(self, proxyid, jobids=[], state_filter='', name_filter=''):
+    def getJobs(self, proxyid, jobids=None, state_filter=None, name_filter=None):
         """
         Get given finished jobs that match optional filter.
 
@@ -379,25 +238,13 @@ class JobManager(object):
         """
         results = JobGetResults()
         # wrong state filter, return immediately
-        if state_filter not in ('', 'done', 'donefailed'):
+        if state_filter not in (None, 'done', 'donefailed'):
             return results # return empty results
-        # create query with filters
-        stmt = select(ClientJob.id, ClientJob.jobname, ArcJob.id, ArcJob.JobID).join(ClientJob.arcjob).where(ClientJob.proxyid==proxyid)
-
-        if state_filter:
-            stmt = stmt.where(ArcJob.arcstate==state_filter)
         else:
-            stmt = stmt.where(ArcJob.arcstate.in_(['done', 'donefailed']))
-
-        if jobids:
-            stmt = stmt.where(ClientJob.id.in_(jobids))
-
-        if name_filter:
-            escaped_filter = name_filter.replace('_', r'\_')
-            stmt = stmt.where(ClientJob.jobname.like(f'%{escaped_filter}%', escape='\\'))
-
-        with self.arcdb.Session.begin() as session:
-            jobs = session.execute(stmt).all()
+            state_filter=[state_filter]
+        # create query with filters
+        with self.clidb.Session() as session:
+            jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids, state_filter=state_filter, name_filter=name_filter, clicols=['id', 'jobname'], arccols=['id', 'JobID'])
 
         # assemble results
         for c_id, jobname, a_id, JobID in jobs:
@@ -442,8 +289,8 @@ class JobManager(object):
         if state_filter:
             state_filter = [state_filter]
 
-        with self.arcdb.Session.begin() as session:
-            jobs = self.make_select(proxyid, session, jobids=jobids,
+        with self.clidb.Session.begin() as session:
+            jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids,
                                     state_filter=state_filter, name_filter=name_filter,
                                     clicols=['id'], arccols=['id', 'arcstate'], forupdate=True)
 
@@ -461,16 +308,16 @@ class JobManager(object):
                     # 'tosubmit' jobs cannot be set to tocancel, they have to be deleted
                     # immediately.
                     client_ids.append(c_id)
-                    self.deleteJobs(session=session, jobids=[a_id], table=ArcJob)
+                    self.clidb.deleteJobs(session=session, jobids=[a_id], table=ArcJob)
                 else:
                     # If there is entry in arcjobs, the job can be killed by
                     # setting its state to 'tocancel'
                     arc_ids.append(a_id)
 
             if arc_ids:
-                self.updateArcstate(session=session, jobids=arc_ids, arcstate='tocancel')
+                self.clidb.updateArcstate(session=session, jobids=arc_ids, arcstate='tocancel')
             if client_ids:
-                self.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
+                self.clidb.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
 
         # One state in which a job can be killed is before it is passed
             # to ARC. Such jobs have None as arcid. Data dirs for jobs are
@@ -500,15 +347,15 @@ class JobManager(object):
         """
         # create query with filters
 
-        with self.arcdb.Session.begin() as session:
-            jobs = self.make_select(proxyid, session, jobids=jobids, 
+        with self.clidb.Session.begin() as session:
+            jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids, 
                                     state_filter=['failed', 'donefailed'], name_filter=name_filter,
                                     clicols=['id'], arccols=['id'], forupdate=True)
 
             if not jobs:
                 return[]
             #set job state for resubmittion
-            self.updateArcstate(session=session, jobids=[job.a_id for job in jobs], arcstate='toresubmit')
+            self.clidb.updateArcstate(session=session, jobids=[job.a_id for job in jobs], arcstate='toresubmit')
 
         return [job.c_id for job in jobs]
 
@@ -538,48 +385,13 @@ class JobManager(object):
         """
         if state_filter:
             state_filter = [state_filter]
-        with self.arcdb.Session() as session:
-            result = self.make_select(proxyid, session, jobids=jobids,
+        with self.clidb.Session() as session:
+            result = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids,
                                       state_filter=state_filter, name_filter=name_filter,
                                       clicols=clicols, arccols=arccols, jobname=jobname)
 
         jobs = [dict(row._mapping) for row in result]
         return jobs
-    
-
-    def make_select(self, proxyid, session, jobids=None, state_filter=None, name_filter=None, clicols=[], arccols=[], jobname=None, forupdate=False): # move to clidb
-        selected_columns = []
-        for colname in clicols:
-            col = getattr(ClientJob, colname)
-            selected_columns.append(col.label(f'c_{colname}'))
-        for colname in arccols:
-            col = getattr(ArcJob, colname)
-            selected_columns.append(col.label(f'a_{colname}'))
-        
-        if not selected_columns:
-            return []
-
-        stmt = select(*selected_columns)
-
-        if state_filter:
-            stmt = stmt.join(ClientJob.arcjob).where(ArcJob.arcstate.in_(state_filter))
-        else:
-            stmt = stmt.outerjoin(ClientJob.arcjob)
-        stmt = stmt.where(ClientJob.proxyid==proxyid)
-
-        if jobname:
-            stmt = stmt.where(ClientJob.jobname==jobname)
-        elif name_filter:
-            escaped = name_filter.replace('_', r'\_')
-            stmt = stmt.where(ClientJob.jobname.like(f'%{escaped}%', escape='\\'))
-
-        if jobids:
-            stmt = stmt.where(ClientJob.id.in_(jobids))
-
-        if forupdate:
-            stmt = stmt.with_for_update()
-
-        return session.execute(stmt).all()
     
     def createJobs(self, proxyid, jobs, errpref):
         results = []
@@ -597,7 +409,7 @@ class JobManager(object):
                     clusterlist = self.checkClusters(job['clusterlist'])
 
                     # insert job
-                    jobid = self.insertClientJob(proxyid=proxyid, session=session, clusterlist=','.join(clusterlist))
+                    jobid = self.clidb.insertJob(proxyid=proxyid, session=session, clusterlist=','.join(clusterlist))
                 except UnknownClusterError as e:
                     print(f'{errpref}Unknown cluster {e.name}')
                     result['msg'] = f'Unknown cluster {e.name}'
@@ -610,14 +422,6 @@ class JobManager(object):
                 result['id'] = jobid
         return results
 
-    def insertClientJob(self, proxyid, session, clusterlist): # move to clidb
-        return session.execute(insert(ClientJob).values(proxyid=proxyid, clusterlist=clusterlist).returning(ClientJob.id)).scalar_one()
-    
-    def checkClientJobs(self, proxyid, session, jobids):
-        return session.execute(select(ClientJob.id).where(ClientJob.proxyid==proxyid, ClientJob.id.in_(jobids))).all()
-    
-    def updateClientJob(self, proxyid, session, jobid, jobdesc, jobname):
-        session.execute(update(ClientJob).where(ClientJob.proxyid==proxyid, ClientJob.id==jobid).values(jobdesc=jobdesc, jobname=jobname, ))
     
     def confirmJobs(self, proxyid, submissions, errpref):
         jobs = []
@@ -640,7 +444,7 @@ class JobManager(object):
         # get info for all jobs and check which ones don't exist
         tosubmit = []
         with self.clidb.Session() as session:
-            stats = self.checkClientJobs(proxyid, session=session, jobids=jobids)
+            stats = self.clidb.checkClientJobs(proxyid, session=session, jobids=jobids)
         for job in tocheck:
             inStats = False
             for stat in stats:
@@ -713,7 +517,7 @@ class JobManager(object):
 
                 # update job entry and confirm job for submission
                 try:
-                    self.updateClientJob(proxyid=proxyid, session=session, jobid=job['id'], jobdesc=desc, jobname=job['name'])
+                    self.clidb.updateJob(proxyid=proxyid, session=session, jobid=job['id'], values_dict={'jobdesc':desc, 'jobname':job['name']})
                 except Exception as e:
                     print(f'{errpref}{e}')
                     job['msg'] = 'Server error'
@@ -754,44 +558,6 @@ class JobManager(object):
         if not datapath:
             raise ConfigError("config/actlocation/datman")
         return os.path.join(datapath, str(jobid))
-
-    def _createMysqlIntList(self, integers):
-        """
-        Create string with integers separated by comma and space.
-
-        Used for creating MySQL queries with job IDs.
-
-        Args:
-            integers: A list of job ID integers.
-
-        Returns:
-            A string of integers separated by comma and space.
-        """
-        where = ''
-        if integers:
-            for integer in integers:
-                where += f'{integer}, '
-            where = where.rstrip(', ')
-        return where
-
-    def _addNameFilter(self, name_filter='', where='', where_params=[]):
-        if name_filter:
-            where += " c.jobname LIKE BINARY %s AND "
-            escaped_filter = name_filter.replace('_', r'\_')
-            where_params.append('%' + escaped_filter + '%')
-        return where, where_params
-
-    def _addIDFilter(self, ids=[], where='', where_params=[]):
-        if ids:
-            #if len(ids) == 1:
-            #    where += ' c.id = %s '
-            #    where_params.append(ids[0])
-            #else:
-            #    where += ' c.id IN ({}) AND '.format(createMysqlEscapeList(len(ids)))
-            #    where_params.extend(ids)
-            where += f' c.id IN ({createMysqlEscapeList(len(ids))}) AND '
-            where_params.extend(ids)
-        return where, where_params
 
     def checkJobExists(self, proxyid, jobid):
         """Returns given jobid if job exists or None if not."""
