@@ -168,7 +168,7 @@ class ProxyManager(object):
         
     def updateProxy(self, proxy, dn, attribute, expirytime):
         with self.clidb.Session.begin() as session:
-            proxyid = self.clidb.updateProxy(session, proxy, dn, attribute, expirytime)
+            proxyid = self.clidb.updateProxy(session, proxy.encode('utf-8'), dn, attribute, expirytime)
         return proxyid
 
 # We basically want to get the value of the first 'attribute:' line from
