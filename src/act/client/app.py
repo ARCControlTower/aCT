@@ -334,7 +334,7 @@ def getCSR():
         print(f'CSR generated: DN: {dn}, attr: {attr}, expiration: {exptime}')
 
         # put private key into string and store in db
-        proxyid = pmgr.actproxy.updateProxy(keyToPEM(key), dn, attr, exptime) # TODO maybe
+        proxyid = pmgr.clidb.updateProxy(keyToPEM(key), dn, attr, exptime)
         if proxyid is None:
             print('error: POST /proxies: proxy insertion failure')
             return {'msg': 'Server error'}, 500
