@@ -165,7 +165,11 @@ class ProxyManager(object):
                 if proxy.expirytime > datetime.datetime.utcnow():
                     return True
             return False
-
+        
+    def updateProxy(self, proxy, dn, attribute, expirytime):
+        with self.clidb.Session.begin() as session:
+            proxyid = self.clidb.updateProxy(session, proxy, dn, attribute, expirytime)
+        return proxyid
 
 # We basically want to get the value of the first 'attribute:' line from
 # 'arcproxy -I' output.
