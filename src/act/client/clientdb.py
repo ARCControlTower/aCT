@@ -224,12 +224,16 @@ class ClientDB(aCTDB):
         for colname in columns:
             col = getattr(Proxy, colname)
             selected_columns.append(col)
-        session.execute(select(*selected_columns).filter_by(**filter)).first()
+        stmt = select(*selected_columns)
+        for k, v in filter.items():
+            stmt = stmt.where(getattr(Proxy, k) == v)
+        session.execute(stmt).first()
 
     def updateProxy(self, session, proxy, dn, attribute, expirytime):
-        proxyid = self.getProxyInfo(session, {'dn':dn, 'attribute':attribute}, ['id']).scalar_one_or_none()
+        proxyid = self.getProxyInfo(session, {'dn':dn, 'attribute':attribute}, ['id'])
         if proxyid:
-            session.execute(update(Proxy).where(Proxy.id==proxyid).values(proxy=proxy, expirytime=expirytime))
+            session.execute(update(Proxy).where(Proxy.id==proxyid.id).values(proxy=proxy, expirytime=expirytime))
+            proxyid = proxyid.id
         else:
             proxyid = session.execute(insert(Proxy).values(proxy=proxy, dn=dn, attribute=attribute, expirytime=expirytime).returning(Proxy.id)).scalar_one_or_none()
         return proxyid
