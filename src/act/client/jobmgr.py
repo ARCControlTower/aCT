@@ -237,11 +237,6 @@ class JobManager(object):
             A :class:`JobGetResults` object with results.
         """
         results = JobGetResults()
-        # wrong state filter, return immediately
-        if state_filter not in (None, 'done', 'donefailed'):
-            return results # return empty results
-        else:
-            state_filter=[state_filter]
         # create query with filters
         with self.clidb.Session() as session:
             jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids, state_filter=state_filter, name_filter=name_filter, clicols=['id', 'jobname'], arccols=['id', 'JobID'])

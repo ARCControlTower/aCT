@@ -218,4 +218,10 @@ class ClientDB(aCTDB):
 
     def checkClientJobs(self, proxyid, session, jobids):
         return session.execute(select(ClientJob.id).where(ClientJob.proxyid==proxyid, ClientJob.id.in_(jobids))).all()
-
+    
+    def getProxyInfo(self, session, filter, columns):
+        selected_columns = []
+        for colname in columns:
+            col = getattr(Proxy, colname)
+            selected_columns.append(col)
+        session.execute(select(*selected_columns).filter_by(**filter)).first()

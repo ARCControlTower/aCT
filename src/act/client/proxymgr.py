@@ -8,8 +8,9 @@ import arc
 import datetime
 import re
 
-from act.common.aCTProxy import aCTProxy
-from act.arc.aCTDBArc import aCTDBArc
+from act.common.aCTProxyNEW import aCTProxy
+from act.arc.aCTDBArcNEW import aCTDBArc
+from act.client.clientdb import ClientDB
 from act.client.errors import NoSuchProxyError, NoProxyFileError
 from act.client.errors import ProxyFileExpiredError, ProxyDBExpiredError
 
@@ -39,6 +40,7 @@ class ProxyManager(object):
         self.log = logging.getLogger(__name__)
         self.actproxy = aCTProxy(self.log, db=db)
         self.arcdb = aCTDBArc(self.log, db=db)
+        self.clidb = ClientDB(self.log, db=db)
 
     def getProxyInfo(self, dn, attribute='', columns=[]):
         """
@@ -56,7 +58,8 @@ class ProxyManager(object):
             NoSuchProxyError: Searched for proxy is not in database.
         """
         try:
-            proxyInfo =  self.actproxy.getProxyInfo(dn, attribute, columns)
+            with self.clidb.Session() as session:
+                proxyInfo =  self.clidb.getProxyInfo(session, {'dn':dn, 'attribute':attribute}, columns)
         except Exception as exc:
             self.log.error(f'Error getting info for proxy dn={dn} attribute={attribute}: {exc}')
             raise
@@ -115,19 +118,6 @@ class ProxyManager(object):
                 "%Y-%m-%dT%H:%M:%SZ")
         return dn, expirytime
 
-    def updateProxy(self, proxyPath):
-        """
-        Update or insert given proxy, return proxyid.
-
-        Args:
-            proxyPath: A string with path to proxy file.
-
-        Returns:
-            ID of proxy in database.
-        """
-        proxystr, dn, exptime = self.readProxyFile(proxyPath)
-        return self.actproxy.updateProxy(proxystr, dn, '', exptime)
-
     def getProxyIdForProxyFile(self, path=None):
         """
         Get proxy id for proxy in given file.
@@ -153,47 +143,28 @@ class ProxyManager(object):
             raise ProxyDBExpiredError()
         return proxyinfo["id"]
 
-    def getProxiesWithDN(self, dn, columns=[]): # TODO
-        """
-        Get info for proxies with given dn.
-
-        Args:
-            dn: A string with DN.
-            columns: A list of string names of table columns.
-
-        Returns:
-            A list of dictionaries with column name:value entries for proxies.
-        """
-        return self.arcdb.getProxiesInfo(f" dn = '{dn}' ", columns)
-
-    def getProxyKeyPEM(self, proxyid): # TODO
-        c = self.arcdb.db.getCursor()
+    def getProxyKeyPEM(self, proxyid):
         try:
-            c.execute('SELECT proxy FROM proxies WHERE id = %s', (proxyid,))
+            with self.clidb.Session() as session:
+                row = self.clidb.getProxyInfo(session, {'id':proxyid}, ['proxy'])
         except Exception as exc:
             self.log.error(f'Error retrieving private key PEM from database: {exc}')
             return None
         else:
-            row = c.fetchone()
-            return row['proxy'].decode()
-        finally:
-            c.close()
+            return row.proxy.decode()
 
-    def checkProxyExists(self, proxyid): # TODO
+    def checkProxyExists(self, proxyid):
         try:
-            c = self.arcdb.db.getCursor()
-            c.execute('SELECT id,expirytime FROM proxies WHERE id = %s LIMIT 1', (proxyid,))
+            with self.clidb.Session() as session:
+                proxy = self.clidb.getProxyInfo(session, {'id':proxyid}, ['id', 'expirytime'])
         except Exception as exc:
             self.log.error(f'Error checking existence of proxy: {exc}')
             return None
         else:
-            proxy = c.fetchone()
             if proxy is not None:
-                if proxy['expirytime'] > datetime.datetime.utcnow():
+                if proxy.expirytime > datetime.datetime.utcnow():
                     return True
             return False
-        finally:
-            c.close()
 
 
 # We basically want to get the value of the first 'attribute:' line from

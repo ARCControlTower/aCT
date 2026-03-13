@@ -73,7 +73,7 @@ class aCTClient2Arc(aCTProcess):
             else:
                 # create a reference to job in client table
                 try:
-                    self.clidb.updateJob(job.id,  arcjobid)
+                    self.clidb.updateJob(proxyid, session, job.id,  {'arcjobid':arcjobid})
                     self.log.info(f'Successfully inserted appjob({job.id}) {arcjobid} to ARC engine')
                 except Exception as exc:
                     self.log.error(f'Error connecting clientjob({job.id}) with arcjob({arcjobid}): {exc}')
