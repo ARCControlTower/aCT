@@ -220,14 +220,10 @@ class ClientDB(aCTDB):
         return session.execute(select(ClientJob.id).where(ClientJob.proxyid==proxyid, ClientJob.id.in_(jobids))).all()
     
     def getProxyInfo(self, session, filter, columns):
-        selected_columns = []
-        for colname in columns:
-            col = getattr(Proxy, colname)
-            selected_columns.append(col)
-        stmt = select(*selected_columns)
-        for k, v in filter.items():
-            stmt = stmt.where(getattr(Proxy, k) == v)
-        session.execute(stmt).first()
+        selected_columns = [getattr(Proxy, col) for col in columns]
+        stmt = select(*selected_columns).where(*[getattr(Proxy, k) == v for k, v in filter.items()])
+        result = session.execute(stmt).first()
+        return result
 
     def updateProxy(self, session, proxy, dn, attribute, expirytime):
         proxyid = self.getProxyInfo(session, {'dn':dn, 'attribute':attribute}, ['id'])

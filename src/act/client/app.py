@@ -390,7 +390,7 @@ def uploadSignedProxy():
         proxy = pemToCert(proxyPEM)
         if not checkRFCProxy(proxy):
             return {'msg': 'cert is not a valid proxy'}, 400
-        proxyid = pmgr.actproxy.updateProxy(proxyPEM, dn, attr, exptime) # TODO maybe
+        proxyid = pmgr.updateProxy(proxyPEM, dn, attr, exptime)
         token = jwt.encode({'proxyid': proxyid, 'exp': exptime}, appconf.user.jwt_secret, algorithm='HS256')
     except Exception as e:
         print(f'error: PUT /proxies: {e}')
