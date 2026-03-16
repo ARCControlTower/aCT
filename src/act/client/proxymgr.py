@@ -185,7 +185,7 @@ class ProxyManager(object):
                     'expirytime':str(expirytime),
                     'attribute':attribute
                 }
-                self.arcdb.updateProxy(proxyid, desc)
+                self.arcdb.updateProxy(proxyid, session, desc)
         return proxyid
 
 # We basically want to get the value of the first 'attribute:' line from

@@ -20,6 +20,9 @@ class aCTDB(object):
             pool_recycle=3600,
             )
         self.Session = sessionmaker(bind=engine)
+        self.db = db
+        if self.db is None:
+            self.db = aCTDBMS.getDB(self.log, self.conf)
 
     def _column_list2str(self,columns):
         s=""
