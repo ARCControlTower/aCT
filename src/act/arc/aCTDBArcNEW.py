@@ -431,7 +431,7 @@ class aCTDBArc(aCTDB):
           - myproxyid: id from myproxy
         Returns id of db entrance
         '''
-        proxyid = session.execute(insert(Proxy).values(proxy=proxy, dn=dn, expirytime=expirytime, attribute=attribute, proxytype=proxytype, myproxyid=myproxyid).returning(Proxy.id)).scalar_one()
+        proxyid = session.execute(insert(Proxy).values(proxy=proxy.encode('utf-8'), dn=dn, expirytime=expirytime, attribute=attribute, proxytype=proxytype, myproxyid=myproxyid).returning(Proxy.id)).scalar_one()
         proxypath = os.path.join(self.proxydir,"proxiesid"+str(proxyid))
         session.execute(update(Proxy).where(Proxy.id==proxyid).values(proxypath=proxypath))
         self._writeProxyFile(proxypath, proxy)

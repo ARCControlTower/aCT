@@ -170,14 +170,13 @@ class ProxyManager(object):
         '''
         Update proxy of given dn/attribute. If no previous proxy, do insert instead.
         '''
-        proxy=proxy.encode('utf-8')
         with self.clidb.Session.begin() as session:
             try:
                 proxyid = self.arcdb.getProxiesInfo(session, {'dn':dn, 'attribute':attribute}, columns=["id"]).id
             except:
                 proxyid = None
             if not proxyid:
-                proxyid = self.arcdb.insertProxy(proxy, dn, str(expirytime), attribute=attribute)
+                proxyid = self.arcdb.insertProxy(proxy, session, dn, str(expirytime), attribute=attribute)
             else:
                 desc={
                     'proxy':proxy,
