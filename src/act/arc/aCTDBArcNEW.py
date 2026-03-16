@@ -6,7 +6,7 @@ import datetime
 import re
 import os
 import arc
-from act.arc.aCTDBARCModels import JobDescription, ArcJob
+from act.arc.aCTDBARCModels import JobDescription, ArcJob, Proxy
 
 class aCTDBArc(aCTDB):
 
@@ -420,7 +420,7 @@ class aCTDBArc(aCTDB):
         # make sure permissions are correct
         os.chmod(proxypath, 0o600)
 
-    def insertProxy(self, proxy, dn, expirytime, attribute='', proxytype='local', myproxyid=''):
+    def insertProxy(self, proxy, session, dn, expirytime, attribute='', proxytype='local', myproxyid=''):
         '''
         Add new proxy.
           - proxy: string representation of proxy file
@@ -431,29 +431,17 @@ class aCTDBArc(aCTDB):
           - myproxyid: id from myproxy
         Returns id of db entrance
         '''
-        c=self.db.getCursor()
-        s="INSERT INTO proxies (proxy, dn, attribute, proxytype, myproxyid, expirytime) VALUES ('"\
-                  +proxy+"','"+dn+"','"+attribute+"','"+proxytype+"','"+myproxyid+"','"+expirytime+"')"
-        c.execute(s)
-        c.execute("SELECT LAST_INSERT_ID()")
-        row = c.fetchone()
-        id=row['LAST_INSERT_ID()']
-        proxypath=os.path.join(self.proxydir,"proxiesid"+str(id))
-        c.execute("UPDATE proxies SET proxypath='"+proxypath+"' WHERE id="+str(id))
-        self.Commit()
+        proxyid = session.execute(insert(Proxy).values(proxy=proxy, dn=dn, expirytime=expirytime, attribute=attribute, proxytype=proxytype, myproxyid=myproxyid).returning(Proxy.id)).scalar_one()
+        proxypath = os.path.join(self.proxydir,"proxiesid"+str(proxyid))
+        session.execute(update(Proxy).where(Proxy.id==proxyid).values(proxypath=proxypath))
         self._writeProxyFile(proxypath, proxy)
-        return id
-
-    def updateProxy(self, id, desc):
+        return proxyid
+    
+    def updateProxy(self, id, session, desc):
         '''
         Update proxy fields specified in desc.
         '''
-        s="UPDATE proxies SET "+",".join(['%s=\'%s\'' % (k, v) for k, v in desc.items()])
-        s+=" WHERE id="+str(id)
-        c=self.db.getCursor()
-        c.execute(s)
-        self.Commit()
-        # rewrite proxy file if proxy was updated
+        session.execute(update(Proxy).where(Proxy.id==id).values(**desc))
         if 'proxy' in desc:
             self._writeProxyFile(self.getProxyPath(id), self.getProxy(id))
 
@@ -485,20 +473,14 @@ class aCTDBArc(aCTDB):
         except Exception as x:
             self.log.error("Could not find proxyid in proxies table. %s", x)
 
-    def getProxiesInfo(self, select, columns=[], lock=False, expect_one=False):
+    def getProxiesInfo(self, session, filter, columns):
         '''
-        Return a list of column: value dictionaries for proxies matching select.
-        If lock is True the row will be locked if possible. If expect_one is true
-        only one row will be returned.
+        Return a list of column: value row objects for proxies matching select.
         '''
-        if lock:
-            select += self.db.addLock()
-        c=self.db.getCursor()
-        c.execute("SELECT "+self._column_list2str(columns)+" FROM proxies WHERE "+select)
-        if expect_one:
-            return c.fetchone()
-        else:
-            return c.fetchall()
+        selected_columns = [getattr(Proxy, col) for col in columns]
+        stmt = select(*selected_columns).where(*[getattr(Proxy, k) == v for k, v in filter.items()])
+        result = session.execute(stmt).first()
+        return result
 
     def deleteProxy(self, id):
         '''

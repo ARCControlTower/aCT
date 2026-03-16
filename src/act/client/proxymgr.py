@@ -167,8 +167,25 @@ class ProxyManager(object):
             return False
         
     def updateProxy(self, proxy, dn, attribute, expirytime):
+        '''
+        Update proxy of given dn/attribute. If no previous proxy, do insert instead.
+        '''
+        proxy=proxy.encode('utf-8')
         with self.clidb.Session.begin() as session:
-            proxyid = self.clidb.updateProxy(session, proxy.encode('utf-8'), dn, attribute, expirytime)
+            try:
+                proxyid = self.arcdb.getProxiesInfo(session, {'dn':dn, 'attribute':attribute}, columns=["id"]).id
+            except:
+                proxyid = None
+            if not proxyid:
+                proxyid = self.arcdb.insertProxy(proxy, dn, str(expirytime), attribute=attribute)
+            else:
+                desc={
+                    'proxy':proxy,
+                    'dn':dn,
+                    'expirytime':str(expirytime),
+                    'attribute':attribute
+                }
+                self.arcdb.updateProxy(proxyid, desc)
         return proxyid
 
 # We basically want to get the value of the first 'attribute:' line from
