@@ -1,5 +1,5 @@
 from act.db.aCTDBNEW import aCTDB
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, ForeignKey, select, update, TIMESTAMP, text, Text, SmallInteger, DateTime, LargeBinary, insert
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, ForeignKey, select, update, TIMESTAMP, text, Text, SmallInteger, DateTime, LargeBinary, insert, delete
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, declared_attr
 from sqlalchemy.sql import func
 import datetime
@@ -431,7 +431,7 @@ class aCTDBArc(aCTDB):
           - myproxyid: id from myproxy
         Returns id of db entrance
         '''
-        proxyid = session.execute(insert(Proxy).values(proxy, dn=dn, expirytime=expirytime, attribute=attribute, proxytype=proxytype, myproxyid=myproxyid).returning(Proxy.id)).scalar_one()
+        proxyid = session.execute(insert(Proxy).values(proxy=proxy, dn=dn, expirytime=expirytime, attribute=attribute, proxytype=proxytype, myproxyid=myproxyid).returning(Proxy.id)).scalar_one()
         proxypath = os.path.join(self.proxydir,"proxiesid"+str(proxyid))
         session.execute(update(Proxy).where(Proxy.id==proxyid).values(proxypath=proxypath))
         self._writeProxyFile(proxypath, proxy)
@@ -444,7 +444,7 @@ class aCTDBArc(aCTDB):
         session.execute(update(Proxy).where(Proxy.id==id).values(**desc))
         if 'proxy' in desc:
             proxy = self.getProxiesInfo(session, {'id':id}, ['proxypath', 'proxy'])
-            self._writeProxyFile(proxy.proxypath, proxy.proxy)
+            self._writeProxyFile(proxy.proxypath, str(proxy.proxy, encoding='utf-8') if type(proxy.proxy) == bytes else proxy.proxy)
 
     def getProxyPath(self, id):
         '''
@@ -483,17 +483,12 @@ class aCTDBArc(aCTDB):
         result = session.execute(stmt).first()
         return result
 
-    def deleteProxy(self, id):
+    def deleteProxy(self, session, id):
         '''
         Delete proxy from proxies table.
         '''
         # remove file first
-        proxypath=self.getProxyPath(id)
-        if os.path.isfile(proxypath):
-            os.remove(proxypath)
-        c=self.db.getCursor()
-        c.execute("DELETE FROM proxies WHERE id="+str(id))
-        self.Commit()
+        session.execute(delete(Proxy).where(Proxy.id==id))
 
 if __name__ == '__main__':
     import logging, sys

@@ -145,8 +145,8 @@ class ProxyManager(object):
 
     def getProxyKeyPEM(self, proxyid):
         try:
-            with self.clidb.Session() as session:
-                row = self.clidb.getProxyInfo(session, {'id':proxyid}, ['proxy'])
+            with self.arcdb.Session() as session:
+                row = self.arcdb.getProxiesInfo(session, {'id':proxyid}, ['proxy'])
         except Exception as exc:
             self.log.error(f'Error retrieving private key PEM from database: {exc}')
             return None
@@ -186,6 +186,13 @@ class ProxyManager(object):
                 }
                 self.arcdb.updateProxy(proxyid, session, desc)
         return proxyid
+    
+    def deleteProxy(self, id):
+        with self.arcdb.Session.begin() as session:
+            proxy = self.arcdb.getProxiesInfo(session, {'id':id}, ['proxypath'])
+            if os.path.isfile(proxy.proxypath):
+                os.remove(proxy.proxypath)
+            self.arcdb.deleteProxy(session, id)
 
 # We basically want to get the value of the first 'attribute:' line from
 # 'arcproxy -I' output.

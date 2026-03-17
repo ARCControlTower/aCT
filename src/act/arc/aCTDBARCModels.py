@@ -79,7 +79,7 @@ class Proxy(Base):
     __tablename__ = 'proxies'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    proxy: Mapped[Optional[str]] = mapped_column(LargeBinary)
+    proxy: Mapped[Optional[str]] = mapped_column(Text)
     expirytime: Mapped[Optional[datetime]] = mapped_column(DateTime)
     proxypath: Mapped[Optional[str]] = mapped_column(String(255))
     dn: Mapped[Optional[str]] = mapped_column(String(255))

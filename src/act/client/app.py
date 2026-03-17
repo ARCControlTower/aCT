@@ -404,7 +404,7 @@ def uploadSignedProxy():
 def deleteProxy():
     try:
         token = getToken()
-        pmgr.arcdb.deleteProxy(token['proxyid'])
+        pmgr.deleteProxy(token['proxyid'])
     except RESTError as e:
         print(f'error: DELETE /proxies: {e}')
         return {'msg': str(e)}, e.httpCode
