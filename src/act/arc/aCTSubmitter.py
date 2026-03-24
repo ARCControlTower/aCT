@@ -2,13 +2,18 @@ import datetime
 from json import JSONDecodeError
 from random import shuffle
 from urllib.parse import urlparse
+from collections import defaultdict
 
-from act.arc.aCTARCProcess import aCTARCProcess
+from act.arc.aCTARCProcessNEW import aCTARCProcess
 from act.arc.aCTStatus import ARC_STATE_MAPPING
+from act.arc.aCTDBARCModels import ArcJob, JobDescription
 from pyarcrest.errors import (ARCError, ARCHTTPError, DescriptionParseError,
                               DescriptionUnparseError, InputFileError,
                               InputUploadError, MatchmakingError,
                               NoValueInARCResult)
+from sqlalchemy import select, or_, update
+from sqlalchemy.sql import func
+from sqlalchemy.orm import joinedload, undefer
 
 
 class aCTSubmitter(aCTARCProcess):
@@ -42,23 +47,26 @@ class aCTSubmitter(aCTARCProcess):
                 if isinstance(info.maxjobs, int):
                     clustermaxjobs = info.maxjobs
 
-        nsubmitted = self.db.getNArcJobs(f"cluster='{self.cluster}'")
+        with self.db.Session() as session:
+            nsubmitted = session.execute(select(func.count()).select_from(ArcJob).where(ArcJob.cluster==self.cluster)).scalar()
+
         if nsubmitted >= clustermaxjobs:
             self.log.info(f'{nsubmitted} submitted jobs is greater than or equal to max jobs {clustermaxjobs}')
             return
 
         # Apply fair-share
-        if self.cluster:
-            fairshares = self.db.getArcJobsInfo(f"arcstate='tosubmit' and clusterlist like '%{self.cluster}%'", ['fairshare', 'proxyid'])
-        else:
-            fairshares = self.db.getArcJobsInfo("arcstate='tosubmit' and clusterlist=''", ['fairshare', 'proxyid'])
+        with self.db.Session() as session:
+            if self.cluster:
+                fairshares = session.execute(select(ArcJob.fairshare, ArcJob.proxyid).where(ArcJob.arcstate=='tosubmit', ArcJob.clusterlist.like(f'%{self.cluster}%'))).all()
+            else:
+                fairshares = session.execute(select(ArcJob.fairshare, ArcJob.proxyid).where(ArcJob.arcstate=='tosubmit', ArcJob.clusterlist=='')).all()
 
         if not fairshares:
             self.log.info('Nothing to submit')
             return
 
         # split by proxy for GU queues
-        fairshares = list(set([(p['fairshare'], p['proxyid']) for p in fairshares]))
+        fairshares = list(set([(p.fairshare, p.proxyid) for p in fairshares]))
         # For proxy bug - see below
         shuffle(fairshares)
 
@@ -66,8 +74,9 @@ class aCTSubmitter(aCTARCProcess):
 
         # Divide limit among fairshares, unless exiting after first loop due to
         # proxy bug, but make sure at least one job is submitted
-        if len(self.db.getProxiesInfo('TRUE', ['id'])) == 1:
-            limit = max(limit // len(fairshares), 1)
+        with self.db.Session() as session:
+            if len(self.db.getProxiesInfo(session, {}, ['id'])) == 1:
+                limit = max(limit // len(fairshares), 1)
 
         for fairshare, proxyid in fairshares:
             self.stopOnFlag()
@@ -79,18 +88,23 @@ class aCTSubmitter(aCTARCProcess):
 
             # Get jobs to submit and set them to "submitting". Lock is required
             # for race with other submitters and act.client.jobmgr.killJobs().
-            jobs = []
-            with self.db.namedLock('arcjobs', timeout=20) as lock:
-                if not lock:
-                    self.log.warning("Could not lock jobs to submit")
-                else:
-                    jobs = self.db.getArcJobsInfo(
-                        "arcstate='tosubmit' and ( clusterlist like '%{0}' or clusterlist like '%{0},%' ) and fairshare='{1}' and proxyid='{2}' limit {3}".format(self.cluster, fairshare, proxyid, limit),
-                        columns=["id", "jobdesc", "appjobid", "priority", "proxyid", "clusterlist"],
-                    )
-                    jd = {'cluster': self.cluster, 'arcstate': 'submitting', 'tarcstate': self.db.getTimeStamp()}
-                    for job in jobs:
-                        self.db.updateArcJob(job['id'], jd)
+            with self.db.Session.begin() as session:
+                stmt = select(ArcJob.id,
+                              ArcJob.jobdesc,
+                              ArcJob.appjobid,
+                              ArcJob.priority,
+                              ArcJob.proxyid,
+                              JobDescription.jobdescription) \
+                    .where(ArcJob.arcstate=='tosubmit',
+                            ArcJob.fairshare==fairshare,
+                            ArcJob.proxyid==proxyid,
+                            or_(ArcJob.clusterlist.like(f'%{self.cluster}'), ArcJob.clusterlist.like(f'%{self.cluster},%'))) \
+                    .join(ArcJob.jobdescobj) \
+                    .limit(limit) \
+                    .with_for_update()
+                jobs = session.execute(stmt).all()
+                if jobs:
+                    session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobs])).values(arcstate='submitting', tarcstate=self.db.getTimeStamp(), cluster=self.cluster))
 
             if not jobs:
                 self.log.debug("No jobs to submit")
@@ -105,12 +119,13 @@ class aCTSubmitter(aCTARCProcess):
             #usercred = self.uc
 
             # Filter only sites for this process
-            qjobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and  arcstate='submitted' and fairshare='{fairshare}'", ['id','priority'])
-            rjobs = self.db.getArcJobsInfo(f"cluster='{self.cluster}' and  arcstate='running' and fairshare='{fairshare}'", ['id'])
+            with self.db.Session() as session:
+                qjobs = session.execute(select(ArcJob.id, ArcJob.priority).where(ArcJob.arcstate=='submitted', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).all()
+                rjobs = session.execute(select(ArcJob.id, ArcJob.priority).where(ArcJob.arcstate=='running', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).all()
 
             # max waiting priority
             try:
-                maxpriowaiting = max(jobs, key=lambda x: x['priority'])['priority']
+                maxpriowaiting = max(jobs, key=lambda x: x.priority).priority
             except:
                 maxpriowaiting = 0
             self.log.info(f"Maximum priority of waiting jobs: {maxpriowaiting}")
@@ -118,7 +133,7 @@ class aCTSubmitter(aCTARCProcess):
 
             # max queued priority
             try:
-                maxprioqueued = max(qjobs, key=lambda x: x['priority'])['priority']
+                maxprioqueued = max(qjobs, key=lambda x: x.priority).priority
             except:
                 maxprioqueued = 0
             self.log.info(f"Max priority queued: {maxprioqueued}")
@@ -133,98 +148,101 @@ class aCTSubmitter(aCTARCProcess):
             ##################################################################
 
             # read job descriptions from DB
-            descs = []
-            for job in jobs:
-                descs.append(str(self.db.getArcJobDescription(str(job["jobdesc"]))))
+            descs = [job.jobdescription for job in jobs]
 
             # get REST client
+            jobids = [job.id for job in jobs]
             arcrest = self.getARCClient(proxyid)
-            if not arcrest:
-                self.setJobsArcstate(jobs, "tosubmit")
-                continue
+
+            with self.db.Session.begin() as session:
+                if not arcrest:
+                    session.execute(self.setJobsArcstate(jobids, 'tosubmit'))
+                    continue
 
             # submit jobs to ARC
-            try:
-                delegationID = arcrest.createDelegation()
-                results = arcrest.submitJobs(
-                    descs,
-                    self.queue,
-                    delegationID,
-                    workers=self.conf.rest.upload_workers or 10,
-                    sendsize=self.conf.rest.upload_size or 8388608,  # 8MB
-                    timeout=self.conf.rest.timeout or 60,
-                )
-            except JSONDecodeError as exc:
-                self.setJobsArcstate(jobs, "tosubmit")
-                self.log.error(f"Invalid JSON response from ARC: {exc}")
-                continue
-            except MatchmakingError as exc:
-                self.setJobsArcstate(jobs, "cancelled")
-                self.log.error(str(exc))
-                continue
-            except Exception as exc:
-                self.setJobsArcstate(jobs, "tosubmit")
-                self.log.error(f"Error submitting jobs to ARC: {exc}", exc_info=True, stack_info=True)
-                #self.log.error(f"Error submitting jobs to ARC: {exc}")
-                continue
-            finally:
-                arcrest.close()
+                try:
+                    delegationID = arcrest.createDelegation()
+                    results = arcrest.submitJobs(
+                        descs,
+                        self.queue,
+                        delegationID,
+                        workers=self.conf.rest.upload_workers or 10,
+                        sendsize=self.conf.rest.upload_size or 8388608,  # 8MB
+                        timeout=self.conf.rest.timeout or 60,
+                    )
+                except JSONDecodeError as exc:
+                    session.execute(self.setJobsArcstate(jobids, 'tosubmit'))
+                    self.log.error(f"Invalid JSON response from ARC: {exc}")
+                    continue
+                except MatchmakingError as exc:
+                    session.execute(self.setJobsArcstate(jobids, 'cancelled'))
+                    self.log.error(str(exc))
+                    continue
+                except Exception as exc:
+                    session.execute(self.setJobsArcstate(jobids, 'tosubmit'))
+                    self.log.error(f"Error submitting jobs to ARC: {exc}", exc_info=True, stack_info=True)
+                    #self.log.error(f"Error submitting jobs to ARC: {exc}")
+                    continue
+                finally:
+                    arcrest.close()
 
-            tstamp = self.db.getTimeStamp()
+                tstamp = self.db.getTimeStamp()
 
-            # log submission results and set job state
-            for job, result in zip(jobs, results):
-                jobdict = {}
-                if result.error:
-                    error = result.value
-                    if isinstance(error, ARCError):
-                        if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError, MatchmakingError):
-                            jobdict["arcstate"] = "cancelled"
-                            self.log.error(f"Error submitting appjob({job['appjobid']}): {error}")
-                        elif isinstance(error, InputUploadError):
-                            jobdict["arcstate"] = "tocancel"
-                            jobdict["cluster"] = self.cluster
-                            jobdict["IDFromEndpoint"] = error.jobid
-                            for exc in error.errors:
-                                self.log.error(f"Error uploading input files for appjob({job['appjobid']}): {exc}")
-                            self.log.info(f"Cancelling appjob({job['appjobid']}) due to upload errors")
-                        else:
-                            jobdict["arcstate"] = "tosubmit"
-                            self.log.error(f"Error submitting appjob({job['appjobid']}): {error}")
-                else:
-                    jobid, state = result.value
-                    jobdict["arcstate"] = "submitted"
-                    jobdict["tstate"] = tstamp
-                    jobdict["ExecutionNode"] = ""
-                    jobdict["UsedTotalWallTime"] = 0
-                    jobdict["UsedTotalCPUTime"] = 0
-                    jobdict["RequestedTotalWallTime"] = 0
-                    jobdict["RequestedTotalCPUTime"] = 0
-                    jobdict["RequestedSlots"] = -1
-                    jobdict["Error"] = ""
-                    jobdict["DelegationID"] = delegationID
-                    jobdict["IDFromEndpoint"] = jobid
-                    host = self.hostname
-                    if self.port is not None:
-                        host = f"{host}:{self.port}"
-                    path = arcrest.apiPath
-                    jobdict["JobID"] = f"https://{host}{path}/jobs/{jobid}"
-                    jobdict["State"] = ARC_STATE_MAPPING[state]
-                    self.log.info(f"Submission successfull for appjob({job['appjobid']}): {jobid}")
+                # log submission results and set job state
+                for job, result in zip(jobs, results):
+                    jobdict = {}
+                    if result.error:
+                        error = result.value
+                        if isinstance(error, ARCError):
+                            if type(error) in (InputFileError, DescriptionParseError, DescriptionUnparseError, MatchmakingError):
+                                jobdict["arcstate"] = "cancelled"
+                                self.log.error(f"Error submitting appjob({job.appjobid}): {error}")
+                            elif isinstance(error, InputUploadError):
+                                jobdict["arcstate"] = "tocancel"
+                                jobdict["cluster"] = self.cluster
+                                jobdict["IDFromEndpoint"] = error.jobid
+                                for exc in error.errors:
+                                    self.log.error(f"Error uploading input files for appjob({job.appjobid}): {exc}")
+                                self.log.info(f"Cancelling appjob({job.appjobid}) due to upload errors")
+                            else:
+                                jobdict["arcstate"] = "tosubmit"
+                                self.log.error(f"Error submitting appjob({job.appjobid}): {error}")
+                    else:
+                        jobid, state = result.value
+                        jobdict["arcstate"] = "submitted"
+                        jobdict["tstate"] = tstamp
+                        jobdict["ExecutionNode"] = ""
+                        jobdict["UsedTotalWallTime"] = 0
+                        jobdict["UsedTotalCPUTime"] = 0
+                        jobdict["RequestedTotalWallTime"] = 0
+                        jobdict["RequestedTotalCPUTime"] = 0
+                        jobdict["RequestedSlots"] = -1
+                        jobdict["Error"] = ""
+                        jobdict["DelegationID"] = delegationID
+                        jobdict["IDFromEndpoint"] = jobid
+                        host = self.hostname
+                        if self.port is not None:
+                            host = f"{host}:{self.port}"
+                        path = arcrest.apiPath
+                        jobdict["JobID"] = f"https://{host}{path}/jobs/{jobid}"
+                        jobdict["State"] = ARC_STATE_MAPPING[state]
+                        self.log.info(f"Submission successfull for appjob({job.appjobid}): {jobid}")
 
-                jobdict["tarcstate"] = tstamp
-                self.db.updateArcJob(job["id"], jobdict)
+                    jobdict["tarcstate"] = tstamp
+                    session.execute(update(ArcJob).where(ArcJob.id==job.id).values(**jobdict))
 
             nsubmitted += limit
 
         self.log.info("Done")
 
     def setJobsArcstate(self, jobs, arcstate):
-        self.log.info(f"Setting arcstate of jobs to {arcstate}")
-        tstamp = self.db.getTimeStamp()
-        for job in jobs:
-            updateDict = {"arcstate": arcstate, "tarcstate": tstamp}
-            self.db.updateArcJob(job["id"], updateDict)
+        stmt = update(ArcJob)
+        if isinstance(jobs, list):
+            self.log.info(f"Setting arcstate of jobs to {arcstate}")
+            stmt = stmt.where(ArcJob.id.in_(jobs))
+        else:
+            stmt = stmt.where(ArcJob==jobs)
+        return stmt.values(arcstate=arcstate, tarcstate=self.db.getTimeStamp())
 
     def checkFailedSubmissions(self):
         """
@@ -233,14 +251,16 @@ class aCTSubmitter(aCTARCProcess):
         Signal handling strategy:
         - termination is checked before handling every job
         """
-        dbjobs = self.db.getArcJobsInfo(f"arcstate='tosubmit' and cluster='{self.cluster}'", ["id", "appjobid", "created"])
-        tstamp = self.db.getTimeStamp()
-        for job in dbjobs:
-            self.stopOnFlag()
-            # TODO: HARDCODED
-            if job["created"] + datetime.timedelta(hours=1) < datetime.datetime.utcnow():
-                self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
-                self.log.warning(f"Cancelling appjob({job['appjobid']}) for being too long in tosubmit")
+        with self.db.Session.begin() as session:
+            tstamp = self.db.getTimeStamp()
+            limit = tstamp - datetime.timedelta(hours=1)
+            dbjobs = session.execute(select(ArcJob.id, ArcJob.appjobid) \
+                                     .where(ArcJob.arcstate=='tosubmit', ArcJob.cluster==self.cluster, ArcJob.created<limit)
+                                     .with_for_update()).all()
+            if dbjobs:
+                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in dbjobs])).values(arcstate='tocancel', tarcstate=tstamp))
+                for job in dbjobs:
+                    self.log.warning(f"Cancelling appjob({job.appjobid}) for being too long in tosubmit")
 
     def processToCancel(self):
         """
@@ -249,39 +269,35 @@ class aCTSubmitter(aCTARCProcess):
         Signal handling strategy:
         - termination is checked before handling every proxyid job batch
         """
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate"]
-        jobstocancel = self.db.getArcJobsInfo(
-            f"arcstate='tocancel' and cluster='{self.cluster}'",
-            COLUMNS
-        )
-        if not jobstocancel:
-            return
-
         # make jobs that are taking too long cancelled
-        now = datetime.datetime.utcnow()
-        tstamp = self.db.getTimeStamp()
-        # TODO: HARDCODED
-        limit = datetime.timedelta(hours=1)
-        tocancel = []
-        for job in jobstocancel:
-            if job["tarcstate"] + limit < now:
-                self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                self.log.warning(f"Could not cancel appjob({job['appjobid']}) in time, setting to cancelled")
-            else:
-                tocancel.append(job)
+        with self.db.Session.begin() as session:
+            tstamp = self.db.getTimeStamp()
+            # TODO: HARDCODED
+            limit = tstamp - datetime.timedelta(hours=1)
+            jobstocancel = session.execute(select(ArcJob.id, ArcJob.appjobid) \
+                                           .where(ArcJob.arcstate=='tocancel', ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit)).all()
+            if jobstocancel:
+                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobstocancel])).values(arcstate='cancelled', tarcstate=tstamp))
+                for job in jobstocancel:
+                    self.log.warning(f"Could not cancel appjob({job.appjobid}) in time, setting to cancelled")
 
+        # cancel remaining jobs in tocancel state
+        with self.db.Session() as session:
+            tocancel = session.execute(select(ArcJob.id, ArcJob.proxyid, ArcJob.appjobid, ArcJob.IDFromEndpoint) \
+                                            .where(ArcJob.arcstate=='tocancel', ArcJob.cluster==self.cluster)).all()
+        
+        if not tocancel:
+            self.log.info(f"Nothing to cancel")
+            return
         self.log.info(f"Cancelling {len(tocancel)} jobs")
 
         # aggregate jobs by proxyid
-        jobsdict = {}
-        for row in tocancel:
-            if not row["proxyid"] in jobsdict:
-                jobsdict[row["proxyid"]] = []
-            jobsdict[row["proxyid"]].append(row)
-
+        jobsdict = defaultdict(list)
+        for job in tocancel:
+            jobsdict[job.proxyid].append(job)
+        
         for proxyid, dbjobs in jobsdict.items():
             self.stopOnFlag()
-
             # partition the jobs based on whether they are in ARC; ARC jobs
             # need to be killed in ARC first, others can be set to cancelled
             # directly
@@ -289,9 +305,9 @@ class aCTSubmitter(aCTARCProcess):
             arcids = []
             cancelled = []
             for dbjob in dbjobs:
-                if dbjob.get("IDFromEndpoint", None):
+                if dbjob.IDFromEndpoint is not None:
                     toARCKill.append(dbjob)
-                    arcids.append(dbjob["IDFromEndpoint"])
+                    arcids.append(dbjob.IDFromEndpoint)
                 else:
                     cancelled.append(dbjob)
 
@@ -313,26 +329,28 @@ class aCTSubmitter(aCTARCProcess):
                 arcrest.close()
 
             tstamp = self.db.getTimeStamp()
+            
+            with self.db.Session.begin() as session:
+                # log ARC results and update DB
+                for job, result in zip(toARCKill, results):
+                    if result.error:
+                        error = result.value
+                        if isinstance(error, ARCHTTPError):
+                            state = "cancelled"
+                            if error.status == 404:
+                                self.log.warning(f"appjob({job.appjobid}) missing in ARC, setting to cancelled")
+                            else:
+                                self.log.error(f"Error killing appjob({job.appjobid}): {error.status} {error.text}")
+                    else:
+                        state = "cancelling"
+                        self.log.info(f"ARC will cancel appjob({job.appjobid})")
+                    session.execute(update(ArcJob).where(ArcJob.id==job.id).values(arcstate=state, tarcstate=tstamp))
 
-            # log ARC results and update DB
-            for job, result in zip(toARCKill, results):
-                if result.error:
-                    error = result.value
-                    if isinstance(error, ARCHTTPError):
-                        state = "cancelled"
-                        if error.status == 404:
-                            self.log.warning(f"appjob({job['appjobid']}) missing in ARC, setting to cancelled")
-                        else:
-                            self.log.error(f"Error killing appjob({job['appjobid']}): {error.status} {error.text}")
-                else:
-                    state = "cancelling"
-                    self.log.info(f"ARC will cancel appjob({job['appjobid']})")
-                self.db.updateArcJob(job["id"], {"arcstate": state, "tarcstate": tstamp})
-
-            # update DB for jobs not in ARC
-            for job in cancelled:
-                self.db.updateArcJob(job["id"], {"arcstate": "cancelled", "tarcstate": tstamp})
-                self.log.info(f"appjob({job['appjobid']}) not in ARC, setting to cancelled directly")
+                # update DB for jobs not in ARC
+                if cancelled:
+                    session.execute(self.setJobsArcstate([job.id for job in cancelled], 'cancelled'))
+                    for job in cancelled:
+                        self.log.info(f"appjob({job.appjobid}) not in ARC, setting to cancelled directly")
 
     def processToResubmit(self):
         """
@@ -344,37 +362,30 @@ class aCTSubmitter(aCTARCProcess):
         Signal handling strategy:
         - termination is checked before handling every proxyid job batch
         """
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate"]
-
-        # fetch jobs from DB
-        jobstoresubmit = self.db.getArcJobsInfo(
-            f"arcstate='toresubmit' and cluster='{self.cluster}'",
-            COLUMNS
-        )
-        if not jobstoresubmit:
-            return
-
         # fail jobs that are taking too long
-        now = datetime.datetime.utcnow()
-        tstamp = self.db.getTimeStamp()
-        # TODO: HARDCODED
-        limit = datetime.timedelta(hours=1)
-        toresubmit = []
-        for job in jobstoresubmit:
-            if job["tarcstate"] + limit < now:
-                self.db.updateArcJob(job["id"], {"arcstate": "failed", "tarcstate": tstamp, "attemptsleft": 0})
-                self.log.warning(f"Could not resubmit appjob({job['appjobid']}) in time, setting to failed")
-            else:
-                toresubmit.append(job)
+        with self.db.Session.begin() as session:
+            tstamp = self.db.getTimeStamp()
+            limit = tstamp - datetime.timedelta(hours=1)
+            jobstoresubmit = session.execute(select(ArcJob.id, ArcJob.appjobid) \
+                                             .where(ArcJob.arcstate=='toresubmit', ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit)).all()
+            if jobstoresubmit:
+                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobstoresubmit])).values(arcstate='failed', tarcstate=tstamp, attemptsleft=0))
+                for job in jobstoresubmit:
+                    self.log.warning(f"Could not resubmit appjob({job.appjobid}) in time, setting to failed")
 
+        # resubmit remaining jobs
+        with self.db.Session() as session:
+            toresubmit = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.proxyid, ArcJob.IDFromEndpoint) \
+                                             .where(ArcJob.arcstate=='toresubmit', ArcJob.cluster==self.cluster)).all()
+        if not toresubmit:
+            self.log.info(f"Nothing to resubmit")
+            return
         self.log.info(f"Resubmitting {len(toresubmit)} jobs")
 
         # aggregate jobs by proxyid
-        jobsdict = {}
-        for row in toresubmit:
-            if not row["proxyid"] in jobsdict:
-                jobsdict[row["proxyid"]] = []
-            jobsdict[row["proxyid"]].append(row)
+        jobsdict = defaultdict(list)
+        for job in toresubmit:
+            jobsdict[job.proxyid].append(job)
 
         for proxyid, dbjobs in jobsdict.items():
             self.stopOnFlag()
@@ -383,9 +394,9 @@ class aCTSubmitter(aCTARCProcess):
             toARCClean = []
             arcids = []
             for dbjob in dbjobs:
-                if dbjob.get("IDFromEndpoint", None):
+                if dbjob.IDFromEndpoint is not None:
                     toARCClean.append(dbjob)
-                    arcids.append(dbjob["IDFromEndpoint"])
+                    arcids.append(dbjob.IDFromEndpoint)
 
             # get REST client
             arcrest = self.getARCClient(proxyid)
@@ -409,18 +420,17 @@ class aCTSubmitter(aCTARCProcess):
                 if result.error:
                     error = result.value
                     if isinstance(error, ARCHTTPError):
-                        self.log.error(f"Error cleaning appjob({job['appjobid']}): {error.status} {error.text}")
+                        self.log.error(f"Error cleaning appjob({job.appjobid}): {error.status} {error.text}")
                 else:
-                    self.log.info(f"Successfully cleaned appjob({job['appjobid']})")
+                    self.log.info(f"Successfully cleaned appjob({job.appjobid})")
 
             tstamp = self.db.getTimeStamp()
 
             # set jobs for resubmission in DB
-            for job in dbjobs:
-                # "created" needs to be reset so that it doesn't get understood
-                # as failing to submit since first insertion.
-                jobdict = {"arcstate": "tosubmit", "tarcstate": tstamp, "created": tstamp}
-                self.db.updateArcJob(job["id"], jobdict)
+            # "created" needs to be reset so that it doesn't get understood
+            # as failing to submit since first insertion.
+            with self.db.Session.begin() as session:
+                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in dbjobs])).values(arcstate='tosubmit', tarcstate=tstamp, created=tstamp))
 
     def processToRerun(self):
         """
@@ -429,37 +439,31 @@ class aCTSubmitter(aCTARCProcess):
         Signal handling strategy:
         - termination is checked before handling every proxyid job batch
         """
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "tarcstate"]
-
-        # fetch jobs from DB
-        jobstorerun = self.db.getArcJobsInfo(
-            f"arcstate='torerun' and cluster='{self.cluster}'",
-            COLUMNS
-        )
-        if not jobstorerun:
-            return
-
         # fail jobs that are taking too long
-        now = datetime.datetime.utcnow()
-        tstamp = self.db.getTimeStamp()
-        # TODO: HARDCODED
-        limit = datetime.timedelta(hours=1)
-        torerun = []
-        for job in jobstorerun:
-            if job["tarcstate"] + limit < now:
-                self.db.updateArcJob(job["id"], {"arcstate": "failed", "tarcstate": tstamp})
-                self.log.warning(f"Could not restart appjob({job['appjobid']}) in time, setting to failed")
-            else:
-                torerun.append(job)
+        with self.db.Session.begin() as session:
+            tstamp = self.db.getTimeStamp()
+            limit = tstamp - datetime.timedelta(hours=1)
+            jobstorerun = session.execute(select(ArcJob.id, ArcJob.appjobid) \
+                                             .where(ArcJob.arcstate=='torerun', ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit)).all()
+            if jobstorerun:
+                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobstorerun])).values(arcstate='failed', tarcstate=tstamp))
+                for job in jobstorerun:
+                    self.log.warning(f"Could not restart appjob({job.appjobid}) in time, setting to failed")
 
+        # rerun remaining jobs
+        with self.db.Session() as session:
+            torerun = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.proxyid, ArcJob.IDFromEndpoint) \
+                                      .where(ArcJob.arcstate=='torerun', ArcJob.cluster==self.cluster)).all()
+
+        if not torerun:
+            self.log.info(f"Nothing to rerun")
+            return
         self.log.info(f"Resuming {len(torerun)} jobs")
 
         # aggregate jobs by proxyid
-        jobsdict = {}
-        for row in torerun:
-            if not row["proxyid"] in jobsdict:
-                jobsdict[row["proxyid"]] = []
-            jobsdict[row["proxyid"]].append(row)
+        jobsdict = defaultdict(list)
+        for job in torerun:
+            jobsdict[job.proxyid].append(job)
 
         for proxyid, dbjobs in jobsdict.items():
             self.stopOnFlag()
@@ -470,7 +474,7 @@ class aCTSubmitter(aCTARCProcess):
                 continue
 
             # get job delegations
-            arcids = [job["IDFromEndpoint"] for job in dbjobs]
+            arcids = [job.IDFromEndpoint for job in dbjobs]
             try:
                 results = arcrest.getJobsDelegations(arcids)
             except Exception as exc:
@@ -486,9 +490,9 @@ class aCTSubmitter(aCTARCProcess):
                 if result.error:
                     error = result.value
                     if isinstance(error, ARCHTTPError):
-                        self.log.error(f"Error getting delegations for appjob({job['appjobid']}): {error.status} {error.text}")
+                        self.log.error(f"Error getting delegations for appjob({job.appjobid}): {error.status} {error.text}")
                     elif isinstance(error, NoValueInARCResult):
-                        self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF DELEGATIONS FOR appjob({job['appjobid']})")
+                        self.log.error(f"NO VALUE IN SUCCESSFUL FETCH OF DELEGATIONS FOR appjob({job.appjobid})")
                 else:
                     delegations = result.value
                     try:
@@ -498,11 +502,11 @@ class aCTSubmitter(aCTARCProcess):
                             arcrest.refreshDelegation(delegations[0])
                             renewed.add(delegations[0])
                     except Exception as exc:
-                        self.log.error(f"Failed to renew delegation for appjob({job['appjobid']}): {exc}")
+                        self.log.error(f"Failed to renew delegation for appjob({job.appjobid}): {exc}")
                     else:
-                        self.log.info(f"Successfully renewed delegation {delegations[0]} for appjob({job['appjobid']})")
+                        self.log.info(f"Successfully renewed delegation {delegations[0]} for appjob({job.appjobid})")
                         torestart.append(job)
-                        arcids.append(job["IDFromEndpoint"])
+                        arcids.append(job.IDFromEndpoint)
 
             # restart jobs
             try:
@@ -519,25 +523,26 @@ class aCTSubmitter(aCTARCProcess):
             tstamp = self.db.getTimeStamp()
 
             # log results and update DB
-            for job, result in zip(torestart, results):
-                if result.error:
-                    error = result.value
-                    if isinstance(error, ARCHTTPError):
-                        if error.status == 505 and error.text == "No more restarts allowed":
-                            self.db.updateArcJob(job["id"], {"arcstate": "failed", "State": "Failed", "tarcstate": tstamp, "tstate": tstamp})
-                            self.log.error(f"Restart of appjob({job['appjobid']}) not allowed, setting to failed")
-                        elif error.status == 505 and error.text == "Job has not failed":
-                            self.db.updateArcJob(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
-                            self.log.warning(f"appjob({job['appjobid']}) has not failed, setting to submitted")
-                        elif error.status == 404:
-                            self.db.updateArcJob(job["id"], {"arcstate": "tocancel", "tarcstate": tstamp})
-                            self.log.warning(f"appjob({job['appjobid']}) not found, cancelling")
-                        else:
-                            self.db.updateArcJob(job["id"], {"arcstate": "torerun", "tarcstate": tstamp})
-                            self.log.error(f"Error rerunning appjob({job['appjobid']}): {error.status} {error.text}")
-                else:
-                    self.db.updateArcJob(job["id"], {"arcstate": "submitted", "tarcstate": tstamp})
-                    self.log.info(f"Successfully rerun appjob({job['appjobid']})")
+            with self.db.Session.begin() as session:
+                for job, result in zip(torestart, results):
+                    if result.error:
+                        error = result.value
+                        if isinstance(error, ARCHTTPError):
+                            if error.status == 505 and error.text == "No more restarts allowed":
+                                session.execute(update(ArcJob).where(ArcJob.id==job.id).values(arcstate='failed', State='Failed', tarcstate=tstamp, tstate=tstamp))
+                                self.log.error(f"Restart of appjob({job.appjobid}) not allowed, setting to failed")
+                            elif error.status == 505 and error.text == "Job has not failed":
+                                session.execute(self.setJobsArcstate(job.id, 'submitted'))
+                                self.log.warning(f"appjob({job.appjobid}) has not failed, setting to submitted")
+                            elif error.status == 404:
+                                session.execute(self.setJobsArcstate(job.id, 'tocancel'))
+                                self.log.warning(f"appjob({job.appjobid}) not found, cancelling")
+                            else:
+                                session.execute(self.setJobsArcstate(job.id, 'torerun'))
+                                self.log.error(f"Error rerunning appjob({job.appjobid}): {error.status} {error.text}")
+                    else:
+                        session.execute(self.setJobsArcstate(job.id, 'submitted'))
+                        self.log.info(f"Successfully rerun appjob({job.appjobid})")
 
     def process(self):
         # process jobs which have to be cancelled

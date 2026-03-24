@@ -155,7 +155,7 @@ class JobManager(object):
         with self.clidb.Session.begin() as session:
             jobs = self.clidb.getJoinJobsInfo(proxyid, session,
                                     jobids=jobids, state_filter=state_filter, name_filter=name_filter,
-                                    clicols=['id'], arccols=['id', 'arcstate', 'JobID'], forupdate=True)
+                                    clicols=['id'], arccols=['id', 'arcstate', 'JobID'])
             if not jobs:
                 return []
 
@@ -203,7 +203,7 @@ class JobManager(object):
         with self.clidb.Session.begin() as session:
             jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids,
                                     state_filter=['failed'], name_filter=name_filter,
-                                    clicols=['id'], arccols=['id'], forupdate=True)
+                                    clicols=['id'], arccols=['id'])
 
             if not jobs:
                 return []
@@ -345,7 +345,7 @@ class JobManager(object):
         with self.clidb.Session.begin() as session:
             jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids, 
                                     state_filter=['failed', 'donefailed'], name_filter=name_filter,
-                                    clicols=['id'], arccols=['id'], forupdate=True)
+                                    clicols=['id'], arccols=['id'])
 
             if not jobs:
                 return[]
