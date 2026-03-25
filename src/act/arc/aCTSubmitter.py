@@ -13,7 +13,6 @@ from pyarcrest.errors import (ARCError, ARCHTTPError, DescriptionParseError,
                               NoValueInARCResult)
 from sqlalchemy import select, or_, update
 from sqlalchemy.sql import func
-from sqlalchemy.orm import joinedload, undefer
 
 
 class aCTSubmitter(aCTARCProcess):

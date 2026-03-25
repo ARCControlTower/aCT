@@ -2,9 +2,12 @@ import datetime
 import os
 import shutil
 from json import JSONDecodeError
+from collections import defaultdict
 
-from act.arc.aCTARCProcess import aCTARCProcess
+from act.arc.aCTARCProcessNEW import aCTARCProcess
+from act.arc.aCTDBARCModels import ArcJob
 from pyarcrest.errors import MissingDiagnoseFile, MissingResultFile
+from sqlalchemy import select, update
 
 # TODO: document downloadfiles syntax
 # TODO: HARDCODED
@@ -27,38 +30,34 @@ class aCTFetcher(aCTARCProcess):
         Signal handling strategy:
         - method checks termination before job batch for every proxyid
         """
-        COLUMNS = ["id", "appjobid", "proxyid", "IDFromEndpoint", "downloadfiles", "tarcstate"]
-
-        # TODO: HARDCODED
-        jobstofetch = self.db.getArcJobsInfo(f"arcstate='{arcstate}' and cluster='{self.cluster}' limit 100", COLUMNS)
-
-        if not jobstofetch:
-            return
-
         # fail jobs that are taking too long
-        now = datetime.datetime.utcnow()
-        tstamp = self.db.getTimeStamp()
-        # TODO: HARDCODED
-        if arcstate == "tofetch":
-            limit = datetime.timedelta(hours=1)
-        elif arcstate == "finished":
-            limit = datetime.timedelta(hours=24)
-        tofetch = []
-        for job in jobstofetch:
-            if job["tarcstate"] + limit < now:
-                self.db.updateArcJob(job["id"], {"arcstate": "donefailed", "tarcstate": tstamp})
-                self.log.warning(f"Could not fetch appjob({job['appjobid']}) in time, setting to donefailed")
-            else:
-                tofetch.append(job)
+        with self.db.Session.begin() as session:
+            tstamp = self.db.getTimeStamp()
+            if arcstate=='tofetch':
+                limit = tstamp - datetime.timedelta(hours=1)
+            elif arcstate=='finished':
+                limit = tstamp - datetime.timedelta(hours=24)
+            jobstofetch = session.execute(select(ArcJob.id, ArcJob.appjobid) \
+                                             .where(ArcJob.arcstate==arcstate, ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit)).all()
+            if jobstofetch:
+                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobstofetch])).values(arcstate='donefailed', tarcstate=tstamp))
+                for job in jobstofetch:
+                    self.log.warning(f"Could not fetch appjob({job.appjobid}) in time, setting to donefailed")
 
+        # fetch remaining jobs
+        with self.db.Session() as session:
+            tofetch = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.proxyid, ArcJob.IDFromEndpoint, ArcJob.downloadfiles) \
+                                      .where(ArcJob.arcstate==arcstate, ArcJob.cluster==self.cluster).limit(100)).all()
+
+        if not tofetch:
+            self.log.info(f"Nothing to fetch")
+            return
         self.log.info(f"Fetching {len(tofetch)} jobs")
-
+        
         # aggregate jobs by proxyid
-        jobsdict = {}
-        for row in tofetch:
-            if not row["proxyid"] in jobsdict:
-                jobsdict[row["proxyid"]] = []
-            jobsdict[row["proxyid"]].append(row)
+        jobsdict = defaultdict(list)
+        for job in tofetch:
+            jobsdict[job.proxyid].append(job)
 
         for proxyid, dbjobs in jobsdict.items():
             self.stopOnFlag()
@@ -69,9 +68,9 @@ class aCTFetcher(aCTARCProcess):
             diagnoseFiles = {}
             diagnoseDirs = {}
             for dbjob in dbjobs:
-                arcid = dbjob["IDFromEndpoint"]
+                arcid = dbjob.IDFromEndpoint
                 arcids.append(arcid)
-                downloadfiles = dbjob.get("downloadfiles", None)
+                downloadfiles = dbjob.downloadfiles
                 refilter = ""
                 if downloadfiles:
                     # If there are multiple conflicting diagnose= entries,
@@ -143,27 +142,28 @@ class aCTFetcher(aCTARCProcess):
                 arcrest.close()
 
             # process results
-            for job, errors in zip(dbjobs, results):
-                isError = False
-                for error in errors:
-                    # don't treat missing diagnose file as fail
-                    if isinstance(error, MissingDiagnoseFile):
-                        self.log.info(f"Skipping the missing diagnose file \"{error.filename}\" for appjob({job['appjobid']})")
+            with self.db.Session.begin() as session:
+                tstamp = self.db.getTimeStamp()
+                for job, errors in zip(dbjobs, results):
+                    isError = False
+                    for error in errors:
+                        # don't treat missing diagnose file as fail
+                        if isinstance(error, MissingDiagnoseFile):
+                            self.log.info(f"Skipping the missing diagnose file \"{error.filename}\" for appjob({job.appjobid})")
 
-                    # missing result file -> error
-                    elif isinstance(error, MissingResultFile):
-                        isError = True
-                        self.log.error(f"Error fetching appjob({job['appjobid']}): missing file {error.filename}")
+                        # missing result file -> error
+                        elif isinstance(error, MissingResultFile):
+                            isError = True
+                            self.log.error(f"Error fetching appjob({job.appjobid}): missing file {error.filename}")
 
-                    # all other errors are fails as well
-                    else:
-                        isError = True
-                        self.log.error(f"Error fetching appjob({job['appjobid']}): {error}")
+                        # all other errors are fails as well
+                        else:
+                            isError = True
+                            self.log.error(f"Error fetching appjob({job.appjobid}): {error}")
 
-                jobdict = {"arcstate": nextarcstate, "tarcstate": self.db.getTimeStamp()}
-                if not isError:
-                    self.db.updateArcJob(job["id"], jobdict)
-                    self.log.info(f"Successfully fetched appjob({job['appjobid']})")
+                    if not isError:
+                        session.execute(update(ArcJob).where(ArcJob.id==job.id).values(arcstate=nextarcstate, tarcstate=tstamp))
+                        self.log.info(f"Successfully fetched appjob({job.appjobid})")
 
         self.log.info("Done")
 
