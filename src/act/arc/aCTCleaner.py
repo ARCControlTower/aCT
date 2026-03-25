@@ -32,7 +32,7 @@ class aCTCleaner(aCTARCProcess):
 
         # clean remaining jobs
         with self.db.Session() as session:
-            toclean = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.proxyid, ArcJob.IDFromEndpoint) \
+            toclean = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.proxyid, ArcJob.IDFromEndpoint, ArcJob.jobdesc) \
                                       .where(ArcJob.arcstate=='toclean', ArcJob.cluster==self.cluster).limit(100)).all()
 
         if not toclean:
