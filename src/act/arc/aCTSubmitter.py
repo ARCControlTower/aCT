@@ -155,7 +155,7 @@ class aCTSubmitter(aCTARCProcess):
 
             with self.db.Session.begin() as session:
                 if not arcrest:
-                    session.execute(self.setJobsArcstate(jobids, 'tosubmit'))
+                    session.execute(self.db.setJobsArcstate(jobids, 'tosubmit'))
                     continue
 
             # submit jobs to ARC
@@ -170,15 +170,15 @@ class aCTSubmitter(aCTARCProcess):
                         timeout=self.conf.rest.timeout or 60,
                     )
                 except JSONDecodeError as exc:
-                    session.execute(self.setJobsArcstate(jobids, 'tosubmit'))
+                    session.execute(self.db.setJobsArcstate(jobids, 'tosubmit'))
                     self.log.error(f"Invalid JSON response from ARC: {exc}")
                     continue
                 except MatchmakingError as exc:
-                    session.execute(self.setJobsArcstate(jobids, 'cancelled'))
+                    session.execute(self.db.setJobsArcstate(jobids, 'cancelled'))
                     self.log.error(str(exc))
                     continue
                 except Exception as exc:
-                    session.execute(self.setJobsArcstate(jobids, 'tosubmit'))
+                    session.execute(self.db.setJobsArcstate(jobids, 'tosubmit'))
                     self.log.error(f"Error submitting jobs to ARC: {exc}", exc_info=True, stack_info=True)
                     #self.log.error(f"Error submitting jobs to ARC: {exc}")
                     continue
@@ -234,15 +234,6 @@ class aCTSubmitter(aCTARCProcess):
 
         self.log.info("Done")
 
-    def setJobsArcstate(self, jobs, arcstate):
-        stmt = update(ArcJob)
-        if isinstance(jobs, list):
-            self.log.info(f"Setting arcstate of jobs to {arcstate}")
-            stmt = stmt.where(ArcJob.id.in_(jobs))
-        else:
-            stmt = stmt.where(ArcJob==jobs)
-        return stmt.values(arcstate=arcstate, tarcstate=self.db.getTimeStamp())
-
     def checkFailedSubmissions(self):
         """
         Cancel jobs that are too long in submitting.
@@ -257,7 +248,7 @@ class aCTSubmitter(aCTARCProcess):
                                      .where(ArcJob.arcstate=='tosubmit', ArcJob.cluster==self.cluster, ArcJob.created<limit)
                                      .with_for_update()).all()
             if dbjobs:
-                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in dbjobs])).values(arcstate='tocancel', tarcstate=tstamp))
+                session.execute(self.db.setJobsArcstate([job.id for job in dbjobs], 'tocancel'))
                 for job in dbjobs:
                     self.log.warning(f"Cancelling appjob({job.appjobid}) for being too long in tosubmit")
 
@@ -276,7 +267,7 @@ class aCTSubmitter(aCTARCProcess):
             jobstocancel = session.execute(select(ArcJob.id, ArcJob.appjobid) \
                                            .where(ArcJob.arcstate=='tocancel', ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit)).all()
             if jobstocancel:
-                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobstocancel])).values(arcstate='cancelled', tarcstate=tstamp))
+                session.execute(self.db.setJobsArcstate([job.id for job in jobstocancel], 'cancelled'))
                 for job in jobstocancel:
                     self.log.warning(f"Could not cancel appjob({job.appjobid}) in time, setting to cancelled")
 
@@ -347,7 +338,7 @@ class aCTSubmitter(aCTARCProcess):
 
                 # update DB for jobs not in ARC
                 if cancelled:
-                    session.execute(self.setJobsArcstate([job.id for job in cancelled], 'cancelled'))
+                    session.execute(self.db.setJobsArcstate([job.id for job in cancelled], 'cancelled'))
                     for job in cancelled:
                         self.log.info(f"appjob({job.appjobid}) not in ARC, setting to cancelled directly")
 
@@ -445,7 +436,7 @@ class aCTSubmitter(aCTARCProcess):
             jobstorerun = session.execute(select(ArcJob.id, ArcJob.appjobid) \
                                              .where(ArcJob.arcstate=='torerun', ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit)).all()
             if jobstorerun:
-                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobstorerun])).values(arcstate='failed', tarcstate=tstamp))
+                session.execute(self.db.setJobsArcstate([job.id for job in jobstorerun], 'failed'))
                 for job in jobstorerun:
                     self.log.warning(f"Could not restart appjob({job.appjobid}) in time, setting to failed")
 
@@ -531,16 +522,16 @@ class aCTSubmitter(aCTARCProcess):
                                 session.execute(update(ArcJob).where(ArcJob.id==job.id).values(arcstate='failed', State='Failed', tarcstate=tstamp, tstate=tstamp))
                                 self.log.error(f"Restart of appjob({job.appjobid}) not allowed, setting to failed")
                             elif error.status == 505 and error.text == "Job has not failed":
-                                session.execute(self.setJobsArcstate(job.id, 'submitted'))
+                                session.execute(self.db.setJobsArcstate(job.id, 'submitted'))
                                 self.log.warning(f"appjob({job.appjobid}) has not failed, setting to submitted")
                             elif error.status == 404:
-                                session.execute(self.setJobsArcstate(job.id, 'tocancel'))
+                                session.execute(self.db.setJobsArcstate(job.id, 'tocancel'))
                                 self.log.warning(f"appjob({job.appjobid}) not found, cancelling")
                             else:
-                                session.execute(self.setJobsArcstate(job.id, 'torerun'))
+                                session.execute(self.db.setJobsArcstate(job.id, 'torerun'))
                                 self.log.error(f"Error rerunning appjob({job.appjobid}): {error.status} {error.text}")
                     else:
-                        session.execute(self.setJobsArcstate(job.id, 'submitted'))
+                        session.execute(self.db.setJobsArcstate(job.id, 'submitted'))
                         self.log.info(f"Successfully rerun appjob({job.appjobid})")
 
     def process(self):

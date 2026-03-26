@@ -490,6 +490,15 @@ class aCTDBArc(aCTDB):
         # remove file first
         session.execute(delete(Proxy).where(Proxy.id==id))
 
+    def setJobsArcstate(self, jobs, arcstate):
+        stmt = update(ArcJob)
+        tstamp = self.getTimeStamp()
+        if isinstance(jobs, list):
+            stmt = stmt.where(ArcJob.id.in_(jobs))
+        else:
+            stmt = stmt.where(ArcJob.id==jobs)
+        return stmt.values(arcstate=arcstate, tarcstate=tstamp)
+
 if __name__ == '__main__':
     import logging, sys
     log = logging.getLogger()

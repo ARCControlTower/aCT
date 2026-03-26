@@ -40,7 +40,7 @@ class aCTFetcher(aCTARCProcess):
             jobstofetch = session.execute(select(ArcJob.id, ArcJob.appjobid) \
                                              .where(ArcJob.arcstate==arcstate, ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit)).all()
             if jobstofetch:
-                session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobstofetch])).values(arcstate='donefailed', tarcstate=tstamp))
+                session.execute(self.db.setJobsArcstate([job.id for job in jobstofetch], 'donefailed'))
                 for job in jobstofetch:
                     self.log.warning(f"Could not fetch appjob({job.appjobid}) in time, setting to donefailed")
 

@@ -210,7 +210,7 @@ class JobManager(object):
             c_ids = [c_id for c_id, _ in jobs]
             a_ids = [a_id for _, a_id in jobs]
 
-            self.clidb.updateArcstate(a_ids, 'tofetch', session)
+            self.clidb.updateArcstate(session=session, jobids=a_ids, arcstate='tofetch')
         return c_ids
 
     def getJobs(self, proxyid, jobids=None, state_filter=None, name_filter=None):
