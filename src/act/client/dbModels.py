@@ -1,7 +1,7 @@
 from sqlalchemy import Integer, String, ForeignKey, TIMESTAMP, Text, SmallInteger, DateTime, LargeBinary
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, declared_attr
 from datetime import datetime, timezone
-from act.arc.aCTDBARCModels import Base, ArcJob, Proxy
+from act.arc.dbModels import Base, ArcJob, Proxy
 from typing import Optional
 
 class ClientJob(Base):

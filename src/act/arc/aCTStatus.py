@@ -80,7 +80,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 from act.arc.aCTARCProcessNEW import aCTARCProcess
-from act.arc.aCTDBARCModels import ArcJob, JobDescription
+from act.arc.dbModels import ArcJob, JobDescription
 from pyarcrest.errors import ARCError, ARCHTTPError, NoValueInARCResult
 from sqlalchemy import select, update, delete
 from sqlalchemy.sql import func

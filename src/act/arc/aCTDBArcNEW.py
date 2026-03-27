@@ -1,12 +1,11 @@
 from act.db.aCTDBNEW import aCTDB
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, ForeignKey, select, update, TIMESTAMP, text, Text, SmallInteger, DateTime, LargeBinary, insert, delete
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, declared_attr
+from sqlalchemy import select, update, insert, delete
 from sqlalchemy.sql import func
 import datetime
 import re
 import os
 import arc
-from act.arc.aCTDBARCModels import JobDescription, ArcJob, Proxy
+from act.arc.dbModels import JobDescription, ArcJob, Proxy
 
 class aCTDBArc(aCTDB):
 
@@ -15,7 +14,6 @@ class aCTDBArc(aCTDB):
 
         self.proxydir = self.conf.voms.proxystoredir
 
-    def createTables(self):
         '''
         arcjobs: columns are attributes of arc.Job plus the following:
           - id:
@@ -54,89 +52,6 @@ class aCTDBArc(aCTDB):
           - myproxyid: id from myproxy
           - expirytime: timestamp for when proxy is expiring
         '''
-
-        # in MySQL the first timestamp specified gets automatically updated to
-        # current time for each change.
-        create="""CREATE TABLE arcjobs (
-            id INTEGER PRIMARY KEY AUTO_INCREMENT,
-            modified TIMESTAMP,
-            created TIMESTAMP,
-            arcstate VARCHAR(12),
-            tarcstate TIMESTAMP,
-            tstate TIMESTAMP,
-            cluster VARCHAR(255),
-            clusterlist VARCHAR(1024),
-            jobdesc INT(11),
-            attemptsleft INTEGER,
-            downloadfiles VARCHAR(255),
-            proxyid INTEGER,
-            appjobid VARCHAR(16),
-            priority SMALLINT,
-            fairshare VARCHAR(50),
-            """+",".join(['%s %s' % (k, self.jobattrmap[v]) for k, v in self.jobattrs.items()])+")"
-
-        # First check if table already exists
-        c = self.db.getCursor()
-        c.execute("show tables like 'arcjobs'")
-        row = c.fetchone()
-        self.Commit()
-        if row:
-            answer = input("Table arcjobs already exists!\nAre you sure you want to recreate it? (y/n) ")
-            if answer != 'y':
-                return True
-            c.execute("drop table arcjobs")
-
-        # Create arcjobs
-        self.log.info("creating arcjobs table")
-        try:
-            c.execute(create)
-            self.Commit()
-        except Exception as x:
-            self.log.error("failed create table %s" %x)
-            return False
-
-        # Create job description table
-        self.log.info("creating jobdescriptions table")
-        create="""CREATE TABLE jobdescriptions (
-            id INTEGER PRIMARY KEY AUTO_INCREMENT,
-            jobdescription mediumtext)
-            """
-        try:
-            c.execute("drop table jobdescriptions")
-        except:
-            pass
-        try:
-            c.execute(create)
-            # add indexes
-            c.execute("ALTER TABLE arcjobs ADD INDEX (arcstate)")
-            self.Commit()
-        except Exception as x:
-            self.log.error("failed create table %s" %x)
-            return False
-
-        # Create proxies table (can be dropped without asking)
-        self.log.info("creating proxies table")
-        create="""CREATE TABLE proxies (
-            id INTEGER PRIMARY KEY AUTO_INCREMENT,
-            proxy BLOB,
-            expirytime DATETIME,
-            proxypath VARCHAR(255),
-            dn VARCHAR(255),
-            attribute VARCHAR(255),
-            proxytype VARCHAR(255),
-            myproxyid VARCHAR(255) )"""
-        try:
-            c.execute("drop table proxies")
-        except:
-            pass
-        try:
-            c.execute(create)
-            self.Commit()
-        except Exception as x:
-            self.log.error("failed create table %s" %x)
-            return False
-
-        return True
 
     def insertArcJob(self, job):
         '''
@@ -340,20 +255,20 @@ class aCTDBArc(aCTDB):
         '''
         Return a list and count of clusters
         '''
-        c=self.db.getCursor()
-        c.execute("SELECT cluster, COUNT(*) FROM arcjobs WHERE cluster!='' GROUP BY cluster")
-        rows=c.fetchall()
+        with self.Session() as session:
+            rows = session.execute(select(ArcJob.cluster, func.count(ArcJob.id).label('counts')).where(ArcJob.cluster!='').group_by(ArcJob.cluster)).all()
         return rows
 
     def getClusterLists(self):
         '''
         Return a list and count of clusterlists for jobs to submit
         '''
-        c=self.db.getCursor()
-        # submitting state is included here so that a submitter process is not
-        # killed while submitting jobs
-        c.execute("SELECT clusterlist, COUNT(*) FROM arcjobs WHERE arcstate in ('tosubmit', 'submitting', 'torerun', 'toresubmit', 'tocancel', 'cancelling') GROUP BY clusterlist")
-        rows=c.fetchall()
+        with self.Session() as session:
+            # submitting state is included here so that a submitter process is not
+            # killed while submitting jobs
+            rows = session.execute(select(ArcJob.clusterlist, func.count(ArcJob.id).label('counts')) \
+                                   .where(ArcJob.arcstate.in_(['tosubmit', 'submitting', 'torerun', 'toresubmit', 'tocancel', 'cancelling'])) \
+                                    .group_by(ArcJob.clusterlist)).all()
         return rows
 
     def _db2job(self, dbinfo):
@@ -487,7 +402,6 @@ class aCTDBArc(aCTDB):
         '''
         Delete proxy from proxies table.
         '''
-        # remove file first
         session.execute(delete(Proxy).where(Proxy.id==id))
 
     def setJobsArcstate(self, jobs, arcstate):

@@ -12,14 +12,14 @@ class aCTDB(object):
         self.log = logger
         self.table = tablename
         self.conf = aCTConfigARC()
-        engine = create_engine(
+        self.engine = create_engine(
             f'{self.conf.db.type}+{self.conf.db.driver}://{self.conf.db.user}:{self.conf.db.password}@{self.conf.db.host}:{self.conf.db.port}/{self.conf.db.name}',
             pool_size=2,
             max_overflow=0,
             pool_pre_ping=True,
             pool_recycle=3600,
             )
-        self.Session = sessionmaker(bind=engine)
+        self.Session = sessionmaker(bind=self.engine)
         self.db = db
         if self.db is None:
             self.db = aCTDBMS.getDB(self.log, self.conf)

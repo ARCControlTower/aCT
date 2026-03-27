@@ -11,7 +11,7 @@ import importlib
 import itertools
 import multiprocessing
 
-from act.arc.aCTDBArc import aCTDBArc
+from act.arc.aCTDBArcNEW import aCTDBArc
 from act.common.aCTConfig import aCTConfigAPP
 from act.condor.aCTDBCondor import aCTDBCondor
 
@@ -342,8 +342,8 @@ class aCTProcessManager:
         """
         # get required and active clusters
         if module == 'act.arc':
-            activeClusters = [entry['cluster'] for entry in self.dbarc.getActiveClusters()]
-            requestedClusters = list(itertools.chain(*[entry['clusterlist'].split(',') for entry in self.dbarc.getClusterLists()]))
+            activeClusters = [entry.cluster for entry in self.dbarc.getActiveClusters()]
+            requestedClusters = list(itertools.chain(*[entry.clusterlist.split(',') for entry in self.dbarc.getClusterLists()]))
         elif module == 'act.condor':
             activeClusters = self.dbcondor.getActiveClusters()
             requestedClusters = self.dbcondor.getClusterLists()

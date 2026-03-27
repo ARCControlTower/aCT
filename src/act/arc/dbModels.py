@@ -1,5 +1,6 @@
-from sqlalchemy import Integer, String, ForeignKey, TIMESTAMP, Text, SmallInteger, DateTime, LargeBinary
+from sqlalchemy import Integer, String, ForeignKey, TIMESTAMP, Text, SmallInteger, DateTime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, declared_attr
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from datetime import datetime, timezone
 import re
 import arc
@@ -71,7 +72,7 @@ class JobDescription(Base):
     __tablename__ = 'jobdescriptions'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    jobdescription: Mapped[Optional[str]] = mapped_column(Text)
+    jobdescription: Mapped[Optional[str]] = mapped_column(MEDIUMTEXT)
 
     arcjob: Mapped['ArcJob'] = relationship(back_populates='jobdescobj')
 

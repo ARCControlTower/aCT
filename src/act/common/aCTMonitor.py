@@ -1,11 +1,13 @@
 import importlib
 import random
 
-from act.arc.aCTARCProcess import aCTProcess
-from act.arc.aCTDBArc import aCTDBArc
+from act.arc.aCTARCProcessNEW import aCTProcess
+from act.arc.aCTDBArcNEW import aCTDBArc
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from prometheus_client import start_http_server
 from prometheus_client.core import REGISTRY, GaugeMetricFamily
+from sqlalchemy import select, func
+from act.arc.dbModels import ArcJob
 
 
 class aCTPrometheusCollector:
@@ -43,10 +45,11 @@ class aCTPrometheusCollector:
                                                labels=['ce_endpoint'])
 
         db = aCTDBArc(self.log)
-        jobs = db.getGroupedJobs('cluster, arcstate')
+        with db.Session.begin() as session:
+            jobs = session.execute(select(func.count().label('counts'), ArcJob.cluster, ArcJob.arcstate).select_from(ArcJob).group_by(ArcJob.cluster, ArcJob.arcstate)).all()
 
         for job in jobs:
-            count, cluster, state = (job['count(*)'], job['cluster'] or 'None', job['arcstate'])
+            count, cluster, state = (job.counts, job.cluster or 'None', job.arcstate)
             if state == 'submitted':
                 queued_arc_jobs.add_metric([cluster], count)
             if state == 'running':

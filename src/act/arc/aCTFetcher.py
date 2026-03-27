@@ -5,7 +5,7 @@ from json import JSONDecodeError
 from collections import defaultdict
 
 from act.arc.aCTARCProcessNEW import aCTARCProcess
-from act.arc.aCTDBARCModels import ArcJob
+from act.arc.dbModels import ArcJob
 from pyarcrest.errors import MissingDiagnoseFile, MissingResultFile
 from sqlalchemy import select, update
 

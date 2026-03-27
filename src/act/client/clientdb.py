@@ -10,8 +10,8 @@ import logging
 from act.db.aCTDBNEW import aCTDB
 from act.client.errors import InvalidColumnError
 from sqlalchemy import select, update, delete, inspect, or_, and_, insert
-from act.arc.aCTDBARCModels import ArcJob, Proxy, JobDescription
-from act.client.clientdbmodels import ClientJob
+from act.arc.dbModels import ArcJob, Proxy, JobDescription
+from act.client.dbModels import ClientJob
 
 
 class ClientDB(aCTDB):
@@ -40,55 +40,6 @@ class ClientDB(aCTDB):
             logger: An object for logging.
         """
         aCTDB.__init__(self, logger, "clientjobs", db=db)
-
-    def createTables(self):
-        """Create clientjobs table."""
-        c = self.db.getCursor()
-
-        # delete table if already exists
-        try:
-            c.execute('DROP TABLE IF EXISTS clientjobs')
-            self.Commit()
-        except Exception as exc:
-            self.log.error(f'Error dropping clientjobs table: {exc}')
-            c.close()
-            raise
-
-        # create table
-        query = """CREATE TABLE clientjobs (
-            id INTEGER PRIMARY KEY AUTO_INCREMENT,
-            modified TIMESTAMP,
-            created TIMESTAMP,
-            jobname VARCHAR(255),
-            jobdesc mediumtext,
-            clusterlist VARCHAR(1024),
-            arcjobid integer,
-            proxyid integer
-        )"""
-        try:
-            c.execute(query)
-            c.execute('ALTER TABLE clientjobs ADD INDEX (arcjobid)')
-            self.Commit()
-        except Exception as exc:
-            self.log.error(f'Error creating clientjobs table: {exc}')
-            raise
-        finally:
-            c.close()
-
-        return True
-
-    def deleteTables(self):
-        """Delete clientjobs table."""
-        c = self.db.getCursor()
-        try:
-            c.execute('DROP TABLE clientjobs')
-        except Exception as exc:
-            self.log.error(f'Error dropping clientjobs table: {exc}')
-            raise
-        else:
-            self.Commit()
-        finally:
-            c.close()
 
     def insertJob(self, proxyid, session, clusterlist):
         """

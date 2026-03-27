@@ -16,8 +16,8 @@ from act.client.errors import ConfigError, InvalidJobDescriptionError
 from act.client.errors import NoSuchSiteError, InvalidJobRangeError
 from act.client.errors import InvalidJobIDError, UnknownClusterError
 from act.client.common import readSites
-from act.arc.aCTDBARCModels import ArcJob
-from act.client.clientdbmodels import ClientJob
+from act.arc.dbModels import ArcJob
+from act.client.dbModels import ClientJob
 from urllib.parse import urlparse
 from pyarcrest.arc import isLocalInputFile
 

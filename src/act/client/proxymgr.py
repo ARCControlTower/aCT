@@ -151,7 +151,7 @@ class ProxyManager(object):
             self.log.error(f'Error retrieving private key PEM from database: {exc}')
             return None
         else:
-            return row.proxy.decode()
+            return row.proxy
 
     def checkProxyExists(self, proxyid):
         try:
