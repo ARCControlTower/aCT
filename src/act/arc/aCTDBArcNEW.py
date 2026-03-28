@@ -9,8 +9,8 @@ from act.arc.dbModels import JobDescription, ArcJob, Proxy
 
 class aCTDBArc(aCTDB):
 
-    def __init__(self, log, db=None):
-        aCTDB.__init__(self, log, 'arcjobs', db=db)
+    def __init__(self, log):
+        aCTDB.__init__(self, log)
 
         self.proxydir = self.conf.voms.proxystoredir
 
@@ -53,26 +53,6 @@ class aCTDBArc(aCTDB):
           - expirytime: timestamp for when proxy is expiring
         '''
 
-    def insertArcJob(self, job):
-        '''
-        Add new arc Job object. Only used for testing and recreating db.
-        '''
-        c=self.db.getCursor()
-        jobdesc = str(job.JobDescriptionDocument)
-        s = "insert into jobdescriptions (jobdescription) values (%s)"
-        c.execute(s, [jobdesc])
-        c.execute("SELECT LAST_INSERT_ID()")
-        jobdescid = c.fetchone()['LAST_INSERT_ID()']
-
-        j = self._job2db(job)
-        tstamp = self.getTimeStamp()
-        c.execute("insert into arcjobs (created,tstate,jobdesc"+",".join(j.keys())+") values ('"+str(tstamp)+"','"+str(tstamp)+"','"+str(jobdescid)+"','"+"','".join(j.values())+"')")
-        c.execute("SELECT LAST_INSERT_ID()")
-        row = c.fetchone()
-        self.Commit()
-        return row
-
-
     def insertArcJobDescription(self, session, jobdesc, proxyid='', maxattempts=0, clusterlist='', appjobid='', downloadfiles='', fairshare=''):
         '''
         Add a new job description for the ARC engine to process. If specified
@@ -107,150 +87,6 @@ class aCTDBArc(aCTDB):
         ).returning(ArcJob.id)).scalar_one()
         return arcjobid
 
-    def deleteArcJob(self, id):
-        '''
-        Delete job from ARC table.
-        '''
-        c=self.db.getCursor()
-        c.execute("select jobdesc from arcjobs where id = %s", (id,))
-        row = c.fetchone()
-        if row:
-            c.execute("delete from jobdescriptions where id = %s", (row['jobdesc'],))
-        c.execute("delete from arcjobs where id = %s", (id,))
-        self.Commit()
-
-    def updateArcJob(self, id, desc, job=None):
-        '''
-        Update arc job fields specified in desc and fields represented by arc
-        Job if job is specified.
-        '''
-        self.updateArcJobLazy(id, desc, job)
-        self.Commit()
-
-    def updateArcJobLazy(self, id, desc, job=None):
-        '''
-        Update arc job fields specified in desc and fields represented by arc
-        Job if job is specified. Does not commit after executing update.
-        '''
-        c = self.db.getCursor()
-        c.execute("select id from arcjobs where id=%d limit 1" % id)
-        row = c.fetchone()
-        if row is None:
-            self.log.warning("Arc job id %d no longer exists" % id)
-            return
-
-        desc['modified']=self.getTimeStamp()
-        s = "update arcjobs set " + ",".join(['%s=%%s' % (k) for k in desc.keys()])
-        if job:
-            s += "," + ",".join(['%s=%%s' % (k) for k in self._job2db(job).keys()])
-        s+=" where id="+str(id)
-        if job:
-            c.execute(s, list(desc.values()) + list(self._job2db(job).values()))
-        else:
-            c.execute(s, list(desc.values()))
-
-    def updateArcJobs(self, desc, select):
-        '''
-        Update arc job fields specified in desc and matching the select statement.
-        '''
-        self.updateArcJobsLazy(desc, select)
-        self.Commit()
-
-    def updateArcJobsLazy(self, desc, select):
-        '''
-        Update arc job fields specified in desc and matching the select statement.
-        Does not commit after executing update.
-        '''
-        desc['modified']=self.getTimeStamp()
-        s = "update arcjobs set " + ",".join(['%s=%%s' % (k) for k in desc.keys()])
-        s+=" where "+select
-        c=self.db.getCursor()
-        c.execute(s, list(desc.values()))
-
-    def getArcJobInfo(self,id,columns=[]):
-        '''
-        Return a dictionary of column name: value for the given id and columns
-        '''
-        c=self.db.getCursor()
-        c.execute("SELECT "+self._column_list2str(columns)+" FROM arcjobs WHERE id="+str(id))
-        row=c.fetchone()
-        if not row:
-            return {}
-        # mysql SELECT returns list, we want dict
-        if not isinstance(row,dict):
-            row = dict(zip([col[0] for col in c.description], row))
-        return row
-
-    def getArcJobsInfo(self, select, columns=[], tables="arcjobs", lock=False):
-        '''
-        Return a list of column: value dictionaries for jobs matching select.
-        If lock is True the row will be locked if possible.
-        '''
-        c=self.db.getCursor()
-        if lock:
-            res = self.db.getMutexLock('arcjobs', timeout=20)
-            if not res:
-                self.log.debug("Could not get lock: %s"%str(res))
-                return []
-            if str(res) == "0":
-                self.log.debug("Could not get lock: %s"%str(res))
-                return []
-            else:
-                self.log.debug("Got lock: %s"%str(res))
-        c.execute("SELECT "+self._column_list2str(columns)+" FROM "+tables+" WHERE "+select)
-        rows=c.fetchall()
-        return rows
-
-    def getArcJobs(self,select):
-        '''
-        Return a dictionary of {proxyid: [(id, appjobid, arc.Job, created), ...]} for jobs matching select
-        '''
-        c=self.db.getCursor()
-        c.execute("SELECT id, proxyid, appjobid, created, "+",".join(self.jobattrs.keys())+" FROM arcjobs WHERE "+select)
-        rows=c.fetchall()
-        d = {}
-        if isinstance(rows, tuple):
-            rows = dict(zip([col[0] for col in c.description], zip(*[list(row) for row in rows])))
-            for row in rows:
-                d[row[0]] = self._db2job(dict(zip([col[0] for col in c.description], row[1:])))
-        # mysql returns list of dictionaries
-        if isinstance(rows, list):
-            for row in rows:
-                if not row['proxyid'] in d:
-                    d[row['proxyid']] = []
-                d[row['proxyid']].append((row['id'], row['appjobid'], self._db2job(row), row['created']))
-
-        return d
-
-    def getArcJobDescription(self, jobdescid):
-        '''
-        Return the job description for the given id in jobdescriptions
-        '''
-        c=self.db.getCursor()
-        c.execute("SELECT jobdescription from jobdescriptions where id="+str(jobdescid))
-        row = c.fetchone()
-        if not row:
-            return None
-        return row['jobdescription']
-
-    def getNArcJobs(self, select):
-        '''
-        Return the count of jobs in the table matching select
-        '''
-        c=self.db.getCursor()
-        c.execute("SELECT COUNT(*) FROM arcjobs WHERE "+select)
-        row = c.fetchone()
-        return row['COUNT(*)']
-
-    def getGroupedJobs(self, groupby):
-        '''
-        Return counts of jobs grouped by given column(s)
-        '''
-        c = self.db.getCursor()
-        c.execute(f"SELECT count(*), {groupby} FROM arcjobs GROUP BY {groupby}")
-        rows = c.fetchall()
-        return rows
-
     def getActiveClusters(self):
         '''
         Return a list and count of clusters
@@ -270,64 +106,6 @@ class aCTDBArc(aCTDB):
                                    .where(ArcJob.arcstate.in_(['tosubmit', 'submitting', 'torerun', 'toresubmit', 'tocancel', 'cancelling'])) \
                                     .group_by(ArcJob.clusterlist)).all()
         return rows
-
-    def _db2job(self, dbinfo):
-        '''
-        Convert a dictionary of DB key value into arc Job object
-        '''
-        j = arc.Job()
-        for attr in self.jobattrs:
-            if attr not in dbinfo or dbinfo[attr] is None:
-                continue
-            # Some object types need special treatment
-            if self.jobattrs[attr] == arc.StringList:
-                l = arc.StringList()
-                for item in dbinfo[attr].split('|'):
-                    l.append(item)
-                setattr(j, attr, l)
-                continue
-            if self.jobattrs[attr] == arc.StringStringMap:
-                m = arc.StringStringMap()
-                d = eval(dbinfo[attr])
-                if not isinstance(d, dict):
-                    continue
-                for (k,v) in d.items():
-                    m[k] = v
-                setattr(j, attr, m)
-                continue
-
-            setattr(j, attr, self.jobattrs[attr](str(dbinfo[attr])))
-        return j
-
-    def _job2db(self, job):
-        '''
-        Convert an arc Job object to a dictionary of column name: value
-        '''
-        d = {}
-        for attr in self.jobattrs:
-            if self.jobattrs[attr] == int or self.jobattrs[attr] == str:
-                d[attr] = str(getattr(job, attr))[:250]
-            elif self.jobattrs[attr] == arc.JobState:
-                d[attr] = getattr(job, attr).GetGeneralState()
-            elif self.jobattrs[attr] == arc.StringList:
-                d[attr] = '|'.join(getattr(job, attr))[:1000]
-            elif self.jobattrs[attr] == arc.URL:
-                d[attr] = getattr(job, attr).str().replace(r'\2f',r'/')
-            elif self.jobattrs[attr] == arc.Period:
-                d[attr] = str(getattr(job, attr).GetPeriod())
-            elif self.jobattrs[attr] == arc.Time:
-                if getattr(job, attr).GetTime() != -1:
-                    # Use UTC time but strip trailing Z since mysql doesn't like it
-                    t = str(getattr(job, attr).str(arc.UTCTime))
-                    d[attr] = re.sub('Z$', '', t)
-            elif self.jobattrs[attr] == arc.StringStringMap:
-                ssm = getattr(job, attr)
-                tmpdict = dict(zip(ssm.keys(), ssm.values()))
-                d[attr] = str(tmpdict)[:1000]
-            # Force everything to ASCII
-            if attr in d:
-                d[attr] = ''.join([i for i in d[attr] if ord(i) < 128])
-        return d
 
     def _writeProxyFile(self, proxypath, proxy):
         with open(proxypath, 'w') as f:

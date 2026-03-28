@@ -25,8 +25,8 @@ class aCTCleaner(aCTARCProcess):
             jobstoclean = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.jobdesc) \
                                              .where(ArcJob.arcstate=='toclean', ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit)).all()
             if jobstoclean:
-                session.execute(delete(JobDescription).where(JobDescription.id.in_([job.jobdesc for job in jobstoclean])))
                 session.execute(delete(ArcJob).where(ArcJob.id.in_([job.id for job in jobstoclean])))
+                session.execute(delete(JobDescription).where(JobDescription.id.in_([job.jobdesc for job in jobstoclean])))
                 for job in jobstoclean:
                     self.log.warning(f"Could not clean appjob({job.appjobid}) in time, removing from DB")
 
@@ -84,8 +84,8 @@ class aCTCleaner(aCTARCProcess):
 
             # update DB
             with self.db.Session.begin() as session:
-                session.execute(delete(JobDescription).where(JobDescription.id.in_([job.jobdesc for job in dbjobs])))
                 session.execute(delete(ArcJob).where(ArcJob.id.in_([job.id for job in dbjobs])))
+                session.execute(delete(JobDescription).where(JobDescription.id.in_([job.jobdesc for job in dbjobs])))
                 for job in dbjobs:
                     self.log.info(f"Successfully cleaned appjob({job.appjobid}) in arc DB")
 

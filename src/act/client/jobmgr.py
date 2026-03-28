@@ -63,8 +63,7 @@ class JobManager(object):
     def __init__(self, db=None):
         """Initialize object's attributes."""
         self.log = logging.getLogger(__name__)
-        self.arcdb = aCTDBArc(self.log, db=db)
-        self.clidb = ClientDB(self.log, db=db)
+        self.db: ClientDB = db
 
         # TODO: if and when sites from arc config are used, move everything
         # that uses arc config to this class
@@ -152,8 +151,8 @@ class JobManager(object):
         else:
             state_filter = ['done', 'donefailed', 'cancelled', 'failed', 'lost']
 
-        with self.clidb.Session.begin() as session:
-            jobs = self.clidb.getJoinJobsInfo(proxyid, session,
+        with self.db.Session.begin() as session:
+            jobs = self.db.getJoinJobsInfo(proxyid, session,
                                     jobids=jobids, state_filter=state_filter, name_filter=name_filter,
                                     clicols=['id'], arccols=['id', 'arcstate', 'JobID'])
             if not jobs:
@@ -179,8 +178,8 @@ class JobManager(object):
                 arc_ids.append(a_id)
 
             if client_ids:
-                self.clidb.updateArcstate(session=session, jobids=arc_ids, arcstate='toclean')
-                self.clidb.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
+                self.db.updateArcstate(session=session, jobids=arc_ids, arcstate='toclean')
+                self.db.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
 
         return client_ids
     
@@ -200,8 +199,8 @@ class JobManager(object):
         Returns:
             A list of IDs of fetched jobs.
         """
-        with self.clidb.Session.begin() as session:
-            jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids,
+        with self.db.Session.begin() as session:
+            jobs = self.db.getJoinJobsInfo(proxyid, session, jobids=jobids,
                                     state_filter=['failed'], name_filter=name_filter,
                                     clicols=['id'], arccols=['id'])
 
@@ -210,7 +209,7 @@ class JobManager(object):
             c_ids = [c_id for c_id, _ in jobs]
             a_ids = [a_id for _, a_id in jobs]
 
-            self.clidb.updateArcstate(session=session, jobids=a_ids, arcstate='tofetch')
+            self.db.updateArcstate(session=session, jobids=a_ids, arcstate='tofetch')
         return c_ids
 
     def getJobs(self, proxyid, jobids=None, state_filter=None, name_filter=None):
@@ -238,8 +237,8 @@ class JobManager(object):
         """
         results = JobGetResults()
         # create query with filters
-        with self.clidb.Session() as session:
-            jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids, state_filter=state_filter, name_filter=name_filter, clicols=['id', 'jobname'], arccols=['id', 'JobID'])
+        with self.db.Session() as session:
+            jobs = self.db.getJoinJobsInfo(proxyid, session, jobids=jobids, state_filter=state_filter, name_filter=name_filter, clicols=['id', 'jobname'], arccols=['id', 'JobID'])
 
         # assemble results
         for c_id, jobname, a_id, JobID in jobs:
@@ -284,8 +283,8 @@ class JobManager(object):
         if state_filter:
             state_filter = [state_filter]
 
-        with self.clidb.Session.begin() as session:
-            jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids,
+        with self.db.Session.begin() as session:
+            jobs = self.db.getJoinJobsInfo(proxyid, session, jobids=jobids,
                                     state_filter=state_filter, name_filter=name_filter,
                                     clicols=['id'], arccols=['id', 'arcstate'], forupdate=True)
 
@@ -303,16 +302,16 @@ class JobManager(object):
                     # 'tosubmit' jobs cannot be set to tocancel, they have to be deleted
                     # immediately.
                     client_ids.append(c_id)
-                    self.clidb.deleteJobs(session=session, jobids=[a_id], table=ArcJob)
+                    self.db.deleteJobs(session=session, jobids=[a_id], table=ArcJob)
                 else:
                     # If there is entry in arcjobs, the job can be killed by
                     # setting its state to 'tocancel'
                     arc_ids.append(a_id)
 
             if arc_ids:
-                self.clidb.updateArcstate(session=session, jobids=arc_ids, arcstate='tocancel')
+                self.db.updateArcstate(session=session, jobids=arc_ids, arcstate='tocancel')
             if client_ids:
-                self.clidb.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
+                self.db.deleteJobs(session=session, jobids=client_ids, table=ClientJob)
 
         # One state in which a job can be killed is before it is passed
             # to ARC. Such jobs have None as arcid. Data dirs for jobs are
@@ -342,15 +341,15 @@ class JobManager(object):
         """
         # create query with filters
 
-        with self.clidb.Session.begin() as session:
-            jobs = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids, 
+        with self.db.Session.begin() as session:
+            jobs = self.db.getJoinJobsInfo(proxyid, session, jobids=jobids, 
                                     state_filter=['failed', 'donefailed'], name_filter=name_filter,
                                     clicols=['id'], arccols=['id'])
 
             if not jobs:
                 return[]
             #set job state for resubmittion
-            self.clidb.updateArcstate(session=session, jobids=[job.a_id for job in jobs], arcstate='toresubmit')
+            self.db.updateArcstate(session=session, jobids=[job.a_id for job in jobs], arcstate='toresubmit')
 
         return [job.c_id for job in jobs]
 
@@ -380,8 +379,8 @@ class JobManager(object):
         """
         if state_filter:
             state_filter = [state_filter]
-        with self.clidb.Session() as session:
-            result = self.clidb.getJoinJobsInfo(proxyid, session, jobids=jobids,
+        with self.db.Session() as session:
+            result = self.db.getJoinJobsInfo(proxyid, session, jobids=jobids,
                                       state_filter=state_filter, name_filter=name_filter,
                                       clicols=clicols, arccols=arccols, jobname=jobname)
 
@@ -390,7 +389,7 @@ class JobManager(object):
     
     def createJobs(self, proxyid, jobs, errpref):
         results = []
-        with self.clidb.Session.begin() as session:
+        with self.db.Session.begin() as session:
             for job in jobs:
                 result = {}
                 results.append(result)
@@ -404,7 +403,7 @@ class JobManager(object):
                     clusterlist = self.checkClusters(job['clusterlist'])
 
                     # insert job
-                    jobid = self.clidb.insertJob(proxyid=proxyid, session=session, clusterlist=','.join(clusterlist))
+                    jobid = self.db.insertJob(proxyid=proxyid, session=session, clusterlist=','.join(clusterlist))
                 except UnknownClusterError as e:
                     print(f'{errpref}Unknown cluster {e.name}')
                     result['msg'] = f'Unknown cluster {e.name}'
@@ -438,8 +437,8 @@ class JobManager(object):
 
         # get info for all jobs and check which ones don't exist
         tosubmit = []
-        with self.clidb.Session() as session:
-            stats = self.clidb.checkClientJobs(proxyid, session=session, jobids=jobids)
+        with self.db.Session() as session:
+            stats = self.db.checkClientJobs(proxyid, session=session, jobids=jobids)
         for job in tocheck:
             inStats = False
             for stat in stats:
@@ -453,7 +452,7 @@ class JobManager(object):
 
         jobdescs = arc.JobDescriptionList()
 
-        with self.clidb.Session.begin() as session:
+        with self.db.Session.begin() as session:
             for job in tosubmit:
 
                 # parse job description
@@ -512,7 +511,7 @@ class JobManager(object):
 
                 # update job entry and confirm job for submission
                 try:
-                    self.clidb.updateJob(proxyid=proxyid, session=session, jobid=job['id'], values_dict={'jobdesc':desc, 'jobname':job['name']})
+                    self.db.updateJob(proxyid=proxyid, session=session, jobid=job['id'], values_dict={'jobdesc':desc, 'jobname':job['name']})
                 except Exception as e:
                     print(f'{errpref}{e}')
                     job['msg'] = 'Server error'

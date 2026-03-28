@@ -18,7 +18,7 @@ class ArcJobMixin:
     tstate: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP)
     cluster: Mapped[Optional[str]] = mapped_column(String(255))
     clusterlist: Mapped[Optional[str]] = mapped_column(String(1024))
-    jobdesc: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('jobdescriptions.id')) # rename to jobdescid
+    jobdesc: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('jobdescriptions.id')) # TODO change
     attemptsleft: Mapped[Optional[int]] = mapped_column(Integer)
     downloadfiles: Mapped[Optional[str]] = mapped_column(String(255))
     proxyid: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('proxies.id'))
@@ -72,7 +72,7 @@ class JobDescription(Base):
     __tablename__ = 'jobdescriptions'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    jobdescription: Mapped[Optional[str]] = mapped_column(MEDIUMTEXT)
+    jobdescription: Mapped[Optional[str]] = mapped_column(Text().with_variant(MEDIUMTEXT, 'mysql'))
 
     arcjob: Mapped['ArcJob'] = relationship(back_populates='jobdescobj')
 

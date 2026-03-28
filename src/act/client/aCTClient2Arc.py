@@ -18,8 +18,7 @@ class aCTClient2Arc(aCTProcess):
 
     def setup(self):
         super().setup()
-        self.clidb = ClientDB(self.log)
-        self.arcdb = aCTDBArc(self.log)
+        self.db = ClientDB(self.log)
 
     def process(self):
         """
@@ -28,9 +27,9 @@ class aCTClient2Arc(aCTProcess):
         Signal handling strategy:
         - termination is checked before handling every proxy
         """
-        with self.clidb.Session() as session:
-            proxies = self.clidb.getProxies(session)
-        with self.clidb.Session.begin() as session:
+        with self.db.Session() as session:
+            proxies = self.db.getProxies(session)
+        with self.db.Session.begin() as session:
             for proxyid in proxies:
                 self.stopOnFlag()
                 self.insertNewJobs(proxyid, session, 1000)
@@ -39,7 +38,7 @@ class aCTClient2Arc(aCTProcess):
         """Insert new jobs to ARC table for proxy."""
         # Get jobs that haven't been inserted to ARC table yet
         # (they don't have reference to ARC table, arcjobid is null).
-        jobs = self.clidb.getJobsInfo(proxyid, session, num)
+        jobs = self.db.getJobsInfo(proxyid, session, num)
         jobdescs = arc.JobDescriptionList()
         for job in jobs:
             # create downloads list
@@ -59,7 +58,7 @@ class aCTClient2Arc(aCTProcess):
 
             # insert job to ARC table
             try:
-                arcjobid = self.arcdb.insertArcJobDescription(
+                arcjobid = self.db.insertArcJobDescription(
                     session,
                     job.jobdesc,
                     proxyid,
@@ -73,12 +72,10 @@ class aCTClient2Arc(aCTProcess):
             else:
                 # create a reference to job in client table
                 try:
-                    self.clidb.updateJob(proxyid, session, job.id,  {'arcjobid':arcjobid})
+                    self.db.updateJob(proxyid, session, job.id,  {'arcjobid':arcjobid})
                     self.log.info(f'Successfully inserted appjob({job.id}) {arcjobid} to ARC engine')
                 except Exception as exc:
                     self.log.error(f'Error connecting clientjob({job.id}) with arcjob({arcjobid}): {exc}')
 
     def finish(self):
-        self.clidb.close()
-        self.arcdb.close()
         super().finish()

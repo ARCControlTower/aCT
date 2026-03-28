@@ -12,7 +12,7 @@ from act.client.errors import (ConfigError, InvalidColumnError,
 from act.client.jobmgr import JobManager, getIDsFromList
 from act.client.proxymgr import ProxyManager, getVOMSProxyAttributes
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
-from act.db.aCTDBMS import getDB
+from act.client.clientdb import ClientDB
 from flask import Flask, jsonify, request, send_file
 from pyarcrest.arc import isLocalInputFile
 from pyarcrest.x509 import (checkRFCProxy, createProxyCSR, csrToPEM,
@@ -34,7 +34,7 @@ appconf = aCTConfigAPP()
 arcconf = aCTConfigARC()
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
-db = getDB(logger, arcconf)
+db = ClientDB(logger)
 pmgr = ProxyManager(db=db)
 jmgr = JobManager(db=db)
 

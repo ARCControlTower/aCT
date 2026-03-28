@@ -7,14 +7,14 @@ This module defines object for managing client engine's table in database.
 import arc
 import logging
 
-from act.db.aCTDBNEW import aCTDB
+from act.arc.aCTDBArcNEW import aCTDBArc
 from act.client.errors import InvalidColumnError
 from sqlalchemy import select, update, delete, inspect, or_, and_, insert
 from act.arc.dbModels import ArcJob, Proxy, JobDescription
 from act.client.dbModels import ClientJob
 
 
-class ClientDB(aCTDB):
+class ClientDB(aCTDBArc):
     """
     Object for managing client engine's table in database.
 
@@ -31,15 +31,6 @@ class ClientDB(aCTDB):
     (lazy=True), commit should be called manually. Coneniently, ClientDB
     has :meth:`Commit`  method (inherited from ancestors).
     """
-
-    def __init__(self, logger=logging.getLogger(__name__), db=None):
-        """
-        Initialize base object.
-
-        Args:
-            logger: An object for logging.
-        """
-        aCTDB.__init__(self, logger, "clientjobs", db=db)
 
     def insertJob(self, proxyid, session, clusterlist):
         """
@@ -175,12 +166,3 @@ class ClientDB(aCTDB):
         stmt = select(*selected_columns).where(*[getattr(Proxy, k) == v for k, v in filter.items()])
         result = session.execute(stmt).first()
         return result
-
-    def updateProxy(self, session, proxy, dn, attribute, expirytime):
-        proxyid = self.getProxyInfo(session, {'dn':dn, 'attribute':attribute}, ['id'])
-        if proxyid:
-            session.execute(update(Proxy).where(Proxy.id==proxyid.id).values(proxy=proxy, expirytime=expirytime))
-            proxyid = proxyid.id
-        else:
-            proxyid = session.execute(insert(Proxy).values(proxy=proxy, dn=dn, attribute=attribute, expirytime=expirytime).returning(Proxy.id)).scalar_one_or_none()
-        return proxyid

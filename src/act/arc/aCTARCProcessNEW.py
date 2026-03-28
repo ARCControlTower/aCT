@@ -53,7 +53,6 @@ class aCTARCProcess(aCTProcess):
         return True
 
     def finish(self):
-        self.db.close()
         super().finish()
 
     def getARCClient(self, proxyid):

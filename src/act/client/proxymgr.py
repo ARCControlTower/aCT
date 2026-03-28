@@ -39,8 +39,7 @@ class ProxyManager(object):
         """Initialize object."""
         self.log = logging.getLogger(__name__)
         self.actproxy = aCTProxy(self.log, db=db)
-        self.arcdb = aCTDBArc(self.log, db=db)
-        self.clidb = ClientDB(self.log, db=db)
+        self.db: ClientDB = db
 
     def getProxyInfo(self, dn, attribute='', columns=[]):
         """
@@ -58,8 +57,8 @@ class ProxyManager(object):
             NoSuchProxyError: Searched for proxy is not in database.
         """
         try:
-            with self.clidb.Session() as session:
-                proxyInfo =  self.clidb.getProxyInfo(session, {'dn':dn, 'attribute':attribute}, columns)
+            with self.db.Session() as session:
+                proxyInfo =  self.db.getProxyInfo(session, {'dn':dn, 'attribute':attribute}, columns)
         except Exception as exc:
             self.log.error(f'Error getting info for proxy dn={dn} attribute={attribute}: {exc}')
             raise
@@ -145,8 +144,8 @@ class ProxyManager(object):
 
     def getProxyKeyPEM(self, proxyid):
         try:
-            with self.arcdb.Session() as session:
-                row = self.arcdb.getProxiesInfo(session, {'id':proxyid}, ['proxy'])
+            with self.db.Session() as session:
+                row = self.db.getProxiesInfo(session, {'id':proxyid}, ['proxy'])
         except Exception as exc:
             self.log.error(f'Error retrieving private key PEM from database: {exc}')
             return None
@@ -155,8 +154,8 @@ class ProxyManager(object):
 
     def checkProxyExists(self, proxyid):
         try:
-            with self.clidb.Session() as session:
-                proxy = self.clidb.getProxyInfo(session, {'id':proxyid}, ['id', 'expirytime'])
+            with self.db.Session() as session:
+                proxy = self.db.getProxyInfo(session, {'id':proxyid}, ['id', 'expirytime'])
         except Exception as exc:
             self.log.error(f'Error checking existence of proxy: {exc}')
             return None
@@ -170,13 +169,13 @@ class ProxyManager(object):
         '''
         Update proxy of given dn/attribute. If no previous proxy, do insert instead.
         '''
-        with self.clidb.Session.begin() as session:
+        with self.db.Session.begin() as session:
             try:
-                proxyid = self.arcdb.getProxiesInfo(session, {'dn':dn, 'attribute':attribute}, columns=["id"]).id
+                proxyid = self.db.getProxiesInfo(session, {'dn':dn, 'attribute':attribute}, columns=["id"]).id
             except:
                 proxyid = None
             if not proxyid:
-                proxyid = self.arcdb.insertProxy(proxy, session, dn, str(expirytime), attribute=attribute)
+                proxyid = self.db.insertProxy(proxy, session, dn, str(expirytime), attribute=attribute)
             else:
                 desc={
                     'proxy':proxy,
@@ -184,15 +183,15 @@ class ProxyManager(object):
                     'expirytime':str(expirytime),
                     'attribute':attribute
                 }
-                self.arcdb.updateProxy(proxyid, session, desc)
+                self.db.updateProxy(proxyid, session, desc)
         return proxyid
     
     def deleteProxy(self, id):
-        with self.arcdb.Session.begin() as session:
-            proxy = self.arcdb.getProxiesInfo(session, {'id':id}, ['proxypath'])
+        with self.db.Session.begin() as session:
+            proxy = self.db.getProxiesInfo(session, {'id':id}, ['proxypath'])
             if os.path.isfile(proxy.proxypath):
                 os.remove(proxy.proxypath)
-            self.arcdb.deleteProxy(session, id)
+            self.db.deleteProxy(session, id)
 
 # We basically want to get the value of the first 'attribute:' line from
 # 'arcproxy -I' output.
