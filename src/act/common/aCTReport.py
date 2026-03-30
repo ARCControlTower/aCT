@@ -6,10 +6,13 @@ import re
 import subprocess
 import sys
 import time
+import datetime
 
-from act.arc import aCTDBArc
+from act.arc import aCTDBArcNEW
+from act.arc.dbModels import ArcJob
 from act.common import aCTLogger
 from act.common.aCTConfig import aCTConfigAPP
+from sqlalchemy import select
 
 
 class aCTReport:
@@ -31,7 +34,7 @@ class aCTReport:
             self.log('<META HTTP-EQUIV="refresh" CONTENT="60"><pre>')
             self.log(time.asctime() + '\n')
 
-        self.db=aCTDBArc.aCTDBArc(self.actlog)
+        self.db=aCTDBArcNEW.aCTDBArc(self.actlog)
 
     def log(self, message=''):
         self.output += message + '\n'
@@ -103,21 +106,19 @@ class aCTReport:
             if conf:
                 os.environ['ACTCONFIGARC'] = conf
 
-            db=aCTDBArc.aCTDBArc(self.actlog)
-            c=db.db.conn.cursor()
-            c.execute("select jobid,state from arcjobs")
-            rows=c.fetchall()
+            with self.db.Session() as session:
+                rows = session.execute(select(ArcJob.id, ArcJob.State)).all()
             for r in rows:
 
                 #AF not all have port# reg=re.search('.+//([^:]+)',str(r[0]))
-                reg=re.search('.+//([^/]+)',str(r[0]))
+                reg=re.search('.+//([^/]+)',str(r.id))
                 cl=""
                 try:
                     cl=reg.group(1)
                 except:
                     cl='WaitingSubmission'
 
-                jid=str(r[1])
+                jid=str(r.State)
                 if jid == 'None':
                     jid="Other"
 
@@ -155,79 +156,15 @@ class aCTReport:
                 log += f'{"-":>10}'
         self.log(log+'\n\n')
 
-    def CondorJobReport(self):
-
-        rep = {}
-        rtot = {}
-        condorjobstatemap = ['Undefined', # used before real state is known
-                             'Idle',
-                             'Running',
-                             'Removed',
-                             'Completed',
-                             'Held',
-                             'Transferring',
-                             'Suspended']
-
-        for conf in self.actconfs:
-            if conf:
-                os.environ['ACTCONFIGARC'] = conf
-
-            db=aCTDBArc.aCTDBArc(self.actlog)
-            c = db.db.conn.cursor()
-            c.execute("select cluster, JobStatus from condorjobs")
-            rows = c.fetchall()
-
-            for r in rows:
-
-                cl = str(r[0])
-                if not cl:
-                    cl = 'WaitingSubmission'
-
-                jid = r[1]
-
-                try:
-                    rep[cl][jid]+=1
-                except:
-                    try:
-                        rep[cl][jid]=1
-                    except:
-                        rep[cl]={}
-                        rep[cl][jid]=1
-                try:
-                    rtot[jid]+=1
-                except:
-                    rtot[jid]=1
-
-        if sum(rtot.values()) == 0:
-            return
-        self.log(f"All Condor jobs: {sum(rtot.values())}")
-        self.log(f"{'':39} {' '.join([f'{s:>9}' for s in condorjobstatemap])}")
-        for k in sorted(rep, key=lambda x: x.split('.')[-1]):
-            log=f"{k:>38.38}:"
-            for s in range(8):
-                try:
-                    log += f'{rep[k][s]:>10}'
-                except KeyError:
-                    log += f'{"-":>10}'
-            self.log(log)
-        log = f"{'Totals':>38}:"
-        for s in range(8):
-            try:
-                log += f'{rtot[s]:>10}'
-            except:
-                log += f'{"-":>10}'
-        self.log(log+'\n\n')
-
 
     def StuckReport(self):
 
         # Query for lost jobs older than lostlimit
         lostlimit = 86400
-        select = "(arcstate='submitted' or arcstate='running') and " \
-                 + self.db.timeStampLessThan("tarcstate", lostlimit) + \
-                 " order by tarcstate"
-        columns = ['cluster']
-        jobs = self.db.getArcJobsInfo(select, columns)
+        with self.db.Session() as session:
+            jobs = session.execute(select(ArcJob.cluster) \
+                            .where(ArcJob.arcstate.in_(['submitted', 'running']), ArcJob.tarcstate<(self.db.getTimeStamp() - datetime.timedelta(seconds=lostlimit))) \
+                            .order_by(ArcJob.tarcstate)).all()
 
         if jobs:
             self.log('Found %d jobs not updated in over %d seconds:\n' % (len(jobs), lostlimit))
@@ -235,7 +172,7 @@ class aCTReport:
             clustercount = {}
             for job in jobs:
                 try:
-                    host = re.search('.+//([^:]+)', job['cluster']).group(1)
+                    host = re.search('.+//([^:]+)', job.cluster).group(1)
                 except:
                     host = None
                 if host in clustercount:
@@ -263,7 +200,6 @@ def main():
     acts = aCTReport(args)
     acts.AppReport()
     acts.ArcJobReport()
-    acts.CondorJobReport()
     acts.StuckReport()
     acts.ProcessReport()
     acts.end()
