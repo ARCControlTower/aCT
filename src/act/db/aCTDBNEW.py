@@ -10,8 +10,7 @@ class aCTDB(object):
         self.log = logger
         self.conf = aCTConfigARC()
         self.engine = create_engine(
-            #f'{self.conf.db.type}+{self.conf.db.driver}://{self.conf.db.user}:{self.conf.db.password}@{self.conf.db.host}:{self.conf.db.port}/{self.conf.db.name}',
-            f'{self.conf.db.type}+{self.conf.db.driver}://{self.conf.db.user}:{self.conf.db.password}@{self.conf.db.host}/{self.conf.db.name}',
+            self.conf.db.link,
             pool_size=2,
             max_overflow=0,
             pool_pre_ping=True,
