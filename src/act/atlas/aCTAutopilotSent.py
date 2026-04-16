@@ -5,6 +5,9 @@ import arc
 from act.atlas import aCTPanda
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.common import aCTProxy, aCTUtils
+from act.arc.dbModels import Proxy
+from act.atlas.dbModels import PandaJob
+from sqlalchemy import select, update, or_
 
 
 class PandaThr(Thread):
@@ -46,19 +49,18 @@ class aCTAutopilotSent(aCTATLASProcess):
         # In future for analysis the id will change once the job is picked up
         self.proxymap = {}
 
-        actp = aCTProxy.aCTProxy(self.log)
-        for role in self.arcconf.voms.roles:
-            attr = f'/atlas/Role={role}'
-            proxyid = actp.getProxyId(dn, attr)
-            if not proxyid:
-                raise Exception(f"Proxy with DN {dn} and attribute {attr} was not found in proxies table")
-
-            proxyfile = actp.path(dn, attribute=attr)
-            # pilot role is mapped to analysis type
-            if role == 'pilot':
-                role = 'analysis'
-            self.pandas[role] = aCTPanda.aCTPanda(self.log, proxyfile)
-            self.proxymap[role] = proxyid
+        with self.db.Session() as session:
+            for role in self.arcconf.voms.roles:
+                attr = f'/atlas/Role={role}'
+                proxy = session.execute(select(Proxy.id, Proxy.proxypath).where(Proxy.dn==dn, Proxy.attribute==attr)).first()
+                if not proxy:
+                    raise Exception(f"Proxy with DN {dn} and attribute {attr} was not found in proxies table")
+                
+                # pilot role is mapped to analysis type
+                if role == 'pilot':
+                    role = 'analysis'
+                self.pandas[role] = aCTPanda.aCTPanda(self.log, proxy.proxypath)
+                self.proxymap[role] = proxy.id
 
         # queue interval
         self.queuestamp=0
@@ -83,13 +85,16 @@ class aCTAutopilotSent(aCTATLASProcess):
           parent aCTProcess and this is the only operation executed in the process loop
         """
         nthreads=self.conf.panda.threads
-        columns = ['pandaid', 'siteName', 'startTime', 'computingElement', 'node', 'corecount']
         # TODO: HARDCODED limit
-        jobs=self.dbpanda.getJobs(f"pandastatus='{pstatus}' and sendhb=1 and ({self.dbpanda.timeStampLessThan('theartbeat', self.conf.panda.heartbeattime)} or modified > theartbeat) limit 1000", columns)
+        with self.db.Session() as session:
+            jobs = session.execute(select(PandaJob.pandaid, PandaJob.siteName, PandaJob.startTime, PandaJob.computingElement, PandaJob.node, PandaJob.corecount) \
+                                   .where(PandaJob.pandastatus==pstatus, PandaJob.sendhb==1, 
+                                        or_(self.db.timeStampLessThan(PandaJob.theartbeat, self.conf.panda.heartbeattime), (PandaJob.modified > PandaJob.theartbeat))) \
+                                    .limit(1000)).all()
         if not jobs:
             return
 
-        idstr = ",".join([str(job['pandaid']) for job in jobs])
+        idstr = ",".join([str(job.pandaid) for job in jobs])
         self.log.info(f"Update heartbeat for {len(jobs)} jobs in state {pstatus} ({idstr})")
 
         changed_pstatus = False
@@ -101,59 +106,60 @@ class aCTAutopilotSent(aCTATLASProcess):
         for j in jobs:
             jd = {}
             if pstatus != 'starting':
-                jd['startTime'] = j['startTime']
-            if j['computingElement']:
-                if j['computingElement'].find('://') != -1: # this if is only needed during transition period
-                    jd['computingElement'] = arc.URL(str(j['computingElement'])).Host()
+                jd['startTime'] = j.startTime
+            if j.computingElement:
+                if j.computingElement.find('://') != -1: # this if is only needed during transition period
+                    jd['computingElement'] = arc.URL(str(j.computingElement)).Host()
                 else:
-                    jd['computingElement'] = j['computingElement']
-            jd['node'] = j['node']
-            jd['siteName'] = j['siteName']
+                    jd['computingElement'] = j.computingElement
+            jd['node'] = j.node
+            jd['siteName'] = j.siteName
             # For starting truepilot jobs send pilotID with expected log
             # location so logs are available in case of lost heartbeat
-            if pstatus == 'starting' and not changed_pstatus and self.sites[j['siteName']]['truepilot']:
+            if pstatus == 'starting' and not changed_pstatus and self.sites[j.siteName]['truepilot']:
                 date = time.strftime('%Y-%m-%d', time.gmtime())
-                logurl = '/'.join([self.conf.joblog.urlprefix, date, j['siteName'], f"{j['pandaid']}.out"])
+                logurl = '/'.join([self.conf.joblog.urlprefix, date, j.siteName, f"{j.pandaid}.out"])
                 jd['pilotID'] = f'{logurl}|Unknown|Unknown|Unknown|Unknown'
             try:
-                corecount = j['corecount'] if j['corecount'] > 0 else self.sites[j['siteName']]['corecount']
+                corecount = j.corecount if j.corecount > 0 else self.sites[j.siteName]['corecount']
                 jd['jobMetrics'] = f"coreCount={corecount}"
             except:
                 pass
-            t=PandaThr(self.getPanda(j['siteName']).updateStatus,j['pandaid'],pstatus,jd)
+            t=PandaThr(self.getPanda(j.siteName).updateStatus,j.pandaid,pstatus,jd)
             tlist.append(t)
 
         aCTUtils.RunThreadsSplit(tlist,nthreads)
 
-        for t in tlist:
-            if t.result == None or 'StatusCode' not in t.result:
-                # Strange response from panda, try later
-                continue
-            if t.result['StatusCode'] and t.result['StatusCode'][0] == '60':
-                self.log.error('Failed to contact Panda, proxy may have expired')
-                continue
-            #self.log.debug('%s: %s' % (t.id, t.result))
-            if 'command' in t.result  and t.result['command'][0] != "NULL":
-                self.log.info(f"{t.id}: response: {t.result}")
-            jd={}
-            if changed_pstatus:
-                jd['pandastatus']=pstatus
-            # Make sure heartbeat is ahead of modified time so it is not picked up again
-            if self.sites[t.args['siteName']]['truepilot'] and pstatus == 'starting':
-                # Set theartbeat 1h in the future to allow job to start
-                # running and avoid race conditions with heartbeats
-                # Now heartbeat timeout is 2h so we remove the offset
-                #jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+3600)
-                jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
-            else:
-                jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+1)
-            # If panda tells us to kill the job, set actpandastatus to tobekilled
-            # and remove from heartbeats
-            if 'command' in t.result and ( ("tobekilled" in t.result['command'][0]) or ("badattemptnr" in t.result['command'][0]) ):
-                self.log.info(f'{t.id}: cancelled by panda')
-                jd['actpandastatus']="tobekilled"
-                jd['pandastatus']=None
-            self.dbpanda.updateJob(t.id,jd)
+        with self.db.Session.begin() as session:
+            for t in tlist:
+                if t.result == None or 'StatusCode' not in t.result:
+                    # Strange response from panda, try later
+                    continue
+                if t.result['StatusCode'] and t.result['StatusCode'][0] == '60':
+                    self.log.error('Failed to contact Panda, proxy may have expired')
+                    continue
+                #self.log.debug('%s: %s' % (t.id, t.result))
+                if 'command' in t.result  and t.result['command'][0] != "NULL":
+                    self.log.info(f"{t.id}: response: {t.result}")
+                jd={}
+                if changed_pstatus:
+                    jd['pandastatus']=pstatus
+                # Make sure heartbeat is ahead of modified time so it is not picked up again
+                if self.sites[t.args['siteName']]['truepilot'] and pstatus == 'starting':
+                    # Set theartbeat 1h in the future to allow job to start
+                    # running and avoid race conditions with heartbeats
+                    # Now heartbeat timeout is 2h so we remove the offset
+                    #jd['theartbeat'] = self.dbpanda.getTimeStamp(time.time()+3600)
+                    jd['theartbeat'] = self.db.getTimeStamp(time.time()+1)
+                else:
+                    jd['theartbeat'] = self.db.getTimeStamp(time.time()+1)
+                # If panda tells us to kill the job, set actpandastatus to tobekilled
+                # and remove from heartbeats
+                if 'command' in t.result and ( ("tobekilled" in t.result['command'][0]) or ("badattemptnr" in t.result['command'][0]) ):
+                    self.log.info(f'{t.id}: cancelled by panda')
+                    jd['actpandastatus']="tobekilled"
+                    jd['pandastatus']=None
+                session.execute(update(PandaJob).where(PandaJob.pandaid==t.id).values(**jd))
 
         self.log.info("Threads finished")
 

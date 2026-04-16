@@ -4,8 +4,10 @@ import time
 import random
 import arc
 from act.atlas import aCTPanda
-from act.common import aCTProxy
 from act.atlas.aCTATLASProcess import aCTATLASProcess
+from act.atlas.dbModels import PandaJob
+from act.arc.dbModels import Proxy
+from sqlalchemy import select, func, insert, update
 
 
 class PandaGetThr(Thread):
@@ -48,22 +50,22 @@ class aCTPandaGetJobs(aCTATLASProcess):
         # In future for analysis the id will change once the job is picked up
         self.proxymap = {}
 
-        actp = aCTProxy.aCTProxy(self.log)
-        for role in self.arcconf.voms.roles:
-            attr = '/atlas/Role='+role
-            proxyid = actp.getProxyId(dn, attr)
-            if not proxyid:
-                raise Exception("Proxy with DN "+dn+" and attribute "+attr+" was not found in proxies table")
+        with self.db.Session.begin() as session:
+            for role in self.arcconf.voms.roles:
+                attr = '/atlas/Role='+role
+                proxy = session.execute(select(Proxy.id, Proxy.proxypath).where(Proxy.dn==dn, Proxy.attribute==attr)).one_or_none()
+                if not proxy:
+                    raise Exception("Proxy with DN "+dn+" and attribute "+attr+" was not found in proxies table")
 
-            proxyfile = actp.path(dn, attribute=attr)
-            # pilot role is mapped to analysis type
-            psl = 'managed'
-            if role == 'pilot':
-                role = 'analysis'
-                psl = 'user'
-                self.proxymap['panda'] = proxyid
-            self.pandas[role] = aCTPanda.aCTPanda(self.log, proxyfile)
-            self.proxymap[psl] = proxyid
+                proxyfile = proxy.proxypath
+                # pilot role is mapped to analysis type
+                psl = 'managed'
+                if role == 'pilot':
+                    role = 'analysis'
+                    psl = 'user'
+                    self.proxymap['panda'] = proxy.id
+                self.pandas[role] = aCTPanda.aCTPanda(self.log, proxyfile)
+                self.proxymap[psl] = proxy.id
 
         # queue interval
         self.queuestamp=0
@@ -124,129 +126,129 @@ class aCTPandaGetJobs(aCTATLASProcess):
 
         count=0
 
-        for site, attrs in self.sites.items():
-            if not attrs['enabled']:
-                continue
-
-            if attrs['status'] == 'offline':
-                continue
-
-            if attrs['maxjobs'] == 0:
-                continue
-
-            if (not self.getjob) and site in self.activated and sum([x for x in self.activated[site].values()]) == 0:
-                self.log.info(f"Site {site}: No activated jobs")
-                continue
-
-            prodsourcelabel = None
-            if attrs['status'] == 'test' and attrs['type'] in ['production', 'unified']:
-                self.log.info(f"Site {site} is in test, will set prodSourceLabel to prod_test")
-                prodsourcelabel = 'prod_test'
-            elif attrs['type'] == 'unified':
-                prodsourcelabel = 'unified'
-
-            # Get number of jobs injected into ARC but not yet submitted
-            nsubmitting = self.dbpanda.getNJobs("actpandastatus='sent' and siteName='%s'" % site )
-
-            # Get total number of active jobs
-            nall = self.dbpanda.getNJobs("siteName='%s' and actpandastatus!='done' \
-                                          and actpandastatus!='donefailed' and actpandastatus!='donecancelled'" % site)
-            self.log.info(f"Site {site}: {nsubmitting} jobs in sent, {nall} total")
-
-            # Limit number of jobs waiting submission to avoid getting too many
-            # jobs from Panda
-            if nsubmitting > self.conf.panda.minjobs:
-                self.log.info(f"Site {site}: at limit of sent jobs")
-                continue
-
-            if nall >= self.sites[site]['maxjobs']:
-                self.log.info(f"Site {site}: at or above max job limit of {self.sites[site]['maxjobs']}")
-                continue
-
-            nthreads = min(self.conf.panda.threads, self.sites[site]['maxjobs'] - nall)
-            if self.getjob:
-                nthreads = 1
-
-            # if no jobs available
-            stopflag=False
-
-            apfmonjobs = []
-
-            for _ in range(0, max(num//nthreads, 1)):
-                if stopflag:
+        with self.db.Session.begin() as session:
+            for site, attrs in self.sites.items():
+                if not attrs['enabled']:
                     continue
 
-                tlist = []
+                if attrs['status'] == 'offline':
+                    continue
 
-                for _ in range(0, nthreads):
-                    r = random.Random()
-                    if site in []:
-                        t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='ptest')
-                    elif r.randint(0,100) <= 2:
-                        if (not self.getjob) and site in self.activated and self.activated[site]['rc_test'] == 0:
-                            self.log.debug(f'{site}: No rc_test activated jobs')
-                            continue
-                        else:
-                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='rc_test', push=attrs['push'])
-                    else:
-                        if (not self.getjob) and site in self.activated and self.activated[site]['rest'] == 0:
-                            self.log.debug(f'{site}: No activated jobs')
-                            continue
-                        elif attrs['type'] == "analysis":
-                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='user', push=attrs['push'])
-                        else:
-                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel=prodsourcelabel, push=attrs['push'])
-                    tlist.append(t)
-                    t.start()
-                    nall += 1
-                    if nall >= self.sites[site]['maxjobs']:
-                        self.log.info(f"Site {site}: reached max job limit of {self.sites[site]['maxjobs']}")
-                        stopflag = True
-                        break
+                if attrs['maxjobs'] == 0:
+                    continue
 
-                activatedjobs = False
-                for t in tlist:
-                    t.join()
-                    (pandaid, pandajob, prodsrclabel) = t.result
-                    if pandaid == -1: # No jobs available
+                if (not self.getjob) and site in self.activated and sum([x for x in self.activated[site].values()]) == 0:
+                    self.log.info(f"Site {site}: No activated jobs")
+                    continue
+
+                prodsourcelabel = None
+                if attrs['status'] == 'test' and attrs['type'] in ['production', 'unified']:
+                    self.log.info(f"Site {site} is in test, will set prodSourceLabel to prod_test")
+                    prodsourcelabel = 'prod_test'
+                elif attrs['type'] == 'unified':
+                    prodsourcelabel = 'unified'
+
+                # Get number of jobs injected into ARC but not yet submitted
+                nsubmitting = session.execute(select(func.count(PandaJob)).where(PandaJob.actpandastatus=='sent', PandaJob.siteName==site)).scalar_one()
+
+                # Get total number of active jobs
+                nall = session.execute(select(func.count(PandaJob)).where(PandaJob.siteName==site, PandaJob.actpandastatus.not_in(['done', 'donefailed', 'donecancelled']))).scalar_one()
+                self.log.info(f"Site {site}: {nsubmitting} jobs in sent, {nall} total")
+
+                # Limit number of jobs waiting submission to avoid getting too many
+                # jobs from Panda
+                if nsubmitting > self.conf.panda.minjobs:
+                    self.log.info(f"Site {site}: at limit of sent jobs")
+                    continue
+
+                if nall >= self.sites[site]['maxjobs']:
+                    self.log.info(f"Site {site}: at or above max job limit of {self.sites[site]['maxjobs']}")
+                    continue
+
+                nthreads = min(self.conf.panda.threads, self.sites[site]['maxjobs'] - nall)
+                if self.getjob:
+                    nthreads = 1
+
+                # if no jobs available
+                stopflag=False
+
+                apfmonjobs = []
+
+                for _ in range(0, max(num//nthreads, 1)):
+                    if stopflag:
                         continue
-                    activatedjobs = True
-                    if pandaid == None: # connection error
+
+                    tlist = []
+
+                    for _ in range(0, nthreads):
+                        r = random.Random()
+                        if site in []:
+                            t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='ptest')
+                        elif r.randint(0,100) <= 2:
+                            if (not self.getjob) and site in self.activated and self.activated[site]['rc_test'] == 0:
+                                self.log.debug(f'{site}: No rc_test activated jobs')
+                                continue
+                            else:
+                                t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='rc_test', push=attrs['push'])
+                        else:
+                            if (not self.getjob) and site in self.activated and self.activated[site]['rest'] == 0:
+                                self.log.debug(f'{site}: No activated jobs')
+                                continue
+                            elif attrs['type'] == "analysis":
+                                t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel='user', push=attrs['push'])
+                            else:
+                                t = PandaGetThr(self.getPanda(site).getJob, site, prodSourceLabel=prodsourcelabel, push=attrs['push'])
+                        tlist.append(t)
+                        t.start()
+                        nall += 1
+                        if nall >= self.sites[site]['maxjobs']:
+                            self.log.info(f"Site {site}: reached max job limit of {self.sites[site]['maxjobs']}")
+                            stopflag = True
+                            break
+
+                    activatedjobs = False
+                    for t in tlist:
+                        t.join()
+                        (pandaid, pandajob, prodsrclabel) = t.result
+                        if pandaid == -1: # No jobs available
+                            continue
+                        activatedjobs = True
+                        if pandaid == None: # connection error
+                            stopflag = True
+                            continue
+
+                        n = {}
+                        n['pandastatus'] = 'sent'
+                        n['actpandastatus'] = 'sent'
+                        n['siteName'] = site
+                        n['proxyid'] = self.proxymap.get(prodsrclabel, self.proxymap.get('managed'))
+                        n['prodSourceLabel'] = prodsrclabel
+                        if pandaid != 0:
+                            try:
+                                n['corecount'] = int(re.search(r'coreCount=(\d+)', pandajob).group(1))
+                            except:
+                                self.log.warning(f'appjob({pandaid}): no corecount in job description')
+                        n['sendhb'] = attrs['push']
+                        if pandaid == 0:
+                            # Pull mode: set dummy arcjobid and condorjobid to avoid
+                            # job getting picked up before setting proper job desc after insertion
+                            n['arcjobid'] = -1
+                            n['condorjobid'] = -1
+                        rowid = session.execute(insert(PandaJob).values(**n, pandaid=pandaid, pandajob=pandajob).returning(PandaJob.id)).scalar_one()
+                        if pandaid == 0:
+                            # Pull mode: use row id as job id for output files
+                            pandaid = rowid
+                            pandajob = 'PandaID=%d&prodSourceLabel=%s' % (pandaid, prodsrclabel)
+                            session.execute(update(PandaJob).where(PandaJob.id==pandaid).values(pandaid=pandaid, pandajob=pandajob, arcjobid=None, condorjobid=None))
+                        apfmonjobs.append((rowid, pandaid))
+                        count += 1
+
+                    if not activatedjobs:
+                        if site in self.activated:
+                            self.activated[site] = {'rest': 0, 'rc_test': 0}
                         stopflag = True
-                        continue
 
-                    n = {}
-                    n['pandastatus'] = 'sent'
-                    n['actpandastatus'] = 'sent'
-                    n['siteName'] = site
-                    n['proxyid'] = self.proxymap.get(prodsrclabel, self.proxymap.get('managed'))
-                    n['prodSourceLabel'] = prodsrclabel
-                    if pandaid != 0:
-                        try:
-                            n['corecount'] = int(re.search(r'coreCount=(\d+)', pandajob).group(1))
-                        except:
-                            self.log.warning(f'appjob({pandaid}): no corecount in job description')
-                    n['sendhb'] = attrs['push']
-                    if pandaid == 0:
-                        # Pull mode: set dummy arcjobid and condorjobid to avoid
-                        # job getting picked up before setting proper job desc after insertion
-                        n['arcjobid'] = -1
-                        n['condorjobid'] = -1
-                    rowid = self.dbpanda.insertJob(pandaid, pandajob, n)['LAST_INSERT_ID()']
-                    if pandaid == 0:
-                        # Pull mode: use row id as job id for output files
-                        pandaid = rowid
-                        pandajob = 'PandaID=%d&prodSourceLabel=%s' % (pandaid, prodsrclabel)
-                        self.dbpanda.updateJobs('id=%d' % pandaid, {'pandaid': pandaid, 'pandajob': pandajob, 'arcjobid': None, 'condorjobid': None})
-                    apfmonjobs.append((rowid, pandaid))
-                    count += 1
-
-                if not activatedjobs:
-                    if site in self.activated:
-                        self.activated[site] = {'rest': 0, 'rc_test': 0}
-                    stopflag = True
-
-            self.apfmon.registerJobs(apfmonjobs, site)
+                self.apfmon.registerJobs(apfmonjobs, site)
 
         return count
 

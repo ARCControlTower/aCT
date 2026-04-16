@@ -1,11 +1,10 @@
-from act.db.aCTDB import aCTDB
+from act.arc.aCTDBArcNEW import aCTDBArc
+from act.atlas.dbModels import PandaJob, PandaArchive
 
-class aCTDBPanda(aCTDB):
-
-    def __init__(self, log):
-        aCTDB.__init__(self, log, 'pandajobs')
+class aCTDBPanda(aCTDBArc):
 
     def createTables(self):
+        return
         '''
          pandajobs:
            - id: Auto-incremented counter

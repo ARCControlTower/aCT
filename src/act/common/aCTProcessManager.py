@@ -13,7 +13,6 @@ import multiprocessing
 
 from act.arc.aCTDBArcNEW import aCTDBArc
 from act.common.aCTConfig import aCTConfigAPP
-from act.condor.aCTDBCondor import aCTDBCondor
 
 
 class aCTProcessManager:
@@ -112,10 +111,6 @@ class aCTProcessManager:
             self.dbarc = aCTDBArc(self.log)
         else:
             self.dbarc = None
-        if 'act.condor' in self.appconf.modules:
-            self.dbcondor = aCTDBCondor(self.log)
-        else:
-            self.dbcondor = None
 
         # dictionary of all running processes
         self.processes = {}
@@ -344,9 +339,6 @@ class aCTProcessManager:
         if module == 'act.arc':
             activeClusters = [entry.cluster for entry in self.dbarc.getActiveClusters()]
             requestedClusters = list(itertools.chain(*[entry.clusterlist.split(',') for entry in self.dbarc.getClusterLists()]))
-        elif module == 'act.condor':
-            activeClusters = self.dbcondor.getActiveClusters()
-            requestedClusters = self.dbcondor.getClusterLists()
         else:
             return
         moduleProcs = self.processes.get(module, {})
@@ -426,8 +418,6 @@ class aCTProcessManager:
         """Reconnect database connections."""
         try:
             del self.dbarc
-            del self.dbcondor
         except AttributeError:  # Already deleted
             pass
         self.dbarc = aCTDBArc(self.log)
-        self.dbcondor = aCTDBCondor(self.log)

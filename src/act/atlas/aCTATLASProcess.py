@@ -1,12 +1,10 @@
 import time
 
-from act.arc.aCTDBArc import aCTDBArc
 from act.atlas.aCTAPFMon import aCTAPFMon
 from act.atlas.aCTCRICParser import aCTCRICParser
 from act.atlas.aCTDBPanda import aCTDBPanda
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from act.common.aCTProcess import aCTProcess
-from act.condor.aCTDBCondor import aCTDBCondor
 
 
 class aCTATLASProcess(aCTProcess):
@@ -35,9 +33,7 @@ class aCTATLASProcess(aCTProcess):
         self.tmpdir = self.arcconf.tmp.dir
 
         # database
-        self.dbarc = aCTDBArc(self.log)
-        self.dbcondor = aCTDBCondor(self.log)
-        self.dbpanda = aCTDBPanda(self.log)
+        self.db = aCTDBPanda(self.log)
 
         # APFMon
         self.apfmon = aCTAPFMon(self.conf)
@@ -45,7 +41,7 @@ class aCTATLASProcess(aCTProcess):
         # CRIC info
         self.cricparser = aCTCRICParser(self.log)
         self.sites = {}
-        self.sitesselect = ''
+        self.sitesselect = []
 
         # start time for periodic restart
         self.starttime = time.time()
@@ -53,11 +49,7 @@ class aCTATLASProcess(aCTProcess):
     def setSites(self):
         self.sites = self.cricparser.getSites(flavour=self.ceflavour)
         # For DB queries
-        siteStr = ",".join([f"'{site}'" for site in self.sites.keys()])
-        self.sitesselect = f"({siteStr})"
+        self.sitesselect = list(self.sites.keys())
 
     def finish(self):
-        self.dbarc.close()
-        self.dbcondor.close()
-        self.dbpanda.close()
         super().finish()

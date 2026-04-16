@@ -9,9 +9,11 @@ import shutil
 import gc
 
 from urllib.parse import urlparse
-
+from sqlalchemy import select, update, or_, delete
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
+from act.atlas.dbModels import PandaJob
+from act.arc.dbModels import ArcJob, JobDescription
 
 
 class aCTATLASStatus(aCTATLASProcess):
@@ -29,66 +31,68 @@ class aCTATLASStatus(aCTATLASProcess):
         """
         offlinesites = [site for site, a in self.sites.items() if a["status"] == "offline"]
         if offlinesites:
-            siteStr = ",".join([f"'{site}'" for site in offlinesites])
-            jobs = self.dbpanda.getJobs(f"(actpandastatus='starting' or actpandastatus='sent') and sitename in ({siteStr})",
-                                        ["pandaid", "arcjobid", "siteName", "id"])
-            for job in jobs:
-                self.stopOnFlag()
-                self.log.info(f"Cancelling \"starting\" appjob({job['pandaid']}) for offline site {job['siteName']}")
-                select = f"id={job['id']}"
-                self.dbpanda.updateJobs(select, {"actpandastatus": "failed", "pandastatus": "failed",
-                                                 "error": "Starting job was killed because queue went offline"})
-                if job["arcjobid"]:
-                    self.dbarc.updateArcJob(job["arcjobid"], {"arcstate": "tocancel"})
+            with self.db.Session.begin() as session:
+                jobs = session.execute(select(PandaJob.pandaid, PandaJob.arcjobid, PandaJob.siteName, PandaJob.id) \
+                                    .where(PandaJob.actpandastatus.in_(['starting', 'sent']), PandaJob.siteName.in_(offlinesites))).all()
+                session.execute(update(PandaJob).where(PandaJob.id.in_([job.id for job in jobs])).values(actpandastatus='failed', pandastatus='failed', error="Starting job was killed because queue went offline"))
+                session.execute(update(ArcJob).where(ArcJob.id.in_([job.arcjobid for job in jobs if job.arcjobid is not None])).values(arcstate='tocancel'))
+                for job in jobs:
+                    self.stopOnFlag()
+                    self.log.info(f"Cancelling \"starting\" appjob({job.pandaid}) for offline site {job.siteName}")
 
         # TODO: HARDCODED limit
         # Get jobs killed by panda
-        jobs = self.dbpanda.getJobs(f"actpandastatus='tobekilled' and siteName in {self.sitesselect} limit 100",
-                                    ["pandaid", "arcjobid", "pandastatus", "id", "siteName"])
-        if not jobs:
-            return
+        with self.db.Session.begin() as session:
+            jobs = session.execute(select(PandaJob.pandaid, PandaJob.arcjobid, PandaJob.pandastatus, PandaJob.id, PandaJob.siteName) \
+                                   .where(PandaJob.actpandastatus=='tobekilled', PandaJob.siteName.in_(self.sitesselect)) \
+                                   .limit(100)).all()
 
-        for job in jobs:
+            if not jobs:
+                return
 
-            self.stopOnFlag()
-            gc.collect()
+            for job in jobs:
 
-            self.log.info(f"Cancelling arcjob({job['id']}) for appjob({job['pandaid']})")
-            select = f"id={job['id']}"
+                self.stopOnFlag()
+                gc.collect()
 
-            # Check if arcjobid is set before cancelling the job
-            if not job["arcjobid"]:
-                self.dbpanda.updateJobs(select, {"actpandastatus": "cancelled"})
-                continue
+                self.log.info(f"Cancelling arcjob({job.id}) for appjob({job.pandaid})")
 
-            # Put timings in the DB
-            arcselect = f"arcjobid={job['arcjobid']} and arcjobs.id=pandajobs.arcjobid and sitename in {self.sitesselect}"
-            columns = ["arcjobs.EndTime", "UsedTotalWallTime", "stdout", "JobID", "appjobid", "siteName", "cluster", "metadata",
-                       "ExecutionNode", "pandaid", "UsedTotalCPUTime", "ExitCode", "arcjobs.Error", "sendhb", "pandajobs.created", "corecount"]
+                # Check if arcjobid is set before cancelling the job
+                if not job.arcjobid:
+                    session.execute(update(PandaJob).where(PandaJob.id==job.id).values(actpandastatus='cancelled'))
+                    continue
 
-            arcjobs = self.dbarc.getArcJobsInfo(arcselect, columns=columns, tables="arcjobs,pandajobs")
-            desc = {}
-            if arcjobs:
-                desc["endTime"] = datetime.datetime.utcnow()
-                desc["startTime"] = datetime.datetime.utcnow()
+                # Put timings in the DB
+                arcjobs = session.execute(select(ArcJob.EndTime, ArcJob.UsedTotalWallTime, ArcJob.StdOut, 
+                                                 ArcJob.JobID, ArcJob.appjobid, ArcJob.cluster, ArcJob.ExecutionNode,
+                                                 ArcJob.UsedTotalCPUTime, ArcJob.ExitCode, ArcJob.Error,
+                                                 PandaJob.siteName, PandaJob.metadata, PandaJob.pandaid,
+                                                 PandaJob.sendhb, PandaJob.created) \
+                                                    .join(PandaJob.arcjob) \
+                                                    .where(PandaJob.id==job.id, PandaJob.siteName.in_(self.sitesselect))).all()
 
-            self.processFailed(arcjobs)
+                desc = {}
+                if arcjobs:
+                    desc["endTime"] = self.db.getTimeStamp()
+                    desc["startTime"] = self.db.getTimeStamp()
+                    arcjobs = [row._asdict() for row in arcjobs]
+                    self.processFailed(arcjobs)
 
-            # Check if job was manually killed
-            if job["pandastatus"] is not None:
-                self.log.info(f"appjob({job['pandaid']}): Manually killed, will report failure to panda")
-                # Skip validator since there is no metadata.xml
-                desc["actpandastatus"] = "failed"
-                desc["pandastatus"] = "failed"
-                desc["error"] = "Job was killed in aCT"
-                if self.sites[job["siteName"]]["truepilot"]:
-                    desc["sendhb"] = 0
-            else:
-                desc["actpandastatus"] = "cancelled"
-            self.dbpanda.updateJobs(select, desc)
+                # Check if job was manually killed
+                if job.pandastatus is not None:
+                    self.log.info(f"appjob({job.pandaid}): Manually killed, will report failure to panda")
+                    # Skip validator since there is no metadata.xml
+                    desc["actpandastatus"] = "failed"
+                    desc["pandastatus"] = "failed"
+                    desc["error"] = "Job was killed in aCT"
+                    if self.sites[job.siteName]["truepilot"]:
+                        desc["sendhb"] = 0
+                else:
+                    desc["actpandastatus"] = "cancelled"
+                session.execute(update(PandaJob).where(PandaJob.id==job.id).values(**desc))
 
-            # Finally cancel the arc job
-            self.dbarc.updateArcJob(job["arcjobid"], {"arcstate": "tocancel"})
+                # Finally cancel the arc job
+                session.execute(update(ArcJob).where(ArcJob.id==job.arcjobid).values(tarcstate=self.db.getTimeStamp(), arcstate='tocancel'))
 
     def getStartTime(self, endtime, walltime):
         """
@@ -109,28 +113,30 @@ class aCTATLASStatus(aCTATLASProcess):
         - exit is checked before every job update
         """
         # TODO: HARDCODED limit
-        select = "((arcjobs.arcstate in ('submitted', 'holding') and pandajobs.actpandastatus='sent') or"
-        select += " (arcjobs.arcstate in ('tosubmit', 'submitting', 'submitted', 'holding') and pandajobs.actpandastatus='running'))"
-        select += f" and arcjobs.id=pandajobs.arcjobid and pandajobs.sitename in {self.sitesselect} limit 100000"
-        columns = ["arcjobs.id", "arcjobs.cluster", "arcjobs.appjobid"]
-        jobstoupdate = self.dbarc.getArcJobsInfo(select, columns=columns, tables="arcjobs,pandajobs")
+        with self.db.Session.begin() as session:
+            jobstoupdate = session.execute(select(ArcJob.id, ArcJob.cluster, ArcJob.appjobid) \
+                            .join(PandaJob.arcjob) \
+                            .where(or_(
+                                (ArcJob.arcstate.in_(['submitted', 'holding']), PandaJob.actpandastatus=='sent'), 
+                                (ArcJob.arcstate.in_(['tosubmit', 'submitting', 'submitted', 'holding']), PandaJob.actpandastatus=='running')),
+                                PandaJob.siteName.in_(self.sitesselect))) \
+                            .limit(100000).all()
 
-        if len(jobstoupdate) == 0:
-            return
-        else:
-            idstr = ",".join([job["appjobid"] for job in jobstoupdate])
-            self.log.info(f"Found {len(jobstoupdate)} submitted jobs ({idstr})")
+            if len(jobstoupdate) == 0:
+                return
+            else:
+                idstr = ",".join([job.appjobid for job in jobstoupdate])
+                self.log.info(f"Found {len(jobstoupdate)} submitted jobs ({idstr})")
 
-        for aj in jobstoupdate:
-            self.stopOnFlag()
-            gc.collect()
-            select = f"arcjobid={aj['id']}"
-            desc = {}
-            desc["pandastatus"] = "starting"
-            desc["actpandastatus"] = "starting"
-            if aj["cluster"]:
-                desc["computingElement"] = urlparse(aj["cluster"]).hostname
-            self.dbpanda.updateJobs(select, desc)
+            for aj in jobstoupdate:
+                self.stopOnFlag()
+                gc.collect()
+                desc = {}
+                desc["pandastatus"] = "starting"
+                desc["actpandastatus"] = "starting"
+                if aj.cluster:
+                    desc["computingElement"] = urlparse(aj.cluster).hostname
+                session.execute(update(PandaJob).where(PandaJob.arcjobid==aj.id).values(**desc))
 
     def updateRunningJobs(self, state):
         """
@@ -149,56 +155,53 @@ class aCTATLASStatus(aCTATLASProcess):
         # do an inner join to pick up all jobs that should be set to running
         # TODO: pandajobs.starttime will not be updated if a job is resubmitted
         # internally by the ARC part.
-        if state == "running":
-            select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate in ('running') and pandajobs.actpandastatus in ('starting', 'sent')"
-        if state == "finishing":
-            select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate in ('finishing') and pandajobs.actpandastatus in ('starting', 'sent', 'running')"
-        select += f" and pandajobs.sitename in {self.sitesselect} limit 100000"
+        states = ['starting', 'sent']
+        if state == 'finishing':
+            states.append('running')
 
-        columns = ["arcjobs.id", "arcjobs.UsedTotalWalltime", "arcjobs.ExecutionNode",
-                   "arcjobs.cluster", "arcjobs.RequestedSlots", "pandajobs.pandaid", "pandajobs.siteName", "arcjobs.appjobid", "arcjobs.tstate"]
-        jobstoupdate = self.dbarc.getArcJobsInfo(select, columns=columns, tables="arcjobs,pandajobs")
+        with self.db.Session().begin() as session:
+            jobstoupdate = session.execute(select(ArcJob.id, ArcJob.UsedTotalWalltime, ArcJob.ExecutionNode,
+                                                  ArcJob.cluster, ArcJob.RequestedSlots, ArcJob.appjobid, ArcJob.tstate,
+                                                  PandaJob.pandaid, PandaJob.siteName) \
+                                                    .join(PandaJob.arcjob) \
+                                                    .where(ArcJob.arcstate==state, PandaJob.actpandastatus.in_(states)) \
+                                                    .limit(100000)).all()
 
-        if len(jobstoupdate) == 0:
-            return
-        else:
-            idstr = ",".join([job["appjobid"] for job in jobstoupdate])
-            self.log.info(f"Found {state}: {len(jobstoupdate)} jobs ({idstr})")
-
-        for aj in jobstoupdate:
-
-            self.stopOnFlag()
-            gc.collect()
-
-            select = f"arcjobid={aj['id']}"
-            desc = {}
-            desc["pandastatus"] = "running"
-            desc["actpandastatus"] = "running"
-            if state == "finishing" and datetime.datetime.utcnow() - aj["tstate"] > datetime.timedelta(minutes=10):
-                desc["pandastatus"] = "transferring"
-                desc["actpandastatus"] = "transferring"
-            if len(aj["ExecutionNode"]) > 255:
-                desc["node"] = aj["ExecutionNode"][:254]
-                self.log.warning(f"appjob({aj['pandaid']}): Truncating wn hostname from {aj['ExecutionNode']} to {desc['node']}")
+            if len(jobstoupdate) == 0:
+                return
             else:
-                desc["node"] = aj["ExecutionNode"]
-            desc["computingElement"] = urlparse(aj["cluster"]).hostname
-            desc["startTime"] = self.getStartTime(datetime.datetime.utcnow(), aj["UsedTotalWalltime"])
-            desc["corecount"] = aj["RequestedSlots"]
+                idstr = ",".join([job.appjobid for job in jobstoupdate])
+                self.log.info(f"Found {state}: {len(jobstoupdate)} jobs ({idstr})")
 
-            # When true pilot job has started running, turn of aCT heartbeats
-            if self.sites[aj["siteName"]]["truepilot"]:
-                self.log.info(f"appjob({aj['pandaid']}): Job is running so stop sending heartbeats")
-                desc["sendhb"] = 0
-            else:
-                # Update APFmon (done by wrapper for truepilot)
-                self.apfmon.updateJob(aj["pandaid"], "running")
+            for aj in jobstoupdate:
 
-            try:
-                self.dbpanda.updateJobs(select, desc)
-            except:
-                desc["startTime"] = datetime.datetime.utcnow()
-                self.dbpanda.updateJobs(select, desc)
+                self.stopOnFlag()
+                gc.collect()
+
+                desc = {}
+                desc["pandastatus"] = "running"
+                desc["actpandastatus"] = "running"
+                if state == "finishing" and datetime.datetime.utcnow() - aj.tstate > datetime.timedelta(minutes=10):
+                    desc["pandastatus"] = "transferring"
+                    desc["actpandastatus"] = "transferring"
+                if len(aj.ExecutionNode) > 255:
+                    desc["node"] = aj.ExecutionNode[:254]
+                    self.log.warning(f"appjob({aj.pandaid}): Truncating wn hostname from {aj.ExecutionNode} to {desc['node']}")
+                else:
+                    desc["node"] = aj.ExecutionNode
+                desc["computingElement"] = urlparse(aj.cluster).hostname
+                desc["startTime"] = self.getStartTime(datetime.datetime.utcnow(), aj.UsedTotalWalltime)
+                desc["corecount"] = aj.RequestedSlots
+
+                # When true pilot job has started running, turn of aCT heartbeats
+                if self.sites[aj.siteName]["truepilot"]:
+                    self.log.info(f"appjob({aj.pandaid}): Job is running so stop sending heartbeats")
+                    desc["sendhb"] = 0
+                else:
+                    # Update APFmon (done by wrapper for truepilot)
+                    self.apfmon.updateJob(aj.pandaid, "running")
+
+                session.execute(update(PandaJob).where(PandaJob.arcjobid==aj.id).values(**desc))
 
     def updateFinishedJobs(self):
         """
@@ -215,49 +218,40 @@ class aCTATLASStatus(aCTATLASProcess):
         # TODO: HARDCODED limit
         # don't get jobs already having actpandastatus states treated by
         # validator to avoid race conditions
-        select = "arcjobs.id=pandajobs.arcjobid and arcjobs.arcstate='done'"
-        select += " and pandajobs.actpandastatus != 'tovalidate'"
-        select += " and pandajobs.actpandastatus != 'toresubmit'"
-        select += " and pandajobs.actpandastatus != 'toclean'"
-        select += " and pandajobs.actpandastatus != 'finished'"
-        select += " and pandajobs.actpandastatus != 'validating'"
-        select += " and pandajobs.actpandastatus != 'cleaning'"
-        select += " and pandajobs.actpandastatus != 'resubmitting'"
-        select += f" and pandajobs.sitename in {self.sitesselect} limit 100000"
-        columns = ["arcjobs.id", "arcjobs.UsedTotalWallTime", "arcjobs.EndTime", "arcjobs.appjobid", "pandajobs.sendhb", "pandajobs.siteName"]
-        jobstoupdate = self.dbarc.getArcJobsInfo(select, tables="arcjobs,pandajobs", columns=columns)
 
-        if len(jobstoupdate) == 0:
-            return
-        else:
-            idstr = ",".join([job['appjobid'] for job in jobstoupdate])
-            self.log.info(f"Found {len(jobstoupdate)} finished jobs ({idstr})")
+        with self.db.Session.begin() as session:
+            jobstoupdate = session.execute(select(ArcJob.id, ArcJob.UsedTotalWallTime, ArcJob.EndTime,
+                                            ArcJob.appjobid, PandaJob.sendhb, PandaJob.siteName) \
+                                            .join(PandaJob.arcjob) \
+                                            .where(ArcJob.arcstate=='done', PandaJob.siteName.in_(self.sitesselect),
+                                                PandaJob.actpandastatus.not_in(['tovalidate', 'toresubmit', 'toclean', 'finished', 'validating', 'cleaning', 'resubmitting'])) \
+                                            .limit(100000)).all()
 
-        for aj in jobstoupdate:
+            if len(jobstoupdate) == 0:
+                return
+            else:
+                idstr = ",".join([job.appjobid for job in jobstoupdate])
+                self.log.info(f"Found {len(jobstoupdate)} finished jobs ({idstr})")
 
-            self.stopOnFlag()
-            gc.collect()
+            for aj in jobstoupdate:
 
-            select = f"arcjobid={aj['id']}"
-            desc = {}
-            desc["pandastatus"] = "transferring"
-            desc["actpandastatus"] = "tovalidate"
-            desc["startTime"] = self.getStartTime(aj["EndTime"], aj["UsedTotalWallTime"])
-            desc["endTime"] = aj["EndTime"]
-            # True pilot job may have gone straight to finished, turn off aCT heartbeats if necessary
-            if self.sites[aj["siteName"]]["truepilot"] and aj["sendhb"] == 1:
-                self.log.info(f"appjob({aj['appjobid']}): Job finished so stop sending heartbeats")
-                desc["sendhb"] = 0
+                self.stopOnFlag()
+                gc.collect()
 
-            if not self.sites[aj["siteName"]]["truepilot"]:
-                # Update APFmon (done by wrapper for truepilot)
-                self.apfmon.updateJob(aj["appjobid"], "exiting", exitcode=0)
-            try:
-                self.dbpanda.updateJobs(select, desc)
-            except:
-                desc["startTime"] = datetime.datetime.utcnow()
-                desc["endTime"] = datetime.datetime.utcnow()
-                self.dbpanda.updateJobs(select, desc)
+                desc = {}
+                desc["pandastatus"] = "transferring"
+                desc["actpandastatus"] = "tovalidate"
+                desc["startTime"] = self.getStartTime(aj.EndTime, aj.UsedTotalWallTime)
+                desc["endTime"] = aj.EndTime
+                # True pilot job may have gone straight to finished, turn off aCT heartbeats if necessary
+                if self.sites[aj.siteName]["truepilot"] and aj.sendhb == 1:
+                    self.log.info(f"appjob({aj.appjobid}): Job finished so stop sending heartbeats")
+                    desc["sendhb"] = 0
+
+                if not self.sites[aj.siteName]["truepilot"]:
+                    # Update APFmon (done by wrapper for truepilot)
+                    self.apfmon.updateJob(aj.appjobid, "exiting", exitcode=0)
+                session.execute(update(PandaJob).where(PandaJob.arcjobid==aj.id).values(**desc))
 
     def checkFailed(self, arcjobs):
         """
@@ -269,31 +263,31 @@ class aCTATLASStatus(aCTATLASProcess):
         failedjobs = []
         #resubmitting=False
 
-        for aj in arcjobs:
+        with self.db.Session.begin() as session:
+            for aj in arcjobs:
 
-            self.stopOnFlag()
-            gc.collect()
+                self.stopOnFlag()
+                gc.collect()
 
-            if self.sites[aj["siteName"]]["truepilot"]:
-                self.log.info(f"appjob({aj['appjobid']}): No resubmission for true pilot job")
-                failedjobs += [aj]
-                continue
-            resubmit = False
-            # TODO: errors part of aCTConfigARC should probably be moved to aCTConfigAPP.
-            for error in self.arcconf.errors.toresubmit.arcerrors or []:
-                if error in aj["Error"]:
-                    resubmit = True
-            if resubmit:
-                self.log.info(f"appjob({aj['appjobid']}): Resubmitting arcjob({aj['arcjobid']}) arcid({aj['JobID']}) {aj['Error']}")
-                select = f"arcjobid={aj['id']}"
-                jd = {}
-                # Validator processes this state before setting back to starting
-                jd["pandastatus"] = "starting"
-                jd["actpandastatus"] = "toresubmit"
-                self.dbpanda.updateJobs(select, jd)
-                #resubmitting=True
-            else:
-                failedjobs += [aj]
+                if self.sites[aj.siteName]["truepilot"]:
+                    self.log.info(f"appjob({aj.appjobid}): No resubmission for true pilot job")
+                    failedjobs += [aj]
+                    continue
+                resubmit = False
+                # TODO: errors part of aCTConfigARC should probably be moved to aCTConfigAPP.
+                for error in self.arcconf.errors.toresubmit.arcerrors or []:
+                    if error in aj.Error:
+                        resubmit = True
+                if resubmit:
+                    self.log.info(f"appjob({aj.appjobid}): Resubmitting arcjob({aj.arcjobid}) arcid({aj.JobID}) {aj.Error}")
+                    jd = {}
+                    # Validator processes this state before setting back to starting
+                    jd["pandastatus"] = "starting"
+                    jd["actpandastatus"] = "toresubmit"
+                    session.execute(update(PandaJob).where(PandaJob.arcjobid==aj.id).values(**jd))
+                    #resubmitting=True
+                else:
+                    failedjobs += [aj]
 
         return failedjobs
 
@@ -465,46 +459,41 @@ class aCTATLASStatus(aCTATLASProcess):
         - exit is checked before every job update
         """
         # fetch failed jobs
-        select = "arcstate='failed'"
-        columns = ["id"]
-        arcjobs = self.dbarc.getArcJobsInfo(select, columns)
-        desc = {"arcstate": "tofetch", "tarcstate": self.dbarc.getTimeStamp()}
-        for aj in arcjobs:
-            self.stopOnFlag()
-            gc.collect()
-            select = f"id={aj['id']}"
-            self.dbarc.updateArcJobs(desc, select)
+        with self.db.Session.begin() as session:
+            session.execute(update(ArcJob).where(ArcJob.arcstate=='failed').values(arcstate='tofetch', tarcstate=self.db.getTimeStamp()))
 
         # TODO: HARDCODED limit
         # Look for failed final states in ARC which are still starting or running in panda
-        select = "(arcstate='donefailed' or arcstate='cancelled' or arcstate='lost')"
-        select += " and actpandastatus in ('sent', 'starting', 'running', 'transferring')"
-        select += f" and pandajobs.arcjobid = arcjobs.id and siteName in {self.sitesselect} limit 1000"
-        columns = ["arcstate", "arcjobid", "appjobid", "JobID", "arcjobs.Error", "arcjobs.EndTime",
-                   "siteName", "ExecutionNode", "pandaid", "UsedTotalCPUTime", "pandajobs.created",
-                   "UsedTotalWallTime", "ExitCode", "sendhb", "stdout", "metadata", "cluster", "corecount"]
-
-        jobstoupdate = self.dbarc.getArcJobsInfo(select, columns=columns, tables="arcjobs,pandajobs")
+        with self.db.Session() as session:
+            jobstoupdate = session.execute(select(ArcJob.arcstate, ArcJob.appjobid, ArcJob.JobID, ArcJob.Error,
+                                                  ArcJob.EndTime, ArcJob.ExecutionNode, ArcJob.UsedTotalCPUTime,
+                                                  ArcJob.UsedTotalWallTime, ArcJob.ExitCode, ArcJob.StdOut, ArcJob.cluster,
+                                                  PandaJob.arcjobid, PandaJob.siteName, PandaJob.pandaid,
+                                                  PandaJob.created, PandaJob.sendhb, PandaJob.metadata, PandaJob.corecount) \
+                                            .join(PandaJob.arcjob) \
+                                            .where(ArcJob.arcstate.in_(['donefailed', 'cancelled', 'lost']), 
+                                                    PandaJob.actpandastatus.in_(['sent', 'starting', 'running', 'transferring']),
+                                                    PandaJob.siteName.in_(self.sitesselect).limit(1000))).all()
 
         if len(jobstoupdate) == 0:
             return
 
         # get donefailed jobs
-        failedjobs = [job for job in jobstoupdate if job["arcstate"] == "donefailed"]
+        failedjobs = [job for job in jobstoupdate if job.arcstate == "donefailed"]
         if len(failedjobs) != 0:
-            idstr = ",".join([job["appjobid"] for job in failedjobs])
+            idstr = ",".join([job.appjobid for job in failedjobs])
             self.log.info(f"Found {len(failedjobs)} failed jobs ({idstr})")
 
         # get lost jobs
-        lostjobs = [job for job in jobstoupdate if job["arcstate"] == "lost"]
+        lostjobs = [job for job in jobstoupdate if job.arcstate == "lost"]
         if len(lostjobs) != 0:
-            idstr = ",".join([job["appjobid"] for job in lostjobs])
+            idstr = ",".join([job.appjobid for job in lostjobs])
             self.log.info(f"Found {len(lostjobs)} lost jobs ({idstr})")
 
         # get cancelled jobs
-        cancelledjobs = [job for job in jobstoupdate if job["arcstate"] == "cancelled"]
+        cancelledjobs = [job for job in jobstoupdate if job.arcstate == "cancelled"]
         if len(cancelledjobs) != 0:
-            idstr = ",".join([job["appjobid"] for job in cancelledjobs])
+            idstr = ",".join([job.appjobid for job in cancelledjobs])
             self.log.info(f"Found {len(cancelledjobs)} cancelled jobs ({idstr})")
 
         # try to resubmit on certain errors
@@ -513,79 +502,74 @@ class aCTATLASStatus(aCTATLASProcess):
         # process all failed jobs that couldn't be resubmitted
         self.processFailed(failedjobs)
 
-        for aj in failedjobs:
-            self.stopOnFlag()
-            gc.collect()
-            select = f"arcjobid={aj['arcjobid']}"
-            desc = {}
-            desc["pandastatus"] = "transferring"
-            desc["actpandastatus"] = "toclean" # to clean up any output
-            desc["endTime"] = aj["EndTime"]
-            desc["startTime"] = self.getStartTime(aj["EndTime"], aj["UsedTotalWallTime"])
-            desc["error"] = aj["Error"]
-            # True pilot job may have gone straight to failed, turn off aCT heartbeats if necessary
-            if self.sites[aj["siteName"]]["truepilot"] and aj["sendhb"] == 1:
-                self.log.info(f"appjob({aj['appjobid']}): Job finished so stop sending heartbeats")
-                desc["sendhb"] = 0
-
-            if not self.sites[aj["siteName"]]["truepilot"]:
-                # Update APFmon (done by wrapper for truepilot)
-                self.apfmon.updateJob(aj["appjobid"], "exiting", exitcode=aj["ExitCode"])
-            try:
-                self.dbpanda.updateJobs(select, desc)
-            except:
-                desc["startTime"] = datetime.datetime.utcnow()
-                desc["endTime"] = datetime.datetime.utcnow()
-                self.dbpanda.updateJobs(select, desc)
-
-        # clean lost pilot jobs or resubmit other lost jobs
-        for aj in lostjobs:
-            self.stopOnFlag()
-            gc.collect()
-            select = f"arcjobid={aj['arcjobid']}"
-            desc = {}
-
-            # For truepilot, just set to clean and transferring to clean up arc job
-            if self.sites[aj["siteName"]]["truepilot"]:
-                self.log.info(f"appjob({aj['appjobid']}): Job is lost, cleaning up arc job")
-                desc["sendhb"] = 0
+        with self.db.Session.begin() as session:
+            for aj in failedjobs:
+                self.stopOnFlag()
+                gc.collect()
+                desc = {}
                 desc["pandastatus"] = "transferring"
-                desc["actpandastatus"] = "toclean"
-                desc["error"] = "Job was lost from ARC CE"
-            else:
-                self.log.info(f"appjob({aj['appjobid']}): Resubmitting lost arcjob({aj['arcjobid']}) arcid({aj['JobID']}) {aj['Error']}")
-                desc["pandastatus"] = "starting"
-                desc["actpandastatus"] = "starting"
-                desc["arcjobid"] = None
-            self.dbpanda.updateJobs(select, desc)
+                desc["actpandastatus"] = "toclean" # to clean up any output
+                desc["endTime"] = aj.EndTime
+                desc["startTime"] = self.getStartTime(aj.EndTime, aj.UsedTotalWallTime)
+                desc["error"] = aj.Error
+                # True pilot job may have gone straight to failed, turn off aCT heartbeats if necessary
+                if self.sites[aj.siteName]["truepilot"] and aj.sendhb == 1:
+                    self.log.info(f"appjob({aj.appjobid}): Job finished so stop sending heartbeats")
+                    desc["sendhb"] = 0
 
-        # clean cancelled pilot jobs and resubmit other cancelled jobs
-        for aj in cancelledjobs:
-            self.stopOnFlag()
-            gc.collect()
-            # Jobs were unexpectedly killed in arc, resubmit and clean
-            select = f"arcjobid={aj['arcjobid']}"
-            desc = {}
-            # For truepilot, just set to clean and transferring to clean up arc job
-            if self.sites[aj["siteName"]]["truepilot"]:
-                self.log.info(f"appjob({aj['appjobid']}): Job was cancelled, cleaning up ARC job")
-                desc["sendhb"] = 0
-                desc["pandastatus"] = "transferring"
-                desc["actpandastatus"] = "toclean"
-                desc["error"] = aj["Error"]
+                if not self.sites[aj.siteName]["truepilot"]:
+                    # Update APFmon (done by wrapper for truepilot)
+                    self.apfmon.updateJob(aj.appjobid, "exiting", exitcode=aj.ExitCode)
+                session.execute(update(PandaJob).where(PandaJob.arcjobid==aj.id).values(**desc))
 
-            # Jobs that fail submitting to ARC are cancelled. Such jobs should
-            # not be resubmitted.
-            elif not aj["JobID"]:
-                desc["pandastatus"] = "transferring"
-                desc["actpandastatus"] = "toclean"
+        with self.db.Session.begin() as session:
+            # clean lost pilot jobs or resubmit other lost jobs
+            for aj in lostjobs:
+                self.stopOnFlag()
+                gc.collect()
+                desc = {}
 
-            else:
-                self.log.info(f"appjob({aj['appjobid']}): Resubmitting cancelled arcjob({aj['arcjobid']}) arcid({aj['JobID']})")
-                desc["pandastatus"] = "starting"
-                desc["actpandastatus"] = "starting"
-                desc["arcjobid"] = None
-            self.dbpanda.updateJobs(select, desc)
+                # For truepilot, just set to clean and transferring to clean up arc job
+                if self.sites[aj.siteName]["truepilot"]:
+                    self.log.info(f"appjob({aj.appjobid}): Job is lost, cleaning up arc job")
+                    desc["sendhb"] = 0
+                    desc["pandastatus"] = "transferring"
+                    desc["actpandastatus"] = "toclean"
+                    desc["error"] = "Job was lost from ARC CE"
+                else:
+                    self.log.info(f"appjob({aj.appjobid}): Resubmitting lost arcjob({aj.arcjobid}) arcid({aj.JobID}) {aj.Error}")
+                    desc["pandastatus"] = "starting"
+                    desc["actpandastatus"] = "starting"
+                    desc["arcjobid"] = None
+                session.execute(update(PandaJob).where(PandaJob.arcjobid==aj.id).values(**desc))
+
+        with self.db.Session.begin() as session:
+            # clean cancelled pilot jobs and resubmit other cancelled jobs
+            for aj in cancelledjobs:
+                self.stopOnFlag()
+                gc.collect()
+                # Jobs were unexpectedly killed in arc, resubmit and clean
+                desc = {}
+                # For truepilot, just set to clean and transferring to clean up arc job
+                if self.sites[aj.siteName]["truepilot"]:
+                    self.log.info(f"appjob({aj.appjobid}): Job was cancelled, cleaning up ARC job")
+                    desc["sendhb"] = 0
+                    desc["pandastatus"] = "transferring"
+                    desc["actpandastatus"] = "toclean"
+                    desc["error"] = aj.Error
+
+                # Jobs that fail submitting to ARC are cancelled. Such jobs should
+                # not be resubmitted.
+                elif not aj.JobID:
+                    desc["pandastatus"] = "transferring"
+                    desc["actpandastatus"] = "toclean"
+
+                else:
+                    self.log.info(f"appjob({aj.appjobid}): Resubmitting cancelled arcjob({aj.arcjobid}) arcid({aj.JobID})")
+                    desc["pandastatus"] = "starting"
+                    desc["actpandastatus"] = "starting"
+                    desc["arcjobid"] = None
+                session.execute(update(PandaJob).where(PandaJob.arcjobid==aj.id).values(**desc))
 
     def cleanupLeftovers(self):
         """
@@ -602,45 +586,51 @@ class aCTATLASStatus(aCTATLASProcess):
         # Even though the transaction probably gets rolled back
         # automatically, it is nice to handle it explicitly. Also, this
         # simplifies the method with one nested block.
-        select = "arcstate in ('tocancel', 'cancelling', 'toclean') and (cluster='' or cluster is NULL)"
-        jobs = self.dbarc.getArcJobsInfo(select, ["id", "appjobid"])
-        for job in jobs:
-            self.stopOnFlag()
-            gc.collect()
-            self.log.info(f"appjob({job['appjobid']}): Deleting from arcjobs unsubmitted arcjob({job['id']})")
-            self.dbarc.deleteArcJob(job["id"])
+        with self.db.Session.begin() as session:
+            jobs = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.jobdesc) \
+                                   .where(ArcJob.arcstate.in_(['tocancel', 'cancelling', 'toclean']), ((ArcJob.cluster == '') | (ArcJob.cluster.is_(None))))).all()
+            if jobs:
+                session.execute(delete(JobDescription).where(JobDescription.id.in_([job.jobdesc for job in jobs])))
+                session.execute(delete(ArcJob).where(ArcJob.id.in_([job.id for job in jobs])))
+                for job in jobs:
+                    self.stopOnFlag()
+                    gc.collect()
+                    self.log.info(f"appjob({job.appjobid}): Deleting from arcjobs unsubmitted arcjob({job.id})")
 
-        select = "(arcstate='done' or arcstate='lost' or arcstate='cancelled' or arcstate='donefailed') \
-                and arcjobs.id not in (select arcjobid from pandajobs where arcjobid is not NULL)"
-        jobs = self.dbarc.getArcJobsInfo(select, ["id", "appjobid", "arcstate", "JobID"])
-        cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
-        for job in jobs:
-            self.stopOnFlag()
-            gc.collect()
-            # done jobs should not be there, log a warning
-            if job["arcstate"] == "done":
-                self.log.warning(f"appjob({job['appjobid']}): Removing orphaned done arcjob({job['id']})")
-            else:
-                self.log.info(f"appjob({job['appjobid']}): Cleaning left behind {job['arcstate']} arcjob({job['id']})")
-            self.dbarc.updateArcJob(job["id"], cleandesc)
-            if job["JobID"] and job["JobID"].rfind("/") != -1:
-                sessionid = job["JobID"][job["JobID"].rfind("/"):]
-                localdir = self.tmpdir + sessionid
-                shutil.rmtree(localdir, ignore_errors=True)
+        with self.db.Session.begin() as session:
+            jobs = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.arcstate, ArcJob.JobID) \
+                            .outerjoin(PandaJob, ArcJob.id == PandaJob.arcjobid) \
+                            .where(ArcJob.arcstate.in_(['done', 'lost', 'cancelled', 'donefailed']), PandaJob.arcjobid.is_(None))).all()
+            cleandesc = {"arcstate": "toclean", "tarcstate": self.db.getTimeStamp()}
+            for job in jobs:
+                self.stopOnFlag()
+                gc.collect()
+                # done jobs should not be there, log a warning
+                if job.arcstate == "done":
+                    self.log.warning(f"appjob({job.appjobid}): Removing orphaned done arcjob({job.id})")
+                else:
+                    self.log.info(f"appjob({job.appjobid}): Cleaning left behind {job.arcstate} arcjob({job.id})")
+                session.execute(update(ArcJob).where(ArcJob.id==job.id).values(**cleandesc))
+                if job.JobID and job.JobID.rfind("/") != -1:
+                    sessionid = job.JobID[job.JobID.rfind("/"):]
+                    localdir = self.tmpdir + sessionid
+                    shutil.rmtree(localdir, ignore_errors=True)
 
-        select = "arcstate='cancelled' and (actpandastatus in ('cancelled', 'donecancelled', 'failed', 'donefailed')) " \
-                 f"and pandajobs.arcjobid = arcjobs.id and siteName in {self.sitesselect}"
-        cleandesc = {"arcstate": "toclean", "tarcstate": self.dbarc.getTimeStamp()}
-        jobs = self.dbarc.getArcJobsInfo(select, ["arcjobs.id", "arcjobs.appjobid", "arcjobs.JobID"], tables="arcjobs, pandajobs")
-        for job in jobs:
-            self.stopOnFlag()
-            gc.collect()
-            self.log.info(f"appjob({job['appjobid']}): Cleaning cancelled arcjob({job['id']})")
-            self.dbarc.updateArcJob(job["id"], cleandesc)
-            if job["JobID"] and job["JobID"].rfind("/") != -1:
-                sessionid = job["JobID"][job["JobID"].rfind("/"):]
-                localdir = self.tmpdir + sessionid
-                shutil.rmtree(localdir, ignore_errors=True)
+        with self.db.Session.begin() as session:
+            jobs = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.JobID) \
+                                    .join(PandaJob.arcjob) \
+                                    .where(ArcJob.arcstate=='cancelled', PandaJob.actpandastatus.in_(['cancelled', 'donecancelled', 'failed', 'donefailed']),
+                                           PandaJob.siteName.in_(self.sitesselect))).all()
+            cleandesc = {"arcstate": "toclean", "tarcstate": self.db.getTimeStamp()}
+            for job in jobs:
+                self.stopOnFlag()
+                gc.collect()
+                self.log.info(f"appjob({job.appjobid}): Cleaning cancelled arcjob({job.id})")
+                session.execute(update(ArcJob).where(ArcJob.id==job.id).values(**cleandesc))
+                if job.JobID and job.JobID.rfind("/") != -1:
+                    sessionid = job.JobID[job.JobID.rfind("/"):]
+                    localdir = self.tmpdir + sessionid
+                    shutil.rmtree(localdir, ignore_errors=True)
 
     def process(self):
         """

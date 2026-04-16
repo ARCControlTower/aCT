@@ -139,17 +139,15 @@ class aCTDBArc(aCTDB):
             proxy = self.getProxiesInfo(session, {'id':id}, ['proxypath', 'proxy'])
             self._writeProxyFile(proxy.proxypath, str(proxy.proxy, encoding='utf-8') if type(proxy.proxy) == bytes else proxy.proxy)
 
-    def getProxyPath(self, id):
+    def getProxyPath(self, session, id):
         '''
         Get the path to the proxy file of a proxy
         '''
-        c=self.db.getCursor()
-        c.execute("SELECT proxypath FROM proxies WHERE id="+str(id))
-        row = c.fetchone()
+        row = session.execute(select(Proxy.proxypath, Proxy.proxy).where(Proxy.id==id)).one_or_none()
         try:
-            proxypath=row['proxypath']
-            if not os.path.isfile(proxypath):
-                self._writeProxyFile(proxypath, self.getProxy(id))
+            proxypath = row.proxypath
+            if not os.path.isfile(proxypath) and Proxy.proxy:
+                self._writeProxyFile(proxypath, Proxy.proxy)
             return proxypath
         except Exception as x:
             self.log.error("Could not find proxyid in proxies table. %s", x)

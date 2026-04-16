@@ -3,7 +3,9 @@ import traceback
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPanda2Xrsl import aCTPanda2Xrsl
+from act.atlas.dbModels import PandaJob
 from pyarcrest.http import HTTPClient
+from sqlalchemy import select, update
 
 
 class aCTPanda2Arc(aCTATLASProcess):
@@ -18,84 +20,87 @@ class aCTPanda2Arc(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
-        jobs = self.dbpanda.getJobs("arcjobid is NULL and actpandastatus in ('sent', 'starting') and siteName in %s limit 10000" % self.sitesselect)
-        proxies_map = {}
+        with self.db.Session.begin() as session:
+            jobs = session.execute(select(PandaJob.proxyid, PandaJob.siteName, PandaJob.pandaid, PandaJob.created)
+                                   .where(PandaJob.arcjobid.is_(None), PandaJob.actpandastatus.in_(['sent', 'starting']), PandaJob.siteName.in_(self.sitesselect))
+                                    .limit(10000)).all()
+            proxies_map = {}
 
-        for job in jobs:
+            for job in jobs:
 
-            self.stopOnFlag()
+                self.stopOnFlag()
 
-            if job['proxyid'] not in proxies_map:
-                proxies_map[job['proxyid']] = self.dbarc.getProxyPath(job['proxyid'])
+                if job.proxyid not in proxies_map:
+                    proxies_map[job.proxyid] = self.db.getProxyPath(session, job.proxyid)
 
-            parser = aCTPanda2Xrsl(job, self.sites[job['siteName']], self.tmpdir, self.conf, self.log)
+                parser = aCTPanda2Xrsl(job, self.sites[job.siteName], self.tmpdir, self.conf, self.log)
 
-            self.log.info(f"site {job['siteName']} maxwalltime {self.sites[job['siteName']]['maxwalltime']}")
+                self.log.info(f"site {job.siteName} maxwalltime {self.sites[job.siteName]['maxwalltime']}")
 
-            try:
-                parser.parse()
-            except Exception as e:
-                # try again later
-                self.log.error(f"appjob({job['pandaid']}): Cant handle job description: {e}")
-                self.log.error(traceback.format_exc())
-                continue
-            self.sendTraces(parser.traces, proxies_map[job['proxyid']])
-            try:
-                xrsl = parser.getXrsl()
-            except:
-                pass
-            if xrsl is not None:
-                endpoints = self.sites[job['siteName']]['endpoints']
-                if not endpoints: # No CEs, try later
-                    self.log.warning(f"appjob({job['pandaid']}): Cannot submit to {job['siteName']} because no CEs available")
-                    continue
-                cl = []
-                for e in endpoints:
-                    if e.find('://') == -1:
-                        # gsiftp is default if not specified
-                        e = 'gsiftp://' + e
-                    cl.append(e)
-                cls = ",".join(cl)
-                self.log.info(f"Inserting appjob({job['pandaid']}) with clusterlist {cls}")
-                maxattempts = 5
-                if self.sites[job['siteName']]['truepilot']:
-                    # truepilot jobs should never be resubmitted
-                    maxattempts = 0
-
-                # Set the list of files to download at the end of the job
-                # new syntax for rest
-                downloadfiles = 'diagnose=gmlog/errors'
                 try:
-                    downloadfiles += ';%s' % parser.jobdesc['logFile'][0].replace('.tgz', '')
+                    parser.parse()
+                except Exception as e:
+                    # try again later
+                    self.log.error(f"appjob({job.pandaid}): Cant handle job description: {e}")
+                    self.log.error(traceback.format_exc())
+                    continue
+                self.sendTraces(parser.traces, proxies_map[job.proxyid])
+                try:
+                    xrsl = parser.getXrsl()
                 except:
                     pass
-                if not self.sites[job['siteName']]['truepilot']:
-                    downloadfiles += ';heartbeat.json'
+                if xrsl is not None:
+                    endpoints = self.sites[job.siteName]['endpoints']
+                    if not endpoints: # No CEs, try later
+                        self.log.warning(f"appjob({job.pandaid}): Cannot submit to {job.siteName} because no CEs available")
+                        continue
+                    cl = []
+                    for e in endpoints:
+                        if e.find('://') == -1:
+                            # gsiftp is default if not specified
+                            e = 'gsiftp://' + e
+                        cl.append(e)
+                    cls = ",".join(cl)
+                    self.log.info(f"Inserting appjob({job.pandaid}) with clusterlist {cls}")
+                    maxattempts = 5
+                    if self.sites[job.siteName]['truepilot']:
+                        # truepilot jobs should never be resubmitted
+                        maxattempts = 0
 
-                aid = self.dbarc.insertArcJobDescription(xrsl, maxattempts=maxattempts, clusterlist=cls,
-                                                        proxyid=job['proxyid'], appjobid=str(job['pandaid']),
-                                                        downloadfiles=downloadfiles, fairshare=job['siteName'])
-                if not aid:
-                    self.log.error(f"appjob({job['pandaid']}): Failed to insert arc job description: {xrsl}")
-                    continue
+                    # Set the list of files to download at the end of the job
+                    # new syntax for rest
+                    downloadfiles = 'diagnose=gmlog/errors'
+                    try:
+                        downloadfiles += ';%s' % parser.jobdesc['logFile'][0].replace('.tgz', '')
+                    except:
+                        pass
+                    if not self.sites[job.siteName]['truepilot']:
+                        downloadfiles += ';heartbeat.json'
 
-                jd = {}
-                jd['arcjobid'] = aid['LAST_INSERT_ID()']
-                jd['pandastatus'] = 'starting'
-                # make sure actpandastatus is really 'sent', in case of resubmitting
-                jd['actpandastatus'] = 'sent'
-                self.dbpanda.updateJob(job['pandaid'], jd)
+                    aid = self.db.insertArcJobDescription(session, xrsl, maxattempts=maxattempts, clusterlist=cls,
+                                                            proxyid=job.proxyid, appjobid=str(job.pandaid),
+                                                            downloadfiles=downloadfiles, fairshare=job.siteName)
+                    if not aid:
+                        self.log.error(f"appjob({job.pandaid}): Failed to insert arc job description: {xrsl}")
+                        continue
 
-                # Dump description for APFMon
-                if self.conf.monitor.apfmon:
-                    logdir = os.path.join(self.conf.joblog.dir,
-                                        job['created'].strftime('%Y-%m-%d'),
-                                        job['siteName'])
-                    os.makedirs(logdir, 0o755, exist_ok=True)
-                    jdlfile = os.path.join(logdir, '%s.jdl' % job['pandaid'])
-                    with open(jdlfile, 'w') as f:
-                        self.log.debug(f'Wrote description to {jdlfile}')
-                        f.write(xrsl)
+                    jd = {}
+                    jd['arcjobid'] = aid
+                    jd['pandastatus'] = 'starting'
+                    # make sure actpandastatus is really 'sent', in case of resubmitting
+                    jd['actpandastatus'] = 'sent'
+                    session.execute(update(PandaJob).where(PandaJob.pandaid==job.pandaid).values(**jd))
+
+                    # Dump description for APFMon
+                    if self.conf.monitor.apfmon:
+                        logdir = os.path.join(self.conf.joblog.dir,
+                                            job.created.strftime('%Y-%m-%d'),
+                                            job.siteName)
+                        os.makedirs(logdir, 0o755, exist_ok=True)
+                        jdlfile = os.path.join(logdir, '%s.jdl' % job.pandaid)
+                        with open(jdlfile, 'w') as f:
+                            self.log.debug(f'Wrote description to {jdlfile}')
+                            f.write(xrsl)
 
     def process(self):
         self.setSites()
