@@ -31,14 +31,14 @@ class PandaJob(Base):
     metadata_: Mapped[bytes] = mapped_column("metadata", LargeBinary)
     error: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, 'mysql'))
 
-    arcjob: Mapped[ArcJob] = relationship(ArcJob, primaryjon= "ArcJob.id==PandaJob.arcjobid")
+    arcjob: Mapped[ArcJob] = relationship(ArcJob, primaryjoin='ArcJob.id==foreign(PandaJob.arcjobid)')
     proxy: Mapped[Proxy] = relationship()
 
 class PandaArchive(Base):
-    __tablename__ = 'pandaarchives'
+    __tablename__ = 'pandaarchive'
 
     pandajob: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT, 'mysql'))
-    pandaid: Mapped[int] = mapped_column(BigInteger)
+    pandaid: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     siteName: Mapped[str] = mapped_column(String(255))
     actpandastatus: Mapped[str] = mapped_column(String(255))
     startTime: Mapped[datetime] = mapped_column(TIMESTAMP)

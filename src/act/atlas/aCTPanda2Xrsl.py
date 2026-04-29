@@ -10,9 +10,9 @@ class aCTPanda2Xrsl:
 
     def __init__(self, pandadbjob, siteinfo, tmpdir, atlasconf, log):
         self.log = log
-        self.pandajob = pandadbjob['pandajob']
+        self.pandajob = pandadbjob.pandajob
         self.jobdesc = parse_qs(self.pandajob)
-        self.pandajobid = pandadbjob['id']
+        self.pandajobid = pandadbjob.id
         self.pandaid = self.jobdesc['PandaID'][0]
         self.xrsl = {}
         self.siteinfo = siteinfo
@@ -24,7 +24,7 @@ class aCTPanda2Xrsl:
         self.defaults['memory'] = 2000
         self.defaults['cputime'] = 2*1440*60
         self.memory = self.defaults['memory']
-        self.sitename = pandadbjob['siteName']
+        self.sitename = pandadbjob.siteName
         self.schedconfig = siteinfo['schedconfig']
         self.truepilot = siteinfo['truepilot']
         self.cricjsons = siteinfo.get('cricjsons', 0)
@@ -37,7 +37,7 @@ class aCTPanda2Xrsl:
         if params is not None:
             self.pilotargs = params.get("pilot_args", None)
 
-        self.created = pandadbjob['created']
+        self.created = pandadbjob.created
         self.wrapper = atlasconf.executable.wrapperurl
         if self.prodSourceLabel.startswith('rc_'):
             self.wrapper = atlasconf.executable.wrapperurlrc
@@ -62,7 +62,7 @@ class aCTPanda2Xrsl:
         self.inputjobdir = os.path.join(self.inputfiledir, self.jobdesc['PandaID'][0])
         self.atlasconf = atlasconf
         self.traces = []
-        self.pandameta = json.loads(pandadbjob.get('metadata', b'{}').decode())
+        self.pandameta = json.loads((pandadbjob.metadata_ or b'{}').decode())
 
         self.monitorurl = atlasconf.monitor.apfmon
 

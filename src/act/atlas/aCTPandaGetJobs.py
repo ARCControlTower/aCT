@@ -234,7 +234,7 @@ class aCTPandaGetJobs(aCTATLASProcess):
                             # job getting picked up before setting proper job desc after insertion
                             n['arcjobid'] = -1
                             n['condorjobid'] = -1
-                        rowid = session.execute(insert(PandaJob).values(**n, pandaid=pandaid, pandajob=pandajob).returning(PandaJob.id)).scalar_one()
+                        rowid = session.execute(insert(PandaJob).values(**n, pandaid=pandaid, pandajob=pandajob)).inserted_primary_key[0]
                         if pandaid == 0:
                             # Pull mode: use row id as job id for output files
                             pandaid = rowid

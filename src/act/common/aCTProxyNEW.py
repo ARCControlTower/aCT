@@ -4,6 +4,8 @@ import datetime, time
 import arc
 import subprocess
 from act.arc.aCTDBArcNEW import aCTDBArc
+from act.arc.dbModels import Proxy
+from sqlalchemy import select, update
 
 class aCTProxy:
 
@@ -63,29 +65,30 @@ class aCTProxy:
         After a call to this function, the new proxy will be automatically renewed
         with a call to the renew() function.
         '''
-        if not proxypath:
-            proxypath=self.conf.voms.proxypath
-        _, dn, expirytime = self._readProxyFromFile(proxypath)
-        # if not given, try to get proxyid using dn and attribute first
-        if not proxyid:
-            proxyid = self.getProxyId(dn, attribute)
-        # if still no proxyid, a new proxies table entry must be created
-        if not proxyid:
-            proxyid = self.updateProxy("", dn, attribute, expirytime)
-        dbproxypath = self.db.getProxyPath(proxyid)
-        retries = 3
-        while self._createVomsProxyFromFile(proxypath, dbproxypath, validTime, voms, attribute).returncode:
-            # todo: check that attribute is actually set in the new proxy.
-            retries -= 1
-            if retries == 0:
-                self.log.warning("Got errors when creating VOMS proxy from file %s", proxypath)
-                break
-            #give arcproxy a bit of time before retrying
-            time.sleep(1)
-        proxy, _, expirytime = self._readProxyFromFile(dbproxypath)
-        desc={"proxy":proxy, "expirytime":expirytime}
-        self.db.updateProxy(proxyid, desc)
-        self.voms_proxies[(dn, attribute)] = (voms, attribute, proxypath, validTime, proxyid)
+        with self.db.Session.begin() as session:
+            if not proxypath:
+                proxypath=self.conf.voms.proxypath
+            _, dn, expirytime = self._readProxyFromFile(proxypath)
+            # if not given, try to get proxyid using dn and attribute first
+            if not proxyid:
+                proxyid = session.execute(select(Proxy.id).where(Proxy.dn==dn, Proxy.attribute==attribute)).scalar_one_or_none()
+            # if still no proxyid, a new proxies table entry must be created
+            if not proxyid:
+                proxyid = self.db.insertProxy("", session, dn, expirytime, attribute)
+            dbproxypath = session.execute(select(Proxy.proxypath).where(Proxy.id==proxyid)).scalar_one()
+            retries = 3
+            while self._createVomsProxyFromFile(proxypath, dbproxypath, validTime, voms, attribute).returncode:
+                # todo: check that attribute is actually set in the new proxy.
+                retries -= 1
+                if retries == 0:
+                    self.log.warning("Got errors when creating VOMS proxy from file %s", proxypath)
+                    break
+                #give arcproxy a bit of time before retrying
+                time.sleep(1)
+            proxy, _, expirytime = self._readProxyFromFile(dbproxypath)
+            desc={"proxy":proxy, "expirytime":expirytime}
+            session.execute(update(Proxy).where(Proxy.id==proxyid).values(**desc))
+            self.voms_proxies[(dn, attribute)] = (voms, attribute, proxypath, validTime, proxyid)
         return proxyid
 
     def deleteVOMSRole(self, dn, attribute):
@@ -121,13 +124,14 @@ class aCTProxy:
 
     def renew(self):
         "renews proxies in db. renews all proxies created with createVOMSRole."
-        for (dn, attribute), args in list(self.voms_proxies.items()):
-            tleft = self.timeleft(dn, attribute)
-            if tleft <= self.conf.voms.minlifetime:
-                self.createVOMSAttribute(*args)
-                tleft = self.timeleft(dn, attribute)
-                if tleft <= 0:
-                    self.log.error("VOMS proxy not extended")
+        with self.db.Session() as session:
+            for (dn, attribute), args in list(self.voms_proxies.items()):
+                tleft = self.timeleft(dn, attribute, session)
+                if tleft <= self.conf.voms.minlifetime:
+                    self.createVOMSAttribute(*args)
+                    tleft = self.timeleft(dn, attribute, session)
+                    if tleft <= 0:
+                        self.log.error("VOMS proxy not extended")
 
     def getProxyInfo(self, dn, attribute, columns=[]):
         """
@@ -145,10 +149,10 @@ class aCTProxy:
         else:
             return None
 
-    def timeleft(self, dn, attribute):
-        expirytime = self.getProxyInfo(dn, attribute, ["expirytime"])
-        if "expirytime" in expirytime and expirytime["expirytime"]:
-            total_seconds = self._timediffSeconds(expirytime["expirytime"], datetime.datetime.utcnow())
+    def timeleft(self, dn, attribute, session):
+        expirytime = session.execute(select(Proxy.expirytime).where(Proxy.dn==dn, Proxy.attribute==attribute)).scalar_one_or_none()
+        if expirytime:
+            total_seconds = self._timediffSeconds(expirytime, datetime.datetime.utcnow())
             return total_seconds
         else:
             return 0

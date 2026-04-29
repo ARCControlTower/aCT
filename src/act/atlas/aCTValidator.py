@@ -73,7 +73,6 @@ class aCTValidator(aCTATLASProcess):
         cred = arc.Credential(uc)
         dn = cred.GetIdentityName()
 
-        actp = aCTProxy(self.log)
         with self.db.Session() as session:
             # Beware hard-coded production role
             proxyfile = session.execute(select(Proxy.proxypath).where(Proxy.dn==dn, Proxy.attribute=='/atlas/Role=production')).one_or_none()
@@ -180,7 +179,7 @@ class aCTValidator(aCTATLASProcess):
 
         with self.db.Session() as session:
             aj = session.execute(select(ArcJob.JobID, ArcJob.appjobid, ArcJob.cluster, ArcJob.UsedTotalWallTime, ArcJob.EndTime,
-                                   ArcJob.ExecutionNode, ArcJob.stdout, ArcJob.fairshare, PandaJob.created, PandaJob.metadata_) \
+                                   ArcJob.ExecutionNode, ArcJob.StdOut, ArcJob.fairshare, PandaJob.created, PandaJob.metadata_) \
                                 .join(PandaJob.arcjob).where(ArcJob.id==arcjobid)).one_or_none()
         if not aj or not aj.JobID:
             if aj:
@@ -250,7 +249,7 @@ class aCTValidator(aCTATLASProcess):
             except:
                 self.log.error(f"Failed to copy {gmlogerrors}")
 
-        pilotlog = aj.stdout
+        pilotlog = aj.StdOut
         if not pilotlog and os.path.exists(localdir):
             pilotlogs = [f for f in os.listdir(localdir)]
             for f in pilotlogs:

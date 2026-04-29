@@ -3,7 +3,11 @@ import random
 
 from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
-from act.common.aCTProxy import aCTProxy
+from act.common.aCTProxyNEW import aCTProxy
+from act.arc.aCTDBArcNEW import aCTDBArc
+from act.arc.dbModels import Proxy
+
+from sqlalchemy import select
 
 
 class aCTProxyHandler(aCTProcess):
@@ -22,7 +26,8 @@ class aCTProxyHandler(aCTProcess):
         super().setup()
 
         self.loadConf()
-        self.pm = aCTProxy(self.log)
+        self.db = aCTDBArc(self.log)
+        self.pm = aCTProxy(self.log, db=self.db)
         self.tstamp = datetime.datetime.utcnow()-datetime.timedelta(0,self.pm.interval)
         if self._updateLocalProxies() == 0:
             # no local proxies in proxies table yet, better populate it
@@ -54,16 +59,15 @@ class aCTProxyHandler(aCTProcess):
         """
         Function to get local proxies to be updated in proxies table.
         """
-        select = "proxytype='local'"
-        columns = ["dn", "attribute", "proxypath", "id"]
-        ret_columns = self.pm.db.getProxiesInfo(select, columns)
+        with self.db.Session() as session:
+            ret_columns = session.execute(select(Proxy.dn, Proxy.attribute, Proxy.proxypath, Proxy.id).where(Proxy.proxytype=='local')).all()
         vo = self.conf.voms.vo
         validTime = self._checkProxyLifetime(self.conf.voms.proxylifetime)
         for row in ret_columns:
-            dn = row["dn"]
-            attribute = row["attribute"]
+            dn = row.dn
+            attribute = row.attribute
             proxypath = self.conf.voms.proxypath
-            proxyid = row["id"]
+            proxyid = row.id
             self.pm.voms_proxies[(dn, attribute)] = (vo, attribute, proxypath, validTime, proxyid)
         return len(ret_columns)
 

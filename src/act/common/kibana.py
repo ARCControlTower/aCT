@@ -6,13 +6,16 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
-from act.arc.aCTDBArc import aCTDBArc
 from act.atlas.aCTDBPanda import aCTDBPanda
 from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTLogger import aCTLogger
+from act.atlas.dbModels import PandaJob
+from act.arc.dbModels import ArcJob
+
+from sqlalchemy import select, func
 
 
 def getARCJobs(arcdb):
@@ -44,7 +47,7 @@ def getPandaDoneFailed(pandadb):
     return str(pandadb.getNJobs("actpandastatus='donefailed'"))
 
 
-def getAvailability(config, pandadb):
+def getAvailability(config, db: aCTDBPanda):
 
     # Check autopilot is running
     logdir = config.logger.logdir
@@ -60,12 +63,10 @@ def getAvailability(config, pandadb):
         return 'degraded', 'Autopilot log not updated in %d seconds' % (time.time() - mtime)
 
     # Check heartbeats are being updated
-    timelimit = 3600
-    select = "sendhb=1 and " \
-         "pandastatus in ('sent', 'starting', 'running', 'transferring') and " \
-         "theartbeat != 0 and " + pandadb.timeStampLessThan("theartbeat", timelimit)
-    columns = ['pandaid']
-    jobs = pandadb.getJobs(select, columns)
+    with db.Session() as session:
+        timelimit = 3600
+        jobs = session.execute(select(PandaJob.pandaid).where(PandaJob.sendhb==1, PandaJob.pandastatus.in_(['sent', 'starting', 'running', 'transferring'],
+                                                                PandaJob.theartbeat!=0, db.timeStampLessThan(PandaJob.theartbeat, timelimit)))).all()
     if len(jobs) > 100:
         return 'degraded', '%d jobs with outdated heartbeat. JUST A TEST PLEASE IGNORE!' % len(jobs)
 
@@ -91,11 +92,10 @@ def main():
 
     logger = aCTLogger('kibana probe')
     log = logger()
-    arcdb = aCTDBArc(log)
-    pandadb = aCTDBPanda(log)
+    db = aCTDBPanda(log)
     config = aCTConfigARC()
 
-    availability, desc = getAvailability(config, pandadb)
+    availability, desc = getAvailability(config, db)
 
     i = []
     info = {}
@@ -109,18 +109,19 @@ def main():
     info['contact'] = 'atlas-adc-act-support@cern.ch'
     info['webpage'] = webpage_url
 
-    infom = {}
-    infom['producer'] = 'atlasact'
-    infom['type'] = "metric"
-    infom['timestamp'] = int(time.time()*1000)
-    infom['arcjobs'] = int(getARCJobs(arcdb))
-    infom['arcslots'] = int(getARCSlots(arcdb))
-    infom['pandasent12h'] = int(getPandaNotStarted(pandadb))
-    infom['arcqueued12h'] = int(getArcQueuedLong(arcdb))
-    infom['pandadone'] = int(getPandaDone(pandadb))
-    infom['pandafailed'] = int(getPandaDoneFailed(pandadb))
-    infom['serviceid'] = service_id
-    infom["idb_tags"] = ["serviceid"]
+    with db.Session() as session:
+        infom = {}
+        infom['producer'] = 'atlasact'
+        infom['type'] = "metric"
+        infom['timestamp'] = int(time.time()*1000)
+        infom['arcjobs'] = session.scalar(select(func.count()).select_from(ArcJob))
+        infom['arcslots'] = session.scalar(select(func.sum(ArcJob.RequestedSlots)).where(ArcJob.State == 'Running')) or 0
+        infom['pandasent12h'] = session.scalar(select(func.count()).where(PandaJob.actpandastatus=='sent', db.timeStampLessThan(PandaJob.created, 43200)))
+        infom['arcqueued12h'] = session.scalar(select(func.count()).where(ArcJob.State=='Queuing', db.timeStampLessThan(ArcJob.created, 43200)))
+        infom['pandadone'] = session.scalar(select(func.count()).where(PandaJob.actpandastatus=='done'))
+        infom['pandafailed'] = session.scalar(select(func.count()).where(PandaJob.actpandastatus=='donefailed'))
+        infom['serviceid'] = service_id
+        infom["idb_tags"] = ["serviceid"]
 
     i.append(info)
     i.append(infom)

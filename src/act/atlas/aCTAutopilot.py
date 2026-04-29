@@ -9,8 +9,8 @@ import arc
 from act.atlas import aCTPanda
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
-from act.common import aCTProxy, aCTUtils
-from act.arc.dbModels import ArcJob
+from act.common import aCTUtils
+from act.arc.dbModels import Proxy
 from act.atlas.dbModels import PandaJob, PandaArchive
 from sqlalchemy import select, update, delete, or_, insert
 
@@ -68,19 +68,19 @@ class aCTAutopilot(aCTATLASProcess):
         # In future for analysis the id will change once the job is picked up
         self.proxymap = {}
 
-        actp = aCTProxy.aCTProxy(self.log)
-        for role in self.arcconf.voms.roles:
-            attr = f'/atlas/Role={role}'
-            proxyid = actp.getProxyId(dn, attr)
-            if not proxyid:
-                raise Exception(f"Proxy with DN {dn} and attribute {attr} was not found in proxies table")
+        with self.db.Session() as session:
+            for role in self.arcconf.voms.roles:
+                attr = f'/atlas/Role={role}'
+                proxy = session.execute(select(Proxy.id, Proxy.proxypath).where(Proxy.dn==dn, Proxy.attribute==attr)).one_or_none()
+                if not proxy or not proxy.id:
+                    raise Exception(f"Proxy with DN {dn} and attribute {attr} was not found in proxies table")
 
-            proxyfile = actp.path(dn, attribute=attr)
-            # pilot role is mapped to analysis type
-            if role == 'pilot':
-                role = 'analysis'
-            self.pandas[role] = aCTPanda.aCTPanda(self.log, proxyfile)
-            self.proxymap[role] = proxyid
+                proxyfile = proxy.proxypath
+                # pilot role is mapped to analysis type
+                if role == 'pilot':
+                    role = 'analysis'
+                self.pandas[role] = aCTPanda.aCTPanda(self.log, proxyfile)
+                self.proxymap[role] = proxy.id
 
         # queue interval
         self.queuestamp=0
@@ -305,7 +305,8 @@ class aCTAutopilot(aCTATLASProcess):
 
         # TODO: HARDCODED limit
         with self.db.Session() as session:
-            jobs = session.execute(select(PandaJob.pandaid, PandaJob.pandastatus, PandaJob.startTime, PandaJob.endTime, PandaJob.siteName) \
+            jobs = session.execute(select(PandaJob.pandaid, PandaJob.pandastatus, PandaJob.startTime, PandaJob.endTime,
+                                          PandaJob.siteName, PandaJob.sendhb, PandaJob.actpandastatus)
                                    .where(PandaJob.actpandastatus.in_(['finished', 'failed', 'cancelled'])).limit(1000)).all()
 
         if not jobs:

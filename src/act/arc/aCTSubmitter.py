@@ -100,7 +100,7 @@ class aCTSubmitter(aCTARCProcess):
                             or_(ArcJob.clusterlist.like(f'%{self.cluster}'), ArcJob.clusterlist.like(f'%{self.cluster},%'))) \
                     .join(ArcJob.jobdescobj) \
                     .limit(limit) \
-                    .with_for_update()
+                    .with_for_update(skip_locked=True)
                 jobs = session.execute(stmt).all()
                 if jobs:
                     session.execute(update(ArcJob).where(ArcJob.id.in_([job.id for job in jobs])).values(arcstate='submitting', tarcstate=self.db.getTimeStamp(), cluster=self.cluster))
@@ -246,7 +246,7 @@ class aCTSubmitter(aCTARCProcess):
             limit = tstamp - datetime.timedelta(hours=1)
             dbjobs = session.execute(select(ArcJob.id, ArcJob.appjobid) \
                                      .where(ArcJob.arcstate=='tosubmit', ArcJob.cluster==self.cluster, ArcJob.created<limit)
-                                     .with_for_update()).all()
+                                     .with_for_update(skip_locked=True)).all()
             if dbjobs:
                 session.execute(self.db.setJobsArcstate([job.id for job in dbjobs], 'tocancel'))
                 for job in dbjobs:

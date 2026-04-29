@@ -68,7 +68,7 @@ class aCTDBArc(aCTDB):
             priority = 50
 
         # todo: find some useful default for proxyid
-        jobdescid = session.execute(insert(JobDescription).values(jobdescription=jobdesc).returning(JobDescription.id)).scalar_one()
+        jobdescid = session.execute(insert(JobDescription).values(jobdescription=jobdesc)).inserted_primary_key[0]
         tstmp = self.getTimeStamp()
         arcjobid = session.execute(insert(ArcJob).values(
             created=tstmp,
@@ -84,7 +84,7 @@ class aCTDBArc(aCTDB):
             downloadfiles=downloadfiles,
             priority=priority,
             fairshare=fairshare
-        ).returning(ArcJob.id)).scalar_one()
+        )).inserted_primary_key[0]
         return arcjobid
 
     def getActiveClusters(self):
@@ -124,7 +124,7 @@ class aCTDBArc(aCTDB):
           - myproxyid: id from myproxy
         Returns id of db entrance
         '''
-        proxyid = session.execute(insert(Proxy).values(proxy=proxy, dn=dn, expirytime=expirytime, attribute=attribute, proxytype=proxytype, myproxyid=myproxyid).returning(Proxy.id)).scalar_one()
+        proxyid = session.execute(insert(Proxy).values(proxy=proxy, dn=dn, expirytime=expirytime, attribute=attribute, proxytype=proxytype, myproxyid=myproxyid)).inserted_primary_key[0]
         proxypath = os.path.join(self.proxydir,"proxiesid"+str(proxyid))
         session.execute(update(Proxy).where(Proxy.id==proxyid).values(proxypath=proxypath))
         self._writeProxyFile(proxypath, proxy)

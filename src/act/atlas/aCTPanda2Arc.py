@@ -21,7 +21,7 @@ class aCTPanda2Arc(aCTATLASProcess):
         - exit is checked before every job update
         """
         with self.db.Session.begin() as session:
-            jobs = session.execute(select(PandaJob.proxyid, PandaJob.siteName, PandaJob.pandaid, PandaJob.created)
+            jobs = session.execute(select(PandaJob.proxyid, PandaJob.siteName, PandaJob.pandaid, PandaJob.created, PandaJob.pandajob, PandaJob.metadata_, PandaJob.id)
                                    .where(PandaJob.arcjobid.is_(None), PandaJob.actpandastatus.in_(['sent', 'starting']), PandaJob.siteName.in_(self.sitesselect))
                                     .limit(10000)).all()
             proxies_map = {}

@@ -9,7 +9,7 @@ import shutil
 import gc
 
 from urllib.parse import urlparse
-from sqlalchemy import select, update, or_, delete
+from sqlalchemy import select, update, or_, and_, delete
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPandaJob import aCTPandaJob
 from act.atlas.dbModels import PandaJob
@@ -66,8 +66,8 @@ class aCTATLASStatus(aCTATLASProcess):
                 arcjobs = session.execute(select(ArcJob.EndTime, ArcJob.UsedTotalWallTime, ArcJob.StdOut, 
                                                  ArcJob.JobID, ArcJob.appjobid, ArcJob.cluster, ArcJob.ExecutionNode,
                                                  ArcJob.UsedTotalCPUTime, ArcJob.ExitCode, ArcJob.Error,
-                                                 PandaJob.siteName, PandaJob.metadata, PandaJob.pandaid,
-                                                 PandaJob.sendhb, PandaJob.created) \
+                                                 PandaJob.siteName, PandaJob.metadata_, PandaJob.pandaid,
+                                                 PandaJob.sendhb, PandaJob.created, PandaJob.corecount) \
                                                     .join(PandaJob.arcjob) \
                                                     .where(PandaJob.id==job.id, PandaJob.siteName.in_(self.sitesselect))).all()
 
@@ -75,7 +75,6 @@ class aCTATLASStatus(aCTATLASProcess):
                 if arcjobs:
                     desc["endTime"] = self.db.getTimeStamp()
                     desc["startTime"] = self.db.getTimeStamp()
-                    arcjobs = [row._asdict() for row in arcjobs]
                     self.processFailed(arcjobs)
 
                 # Check if job was manually killed
@@ -117,10 +116,10 @@ class aCTATLASStatus(aCTATLASProcess):
             jobstoupdate = session.execute(select(ArcJob.id, ArcJob.cluster, ArcJob.appjobid) \
                             .join(PandaJob.arcjob) \
                             .where(or_(
-                                (ArcJob.arcstate.in_(['submitted', 'holding']), PandaJob.actpandastatus=='sent'), 
-                                (ArcJob.arcstate.in_(['tosubmit', 'submitting', 'submitted', 'holding']), PandaJob.actpandastatus=='running')),
-                                PandaJob.siteName.in_(self.sitesselect))) \
-                            .limit(100000).all()
+                                and_(ArcJob.arcstate.in_(['submitted', 'holding']), PandaJob.actpandastatus=='sent'), 
+                                and_(ArcJob.arcstate.in_(['tosubmit', 'submitting', 'submitted', 'holding']), PandaJob.actpandastatus=='running')),
+                                PandaJob.siteName.in_(self.sitesselect))
+                            .limit(100000)).all()
 
             if len(jobstoupdate) == 0:
                 return
@@ -159,8 +158,8 @@ class aCTATLASStatus(aCTATLASProcess):
         if state == 'finishing':
             states.append('running')
 
-        with self.db.Session().begin() as session:
-            jobstoupdate = session.execute(select(ArcJob.id, ArcJob.UsedTotalWalltime, ArcJob.ExecutionNode,
+        with self.db.Session.begin() as session:
+            jobstoupdate = session.execute(select(ArcJob.id, ArcJob.UsedTotalWallTime, ArcJob.ExecutionNode,
                                                   ArcJob.cluster, ArcJob.RequestedSlots, ArcJob.appjobid, ArcJob.tstate,
                                                   PandaJob.pandaid, PandaJob.siteName) \
                                                     .join(PandaJob.arcjob) \
@@ -190,7 +189,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 else:
                     desc["node"] = aj.ExecutionNode
                 desc["computingElement"] = urlparse(aj.cluster).hostname
-                desc["startTime"] = self.getStartTime(datetime.datetime.utcnow(), aj.UsedTotalWalltime)
+                desc["startTime"] = self.getStartTime(datetime.datetime.utcnow(), aj.UsedTotalWallTime)
                 desc["corecount"] = aj.RequestedSlots
 
                 # When true pilot job has started running, turn of aCT heartbeats
@@ -349,7 +348,7 @@ class aCTATLASStatus(aCTATLASProcess):
         """
         if not arcjobs:
             return
-
+        arcjobs = [row._asdict() for row in arcjobs]
         self.log.info(f"processing {len(arcjobs)} failed jobs")
         for aj in arcjobs:
 
@@ -378,7 +377,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 except:
                     self.log.error(f"Failed to copy {gmlogerrors}")
 
-            pilotlog = aj["stdout"]
+            pilotlog = aj["StdOut"]
             if not pilotlog and os.path.exists(localdir):
                 pilotlogs = [f for f in os.listdir(localdir)]
                 for f in pilotlogs:
@@ -393,7 +392,7 @@ class aCTATLASStatus(aCTATLASProcess):
                     self.log.warning(f"appjob({aj['appjobid']}): Failed to copy job output for arcid({jobid}): {e}")
 
             try:
-                smeta = json.loads(aj["metadata"].decode())
+                smeta = json.loads(aj["metadata_"].decode())
             except:
                 smeta = None
 
@@ -465,15 +464,16 @@ class aCTATLASStatus(aCTATLASProcess):
         # TODO: HARDCODED limit
         # Look for failed final states in ARC which are still starting or running in panda
         with self.db.Session() as session:
-            jobstoupdate = session.execute(select(ArcJob.arcstate, ArcJob.appjobid, ArcJob.JobID, ArcJob.Error,
+            jobstoupdate = session.execute(select(ArcJob.id, ArcJob.arcstate, ArcJob.appjobid, ArcJob.JobID, ArcJob.Error,
                                                   ArcJob.EndTime, ArcJob.ExecutionNode, ArcJob.UsedTotalCPUTime,
                                                   ArcJob.UsedTotalWallTime, ArcJob.ExitCode, ArcJob.StdOut, ArcJob.cluster,
                                                   PandaJob.arcjobid, PandaJob.siteName, PandaJob.pandaid,
-                                                  PandaJob.created, PandaJob.sendhb, PandaJob.metadata, PandaJob.corecount) \
+                                                  PandaJob.created, PandaJob.sendhb, PandaJob.metadata_, PandaJob.corecount)
                                             .join(PandaJob.arcjob) \
                                             .where(ArcJob.arcstate.in_(['donefailed', 'cancelled', 'lost']), 
                                                     PandaJob.actpandastatus.in_(['sent', 'starting', 'running', 'transferring']),
-                                                    PandaJob.siteName.in_(self.sitesselect).limit(1000))).all()
+                                                    PandaJob.siteName.in_(self.sitesselect))
+                                            .limit(1000)).all()
 
         if len(jobstoupdate) == 0:
             return

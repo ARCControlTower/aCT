@@ -34,12 +34,12 @@ class aCTDB(object):
         else:
             return datetime.now(timezone.utc)
 
-    def timeStampLessThan(column, seconds, utc=True):
+    def timeStampLessThan(self, column, seconds, utc=True):
         now = datetime.now(timezone.utc) if utc else datetime.now()
         cutoff = now - timedelta(seconds=seconds)
         return column < cutoff
 
-    def timeStampGreaterThan(column, seconds, utc=True):
+    def timeStampGreaterThan(self, column, seconds, utc=True):
         now = datetime.now(timezone.utc) if utc else datetime.now()
         cutoff = now - timedelta(seconds=seconds)
         return column > cutoff
