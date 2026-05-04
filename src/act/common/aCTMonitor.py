@@ -1,7 +1,7 @@
 import importlib
 import random
 
-from act.arc.aCTARCProcessNEW import aCTProcess
+from act.arc.aCTARCProcess import aCTProcess
 from act.arc.aCTDBArcNEW import aCTDBArc
 from act.common.aCTConfig import aCTConfigAPP, aCTConfigARC
 from prometheus_client import start_http_server
