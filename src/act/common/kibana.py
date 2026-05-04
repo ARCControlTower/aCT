@@ -18,35 +18,6 @@ from act.arc.dbModels import ArcJob
 from sqlalchemy import select, func
 
 
-def getARCJobs(arcdb):
-    return str(arcdb.getNArcJobs('TRUE'))
-
-
-def getARCSlots(arcdb):
-    jobs = arcdb.getArcJobsInfo("state='Running'", ['RequestedSlots'])
-    slots = 0
-    for j in jobs:
-        slots += j['RequestedSlots']
-    return str(slots)
-
-
-def getPandaNotStarted(pandadb):
-    return str(pandadb.getNJobs("actpandastatus='sent' and created<NOW()-interval 12 hour"))
-
-
-def getArcQueuedLong(arcdb):
-    jobs = arcdb.getArcJobsInfo("state='Queuing' and created<NOW()-interval 12 hour",['id'])
-    return str(len(jobs))
-
-
-def getPandaDone(pandadb):
-    return str(pandadb.getNJobs("actpandastatus='done'"))
-
-
-def getPandaDoneFailed(pandadb):
-    return str(pandadb.getNJobs("actpandastatus='donefailed'"))
-
-
 def getAvailability(config, db: aCTDBPanda):
 
     # Check autopilot is running

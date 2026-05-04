@@ -2,7 +2,7 @@ import datetime
 from json import JSONDecodeError
 from collections import defaultdict
 
-from act.arc.aCTARCProcessNEW import aCTARCProcess
+from act.arc.aCTARCProcess import aCTARCProcess
 from act.arc.dbModels import ArcJob, JobDescription
 from pyarcrest.errors import ARCHTTPError
 from sqlalchemy import select, delete

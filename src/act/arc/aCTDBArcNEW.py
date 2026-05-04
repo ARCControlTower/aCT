@@ -1,4 +1,4 @@
-from act.db.aCTDBNEW import aCTDB
+from act.db.aCTDB import aCTDB
 from sqlalchemy import select, update, insert, delete
 from sqlalchemy.sql import func
 import datetime

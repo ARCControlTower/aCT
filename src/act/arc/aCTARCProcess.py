@@ -2,7 +2,7 @@ import os
 import logging
 import random
 
-from act.arc.aCTDBArc import aCTDBArc
+from act.arc.aCTDBArcNEW import aCTDBArc
 from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
 from act.common.aCTLogger import LEVELS
@@ -53,13 +53,12 @@ class aCTARCProcess(aCTProcess):
         return True
 
     def finish(self):
-        self.db.close()
         super().finish()
 
     def getARCClient(self, proxyid):
         proxypath = os.path.join(self.db.proxydir, f"proxiesid{proxyid}")
         try:
-            return ARCRest.getClient(url=self.cluster, proxypath=proxypath, timeout=900)
+            return ARCRest.getClient(url=self.cluster, proxypath=proxypath, timeout=60) #Revert?
         except Exception as exc:
             self.log.error(f"Error creating REST client for proxy ID {proxyid}: {exc}")
             return None

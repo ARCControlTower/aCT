@@ -3,7 +3,7 @@ import random
 
 from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
-from act.common.aCTProxyNEW import aCTProxy
+from act.common.aCTProxy import aCTProxy
 from act.arc.aCTDBArcNEW import aCTDBArc
 from act.arc.dbModels import Proxy
 

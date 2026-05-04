@@ -8,7 +8,7 @@ import arc
 import datetime
 import re
 
-from act.common.aCTProxyNEW import aCTProxy
+from act.common.aCTProxy import aCTProxy
 from act.arc.aCTDBArcNEW import aCTDBArc
 from act.client.clientdb import ClientDB
 from act.client.errors import NoSuchProxyError, NoProxyFileError

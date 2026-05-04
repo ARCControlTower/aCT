@@ -1077,7 +1077,7 @@ class HeartbeatDownloader(ARCWorker):
             if self.terminate.is_set():
                 return
             self.log.debug(f"{self.__class__.__name__}: job: {job}")
-            if 'JobID' not in job or not job['JobID']:
+            if not hasattr(job, 'JobID') or not job.JobID:
                 self.resultQueue.put(job)
                 continue
 
@@ -1092,5 +1092,5 @@ class HeartbeatDownloader(ARCWorker):
             dm = arc.DataMover()
             status = dm.Transfer(source.h, dest.h, arc.FileCache(), arc.URLMap())
             if not status:
-                self.log.error(f"appjob({job['pandaid']}): Failed to download {source.h.GetURL.str()}: {status}")
+                self.log.error(f"appjob({job.pandaid}): Failed to download {source.h.GetURL.str()}: {status}")
                 self.resultQueue.put(job)
