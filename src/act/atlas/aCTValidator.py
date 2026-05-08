@@ -221,7 +221,7 @@ class aCTValidator(aCTATLASProcess):
                 jobinfo.node = aj.ExecutionNode
 
             try:
-                smeta = json.loads(aj.metadata.decode())
+                smeta = json.loads(aj.metadata_.decode())
             except:
                 smeta = None
 
@@ -1081,7 +1081,7 @@ class HeartbeatDownloader(ARCWorker):
                 self.resultQueue.put(job)
                 continue
 
-            jobid = job['JobID']
+            jobid = job.JobID
             sessionid = jobid[jobid.rfind('/'):]
             localdir = self.tmpdir + sessionid
 
