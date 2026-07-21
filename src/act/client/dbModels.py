@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String, ForeignKey, TIMESTAMP, Text, SmallInteger, DateTime, LargeBinary
+from sqlalchemy import Integer, String, ForeignKey, TIMESTAMP, Text, SmallInteger, DateTime, LargeBinary, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, declared_attr
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from datetime import datetime, timezone
@@ -19,3 +19,11 @@ class ClientJob(Base):
 
     arcjob: Mapped['ArcJob'] = relationship()
     proxy: Mapped['Proxy'] = relationship()
+
+class UserSummary(Base):
+    __tablename__ = 'usersummary'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cn: Mapped[str] = mapped_column(String(255), primary_key=True)
+    cluster: Mapped[str] = mapped_column(String(255), primary_key=True)
+    states: Mapped[dict] = mapped_column(JSON)

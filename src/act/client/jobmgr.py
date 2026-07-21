@@ -17,9 +17,10 @@ from act.client.errors import NoSuchSiteError, InvalidJobRangeError
 from act.client.errors import InvalidJobIDError, UnknownClusterError
 from act.client.common import readSites
 from act.arc.dbModels import ArcJob
-from act.client.dbModels import ClientJob
+from act.client.dbModels import ClientJob, UserSummary
 from urllib.parse import urlparse
 from pyarcrest.arc import isLocalInputFile
+from sqlalchemy import select
 
 
 logger = logging.getLogger(__name__)
@@ -347,7 +348,7 @@ class JobManager(object):
                                     clicols=['id'], arccols=['id'])
 
             if not jobs:
-                return[]
+                return []
             #set job state for resubmittion
             self.db.updateArcstate(session=session, jobids=[job.a_id for job in jobs], arcstate='toresubmit')
 
@@ -520,6 +521,13 @@ class JobManager(object):
                 del job['desc']  # don't want to return description in result
 
         return jobs
+
+
+    def getUserSummary(self, **_):
+        stmt = select(UserSummary.cn, UserSummary.cluster, UserSummary.states)
+        with self.db.Session() as session:
+            results = session.execute(stmt).all()
+        return [dict(row._mapping) for row in results]
 
 
     def getJobOutputDir(self, arcid):

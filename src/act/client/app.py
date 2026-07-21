@@ -451,6 +451,17 @@ def uploadFile(jobid, path):
 
     return '', 204
 
+@app.route('/usersummary', methods=['GET'])
+def user_summary():
+    try:
+        results = process_request(jmgr.getUserSummary)
+    except RESTError as e:
+        print(f'error: GET /usersummary: {e}')
+        return {'msg': str(e)}, e.httpCode
+    except Exception as e:
+        print(f'error: GET /usersummary: {e}')
+        return {'msg': 'Server error'}, 500
+    return jsonify(results)
 
 @app.route('/info', methods=['GET'])
 def info():

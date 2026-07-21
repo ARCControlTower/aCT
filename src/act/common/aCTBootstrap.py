@@ -4,7 +4,6 @@ import os
 from act.common.aCTLogger import aCTLogger
 from act.common.aCTConfig import aCTConfigARC, aCTConfigAPP
 from act.arc.aCTDBArcNEW import aCTDBArc
-from act.condor.aCTDBCondor import aCTDBCondor
 from act.arc.dbModels import Base
 from sqlalchemy import inspect
 

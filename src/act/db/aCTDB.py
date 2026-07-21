@@ -20,7 +20,7 @@ class aCTDB(object):
 
     def getTimeStamp(self, seconds=None):
         if seconds:
-            return datetime.fromtimestamp(timezone.utc, seconds)
+            return datetime.fromtimestamp(seconds, timezone.utc)
         else:
             return datetime.now(timezone.utc)
 
