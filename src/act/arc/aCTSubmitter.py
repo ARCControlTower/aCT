@@ -99,6 +99,7 @@ class aCTSubmitter(aCTARCProcess):
                             ArcJob.proxyid==proxyid,
                             or_(ArcJob.clusterlist.like(f'%{self.cluster}'), ArcJob.clusterlist.like(f'%{self.cluster},%'))) \
                     .join(ArcJob.jobdescobj) \
+                    .order_by(ArcJob.tarcstate.asc()) \
                     .limit(limit) \
                     .with_for_update(skip_locked=True)
                 jobs = session.execute(stmt).all()
@@ -137,8 +138,10 @@ class aCTSubmitter(aCTARCProcess):
                 maxprioqueued = 0
             self.log.info(f"Max priority queued: {maxprioqueued}")
 
-            #qfraction = self.conf.jobs.get("queuefraction", 0.15) / 100.0
-            #qoffset = self.conf.jobs.get("queueoffset", 100)
+            qfraction = self.conf.jobs.get("queuefraction", 15)/100
+            qoffset = self.conf.jobs.get("queueoffset", 100)
+            numbertosubmit = min(max(int(max(qfraction*len(rjobs), qoffset) - len(qjobs)), 0), len(jobs))
+            self.log.info(f"Number of jobs to submit: {numbertosubmit} for fairshare {fairshare} and proxyid {proxyid}")
 
             ##################################################################
             #
@@ -151,6 +154,15 @@ class aCTSubmitter(aCTARCProcess):
 
             # get REST client
             jobids = [job.id for job in jobs]
+
+            if numbertosubmit < len(jobs):
+                with self.db.Session.begin() as session:
+                    session.execute(self.db.setJobsArcstate(jobids[numbertosubmit:], 'tosubmit'))
+                if numbertosubmit == 0:
+                    continue
+                descs = descs[:numbertosubmit]
+                jobids = jobids[:numbertosubmit]
+
             arcrest = self.getARCClient(proxyid)
 
             with self.db.Session.begin() as session:

@@ -24,7 +24,7 @@ class ArcJobMixin:
     proxyid: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey('proxies.id'))
     appjobid: Mapped[Optional[str]] = mapped_column(String(16))
     priority: Mapped[Optional[int]] = mapped_column(SmallInteger)
-    fairshare: Mapped[Optional[str]] = mapped_column(String(50))
+    fairshare: Mapped[Optional[str]] = mapped_column(String(255))
 
     @declared_attr
     def jobdescobj(col):

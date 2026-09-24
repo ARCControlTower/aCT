@@ -29,16 +29,17 @@ class aCTClient2Arc(aCTProcess):
         """
         with self.db.Session() as session:
             proxies = self.db.getProxies(session)
-        with self.db.Session.begin() as session:
-            for proxyid in proxies:
-                self.stopOnFlag()
-                self.insertNewJobs(proxyid, session, 1000)
+        for proxyid in proxies:
+            self.stopOnFlag()
+            self.insertNewJobs(proxyid, 1000)
 
-    def insertNewJobs(self, proxyid, session, num):
+    def insertNewJobs(self, proxyid, num):
         """Insert new jobs to ARC table for proxy."""
         # Get jobs that haven't been inserted to ARC table yet
         # (they don't have reference to ARC table, arcjobid is null).
-        jobs = self.db.getJobsInfo(proxyid, session, num)
+        with self.db.Session() as session:
+            jobs = self.db.getJobsInfo(proxyid, session, num)
+            dn = self.db.getProxyInfo(session, {'id': proxyid}, ['dn']).dn
         jobdescs = arc.JobDescriptionList()
         for job in jobs:
             # create downloads list
@@ -57,25 +58,28 @@ class aCTClient2Arc(aCTProcess):
                     downloads.append(f'diagnose={logdir}/')
 
             # insert job to ARC table
-            try:
-                arcjobid = self.db.insertArcJobDescription(
-                    session,
-                    job.jobdesc,
-                    proxyid,
-                    0,
-                    job.clusterlist,
-                    job.id,
-                    ';'.join(downloads)
-                )
-            except Exception as exc:
-                self.log.error(f'Error inserting appjob({job.id}) to arc table: {exc}')
-            else:
-                # create a reference to job in client table
+            with self.db.Session() as session:
                 try:
-                    self.db.updateJob(proxyid, session, job.id,  {'arcjobid':arcjobid})
-                    self.log.info(f'Successfully inserted appjob({job.id}) {arcjobid} to ARC engine')
+                    arcjobid = self.db.insertArcJobDescription(
+                        session,
+                        job.jobdesc,
+                        proxyid,
+                        0,
+                        job.clusterlist,
+                        job.id,
+                        ';'.join(downloads),
+                        dn
+                    )
                 except Exception as exc:
-                    self.log.error(f'Error connecting clientjob({job.id}) with arcjob({arcjobid}): {exc}')
+                    self.log.error(f'Error inserting appjob({job.id}) to arc table: {exc}')
+                else:
+                    # create a reference to job in client table
+                    try:
+                        self.db.updateJob(proxyid, session, job.id,  {'arcjobid':arcjobid})
+                        session.commit()
+                        self.log.info(f'Successfully inserted appjob({job.id}) {arcjobid} to ARC engine')
+                    except Exception as exc:
+                        self.log.error(f'Error connecting clientjob({job.id}) with arcjob({arcjobid}): {exc}')
 
     def finish(self):
         super().finish()
