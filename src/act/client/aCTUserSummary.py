@@ -4,12 +4,19 @@ from act.arc.aCTDBArcNEW import aCTDBArc
 from act.client.clientdb import ClientDB
 from act.common.aCTConfig import aCTConfigARC
 from act.common.aCTProcess import aCTProcess
-from sqlalchemy import select,func,insert,delete
+from sqlalchemy import select,func,insert,delete,case
 from act.client.dbModels import Proxy, ArcJob, UserSummary
+
+# arcstate values that group together several ARC-reported States (e.g.
+# 'submitted' covers ARC's Accepted/Preparing/Submitting/Queuing). For
+# these, use the more granular ARC State instead of the arcstate label.
+# Every other arcstate (tosubmit, cancelled, done, ...) has no meaningful
+# or no more detailed corresponding State, so it's kept as-is.
+EXPAND_TO_ARC_STATE = ('submitted', 'running', 'finishing', 'holding')
 
 
 class aCTUserSummary(aCTProcess):
-    """Object that runs until interrupted and periodically submits new jobs."""
+    """Object that runs until interrupted and periodically creates summary of user jobs."""
 
     # overriding to prevent cluster argument
     def __init__(self):
@@ -38,11 +45,16 @@ class aCTUserSummary(aCTProcess):
             func.substring_index(name, ' ', -1)
         ).label('cn')
 
-        subq = (select(Proxy.id,cn,ArcJob.cluster,ArcJob.arcstate,func.count().label('cnt'))
-                .join(Proxy.arcjobs)
-                .group_by(Proxy.id,cn,ArcJob.cluster,ArcJob.arcstate)).subquery()
+        combinedState = case(
+            (ArcJob.arcstate.in_(EXPAND_TO_ARC_STATE), func.coalesce(ArcJob.State, ArcJob.arcstate)),
+            else_=ArcJob.arcstate
+        ).label('combinedstate')
 
-        stmt = (select(subq.c.id,subq.c.cn,subq.c.cluster,func.json_objectagg(subq.c.arcstate,subq.c.cnt).label('states'))
+        subq = (select(Proxy.id,cn,ArcJob.cluster,combinedState,func.count().label('cnt'))
+                .join(Proxy.arcjobs)
+                .group_by(Proxy.id,cn,ArcJob.cluster,combinedState)).subquery()
+
+        stmt = (select(subq.c.id,subq.c.cn,subq.c.cluster,func.json_objectagg(subq.c.combinedstate,subq.c.cnt).label('states'))
                 .group_by(subq.c.id,subq.c.cn,subq.c.cluster)
                 .order_by(subq.c.id,subq.c.cn,subq.c.cluster))
         
