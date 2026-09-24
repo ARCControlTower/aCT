@@ -16,7 +16,7 @@ from act.client.errors import ConfigError, InvalidJobDescriptionError
 from act.client.errors import NoSuchSiteError, InvalidJobRangeError
 from act.client.errors import InvalidJobIDError, UnknownClusterError
 from act.client.common import readSites
-from act.arc.dbModels import ArcJob
+from act.arc.dbModels import ArcJob, JobDescription
 from act.client.dbModels import ClientJob, UserSummary
 from urllib.parse import urlparse
 from pyarcrest.arc import isLocalInputFile
@@ -278,23 +278,25 @@ class JobManager(object):
             A list of job dictionaries.
         """
         # wrong state filter, return immediately
-        valid_states = (None, 'submitted', 'running', 'tosubmit', 'submitting')
+        valid_states = (None, 'submitted', 'running', 'tosubmit', 'submitting', 'finishing')
         if state_filter not in valid_states:
             return []
         if state_filter:
             state_filter = [state_filter]
+        else:
+            state_filter = ['submitted', 'running', 'tosubmit', 'submitting', 'finishing']
 
         with self.db.Session.begin() as session:
             jobs = self.db.getJoinJobsInfo(proxyid, session, jobids=jobids,
                                     state_filter=state_filter, name_filter=name_filter,
-                                    clicols=['id'], arccols=['id', 'arcstate'], forupdate=True)
+                                    clicols=['id'], arccols=['id', 'arcstate', 'jobdesc'], forupdate=True)
 
             if not jobs:
                 return []
             
             arc_ids = []
             client_ids = []
-            for c_id, a_id, arcstate in jobs:
+            for c_id, a_id, arcstate, jobdesc in jobs:
                 if a_id is None:
                     # If id from arcjobs is NULL, then job is either waiting or in
                     # inconsistent state. The job has to be deleted.
@@ -304,6 +306,7 @@ class JobManager(object):
                     # immediately.
                     client_ids.append(c_id)
                     self.db.deleteJobs(session=session, jobids=[a_id], table=ArcJob)
+                    self.db.deleteJobs(session=session, jobids=[jobdesc], table=JobDescription)
                 else:
                     # If there is entry in arcjobs, the job can be killed by
                     # setting its state to 'tocancel'
@@ -323,7 +326,7 @@ class JobManager(object):
             datadir = self.getJobDataDir(c_id)
             shutil.rmtree(self.getJobDataDir(datadir), ignore_errors=True)
 
-        return [{"c_id": c, "a_id": a, "a_arcstate": s} for c, a, s in jobs]
+        return [{"c_id": c, "a_id": a, "a_arcstate": s} for c, a, s, _ in jobs]
 
     def resubmitJobs(self, proxyid, jobids=[], name_filter='', **_):
         """
