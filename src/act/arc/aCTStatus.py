@@ -429,7 +429,11 @@ class aCTStatus(aCTARCProcess):
         with self.db.Session() as session:
             limit = self.db.getTimeStamp() - timedelta(seconds=self.conf.jobs.checkinterval)
             jobstocheck = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.proxyid, ArcJob.IDFromEndpoint, ArcJob.tarcstate, ArcJob.created) \
-                            .where(ArcJob.arcstate=='cancelling', ArcJob.JobID.notlike(''), ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit) \
+                            .where(ArcJob.arcstate=='cancelling',
+                                   # IDFromEndpoint, not JobID: jobs whose input upload failed exist on
+                                   # the CE (IDFromEndpoint set) but never got a JobID
+                                   ArcJob.IDFromEndpoint.isnot(None), ArcJob.IDFromEndpoint != '',
+                                   ArcJob.cluster==self.cluster, ArcJob.tarcstate<limit) \
                             .limit(100000)).all()
         if not jobstocheck:
             return
@@ -448,9 +452,9 @@ class aCTStatus(aCTARCProcess):
             tocheck = []
             with self.db.Session.begin() as session:
                 for job in dbjobs:
-                    if not job.tarcstate:
-                        job.tarcstate = job.tcreated
-                    if job.tarcstate + timedelta(seconds=3600) < datetime.utcnow():
+                    # rows are read-only, so use a local value; fall back to creation time
+                    tarcstate = job.tarcstate or job.created
+                    if tarcstate + timedelta(seconds=3600) < datetime.utcnow():
                         session.execute(update(ArcJob).where(ArcJob.id==job.id).values(arcstate='cancelled', tarcstate=tstamp))
                         self.log.warning(f"appjob({job.appjobid}) stuck in cancelling, setting to cancelled")
                     else:
@@ -492,7 +496,8 @@ class aCTStatus(aCTARCProcess):
 
                     # jobs that are not on the list anymore are considered to
                     # be cancelled [1]
-                    if job.id not in joblist:
+                    # joblist holds the CE's job IDs, so compare IDFromEndpoint (not the DB id)
+                    if job.IDFromEndpoint not in joblist:
                         session.execute(update(ArcJob).where(ArcJob.id==job.id).values(arcstate='cancelled', tarcstate=tstamp))
                         self.log.warning(f"appjob({job.appjobid}) not in ARC job list anymore, setting to cancelled")
                         continue
