@@ -72,7 +72,7 @@ class aCTCRICParser:
             for queue in siteinfo['queues']:
                 if queue.get('ce_state') != 'ACTIVE':
                     if siteinfo['enabled']:
-                        self.log.info(f"Skipping inactive CE {queue.get('ce endpoint')}")
+                        self.log.info(f"Skipping inactive CE {queue.get('ce_endpoint')}")
                     continue
                 if queue['ce_flavour'] == 'CREAM-CE':
                     endpoints.append('cream %s/ce-cream/services/CREAM2 %s %s' % (queue['ce_endpoint'], queue['ce_jobmanager'], queue['ce_queue_name']))
@@ -82,7 +82,7 @@ class aCTCRICParser:
                     endpoints.append('%s/%s' % (queue['ce_endpoint'], queue['ce_queue_name']))
                 else:
                     if siteinfo['enabled']:
-                        self.log.warning(f"Cannot use CE flavour {queue['ce flavour']} for queue {sitename}")
+                        self.log.warning(f"Cannot use CE flavour {queue['ce_flavour']} for queue {sitename}")
             # Ignore endpoints with "default" queue unless that is the only queue
             nondefaultendpoints = [e for e in endpoints if not e.endswith(' default')]
             if not nondefaultendpoints:
@@ -118,11 +118,29 @@ class aCTCRICParser:
             self.log.info(f"Parsed {len(sites)} sites from CRIC")
         return sites
 
+    def _configSiteDefaults(self, sitename, info):
+        '''
+        Fill in values for a site defined only in the config (not in CRIC),
+        using the same defaults as _parseCRICJson. Values set in the config
+        are kept.
+        '''
+        info.setdefault('flavour', 'ARC-CE')
+        info.setdefault('endpoints', [])
+        info.setdefault('schedconfig', sitename)
+        info.setdefault('type', 'production')
+        info.setdefault('corecount', 1)
+        info.setdefault('maxjobs', self.conf.cric.maxjobs)
+        info.setdefault('push', True)
+        info.setdefault('truepilot', False)
+        info.setdefault('maxwalltime', 60*24*7)
+
     def _mergeSiteDicts(self, dict1, dict2):
         for d in dict2.keys():
             if d in dict1:
                 dict1[d].update(dict2[d])
             else:
+                # site only in config: fill in what CRIC would provide
+                self._configSiteDefaults(d, dict2[d])
                 dict1[d]=dict2[d]
 
     def getSites(self, flavour=None):
@@ -131,8 +149,13 @@ class aCTCRICParser:
         self.conf = aCTConfigAPP()
         cricfile = self.conf.cric.jsonfilename
         if not cricfile:
-            # No CRIC, only manually configured sites
-            return self._parseConfigSites()
+            # No CRIC, only manually configured sites. Fill in the values that
+            # otherwise come from CRIC, using the same defaults as
+            # _parseCRICJson. Values set in the config are kept.
+            sites = self._parseConfigSites()
+            for sitename, info in sites.items():
+                self._configSiteDefaults(sitename, info)
+            return self._filterFlavour(sites, flavour)
 
         # wait for CRIC json to be produced
         i = 0
@@ -168,9 +191,13 @@ class aCTCRICParser:
                     pilotType = 'True pilot' if info['truepilot'] else 'ARC pilot'
                     self.log.info(f"{site} ({info['status']}): {pilotType} ({info['flavour']}), maxjobs {info['maxjobs']}")
 
+        return self._filterFlavour(self.sites, flavour)
+
+    def _filterFlavour(self, sites, flavour):
+        '''Return only sites with CE flavour in flavour, or all if not given'''
         if flavour:
-            return dict((k,v) for (k,v) in self.sites.items() if v.get('flavour') in flavour)
-        return self.sites
+            return dict((k,v) for (k,v) in sites.items() if v.get('flavour') in flavour)
+        return sites
 
 if __name__ == '__main__':
 
