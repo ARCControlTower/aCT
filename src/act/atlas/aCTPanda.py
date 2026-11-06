@@ -18,7 +18,8 @@ class aCTPanda:
         self.timeout = self.conf.panda.timeout
         socket.setdefaulttimeout(self.timeout)
 
-        self.context = ssl.SSLContext(ssl.PROTOCOL_TLSv1)
+        # TLS_CLIENT negotiates the best TLS version and also checks the hostname
+        self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         self.context.load_cert_chain(proxypath, keyfile=proxypath)
         self.context.verify_mode = ssl.CERT_REQUIRED
         self.context.load_verify_locations('/etc/pki/tls/certs/CERN-bundle.pem')
