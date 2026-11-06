@@ -354,8 +354,7 @@ class aCTAutopilot(aCTATLASProcess):
                         jobinfo = aCTPandaJob(jobinfo=info)
                         jobinfo.errorCode = 9000
                         jobinfo.errorDiag = 'Job failed for unknown reason'
-                    else:
-                        os.remove(fname)
+                    # heartbeat file is removed only after panda accepts the update
 
                 self.log.debug(f"appjob({j.pandaid}): final heartbeat: {jobinfo.dictionary()}")
                 t=PandaThr(self.getPanda(j.siteName).updateStatus,j.pandaid,j.pandastatus,jobinfo.dictionary())
@@ -366,7 +365,8 @@ class aCTAutopilot(aCTATLASProcess):
         tstamp = self.db.getTimeStamp()
         with self.db.Session.begin() as session:
             for t in tlist:
-                if t.result == None:
+                # None or {} (connection error): retry next time
+                if not t.result:
                     continue
                 if 'StatusCode' in t.result and t.result['StatusCode'] and t.result['StatusCode'][0] != '0':
                     self.log.error('Error updating panda')
@@ -381,6 +381,11 @@ class aCTAutopilot(aCTATLASProcess):
                 jd['theartbeat'] = tstamp
 
                 session.execute(update(PandaJob).where(PandaJob.pandaid==t.id).values(**jd))
+                # Final heartbeat accepted, heartbeat file no longer needed
+                try:
+                    os.remove(os.path.join(self.tmpdir, "heartbeats", f"{t.id}.json"))
+                except FileNotFoundError:
+                    pass
                 # Send done message to APFMon
                 self.apfmon.updateJob(t.id, 'done' if jd['actpandastatus'] == 'done' else 'fault')
 
