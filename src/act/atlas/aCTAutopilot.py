@@ -130,8 +130,8 @@ class aCTAutopilot(aCTATLASProcess):
             jd = {}
             if pstatus != 'starting':
                 jd['startTime'] = j.startTime
-            if j['computingElement']:
-                if j['computingElement'].find('://') != -1: # this if is only needed during transition period
+            if j.computingElement:
+                if j.computingElement.find('://') != -1: # this if is only needed during transition period
                     jd['computingElement'] = arc.URL(str(j.computingElement)).Host()
                 else:
                     jd['computingElement'] = j.computingElement
@@ -209,7 +209,7 @@ class aCTAutopilot(aCTATLASProcess):
         if not jobs:
             return
 
-        idstr = ",".join([str(job["pandaid"]) for job in jobs])
+        idstr = ",".join([str(job.pandaid) for job in jobs])
         self.log.info(f"Update heartbeat for {len(jobs)} jobs in state {pstatus} ({idstr})")
 
         changed_pstatus = False
@@ -248,8 +248,9 @@ class aCTAutopilot(aCTATLASProcess):
             except:
                 jobsbyproxy[self.sites[j.siteName]['type']] = [jd]
 
-        for sitetype, jobs in jobsbyproxy.items():
-            t = PandaBulkThr(self.pandas.get(sitetype, self.pandas.get('production')).updateStatuses, [j.jobId for j in jobs], jobs)
+        for sitetype, jobdicts in jobsbyproxy.items():
+            t = PandaBulkThr(self.pandas.get(sitetype, self.pandas.get('production')).updateStatuses,
+                             [j['jobId'] for j in jobdicts], jobdicts)
             tlist.append(t)
 
         aCTUtils.RunThreadsSplit(tlist, self.nthreads)
@@ -466,12 +467,12 @@ class aCTAutopilot(aCTATLASProcess):
                 # Fill out empty start/end time
                 if job.startTime:
                     if not job.endTime:
-                        jobarchive['endtime'] = job.modified
+                        jobarchive['endTime'] = job.modified
                 elif job.endTime:
-                    jobarchive['starttime'] = job.endTime
+                    jobarchive['startTime'] = job.endTime
                 else:
-                    jobarchive['starttime'] = tstamp
-                    jobarchive['endtime'] = tstamp
+                    jobarchive['startTime'] = tstamp
+                    jobarchive['endTime'] = tstamp
 
                 # archive table doesn't have modified
                 del jobarchive['modified']

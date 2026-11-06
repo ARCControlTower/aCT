@@ -39,7 +39,7 @@ def main():
                     pandas[proxyid] = panda
 
                 response = pandas[proxyid].updateStatus(job.pandaid, job.pandastatus)
-                print('\t'.join([str(job.pandaid), job.sitename, job.pandastatus, str(job.theartbeat), str(response)]))
+                print('\t'.join([str(job.pandaid), job.siteName, job.pandastatus, str(job.theartbeat), str(response)]))
                 # update heartbeat time in the DB
                 session.execute(update(PandaJob).where(PandaJob.pandaid==job.pandaid).values(theartbeat=db.getTimeStamp(time.time()+1)))
 
