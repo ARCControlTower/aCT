@@ -84,7 +84,7 @@ class aCTValidator(aCTATLASProcess):
         # aCT's proxy cert used for authentication on SEs
         self.uc = arc.UserConfig(cred_type)
         self.uc.ProxyPath(str(proxyfile))
-        self.uc.UtilsDirPath(str(arc.UserConfig.ARCUSERDIRECTORY))
+        self.uc.UtilsDirPath(str(arc.UserConfig.ARCUSERDIRECTORY()))
 
         # result queues for worker threads
         self.checkResults = queue.Queue()
@@ -214,11 +214,12 @@ class aCTValidator(aCTATLASProcess):
                         jobinfo.startTime = (aj.EndTime - datetime.timedelta(0, cputimepercore)).strftime('%Y-%m-%d %H:%M:%S')
                 else:
                     self.log.warning(f'appjob({aj.appjobid}): no endtime found')
-            if len(aj.ExecutionNode) > 255:
-                jobinfo.node = aj.ExecutionNode[:254]
-                self.log.warning(f"appjob({aj.appjobid}): Truncating wn hostname from {aj.ExecutionNode} to {jobinfo.node}")
+            node = aj.ExecutionNode or ''
+            if len(node) > 255:
+                jobinfo.node = node[:254]
+                self.log.warning(f"appjob({aj.appjobid}): Truncating wn hostname from {node} to {jobinfo.node}")
             else:
-                jobinfo.node = aj.ExecutionNode
+                jobinfo.node = node
 
             try:
                 smeta = json.loads(aj.metadata_.decode())
@@ -251,10 +252,11 @@ class aCTValidator(aCTATLASProcess):
 
         pilotlog = aj.StdOut
         if not pilotlog and os.path.exists(localdir):
-            pilotlogs = [f for f in os.listdir(localdir)]
-            for f in pilotlogs:
-                if f.find('.log'):
+            # pilot log names contain .log but may have suffixes (e.g. job.log.1)
+            for f in os.listdir(localdir):
+                if '.log' in f:
                     pilotlog = f
+                    break
         if pilotlog:
             try:
                 shutil.move(os.path.join(localdir, pilotlog),
@@ -268,8 +270,12 @@ class aCTValidator(aCTATLASProcess):
 
     def extractOutputFilesFromMetadata(self, session, arcjobid):
         aj = session.execute(select(ArcJob.JobID, ArcJob.appjobid).where(ArcJob.id==arcjobid)).one_or_none()
-        if not aj or not aj.JobID:
+        if not aj:
             self.log.error(f"failed to find arcjob({arcjobid}) in database")
+            return {}
+        if not aj.JobID:
+            # job was never (fully) submitted to ARC, so it cannot have output files
+            self.log.info(f"appjob({aj.appjobid}): arcjob({arcjobid}) was never submitted to ARC, no output files")
             return {}
 
         jobid=aj.JobID
@@ -647,7 +653,7 @@ class aCTValidator(aCTATLASProcess):
             surls = {}
             for job in toremove:
                 self.stopOnFlag()
-                jobsurls = self.extractOutputFilesFromMetadata(job.arcjobid)
+                jobsurls = self.extractOutputFilesFromMetadata(session, job.arcjobid)
                 if not jobsurls:
                     jobid = job.arcjobid
                     if job in downloaded or job.RestartState != "Finishing" and job.arcstate != "done":
@@ -660,7 +666,7 @@ class aCTValidator(aCTATLASProcess):
                         session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**resubdesc))
                     else:
                         # Otherwise fail job whose outputs cannot be cleaned.
-                        self.log.error(f"appjob({job['pandaid']}): Cannot remove output, skipping")
+                        self.log.error(f"appjob({job.pandaid}): Cannot remove output, skipping")
                         self.cleanDownloadedJob(session, jobid)
                         session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
                         session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**faildesc))
@@ -695,7 +701,6 @@ class aCTValidator(aCTATLASProcess):
                     self.cleanDownloadedJob(session, jobid)
                     session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
                     session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**faildesc))
-                    self.cleanDownloadedJob(session, jobid)
 
                 else:
                     # set back to toresubmit to retry
@@ -978,13 +983,15 @@ class OutputChecker(ARCWorker):
                         st = datapointlist[i].Stat(f)
                         if not st or not f:
                             s = surllist[i]
-                            if status.Retryable():
+                            if st.Retryable():
                                 self.log.warning(f"arcjob({jobid}): Failed to query files on {datapointlist[i].GetURL().Host()}, will retry later: {st}")
                                 self.resultQueue.put((jobid, url, JobStatus.RETRY))
                             else:
                                 self.log.error(f"arcjob({jobid}): Failed to find info on {dpurl}")
                                 self.resultQueue.put((jobid, url, JobStatus.FAILED))
                             files.append(None)
+                            # result already reported above
+                            continue
                         else:
                             files.append(f)
 
@@ -1092,5 +1099,7 @@ class HeartbeatDownloader(ARCWorker):
             dm = arc.DataMover()
             status = dm.Transfer(source.h, dest.h, arc.FileCache(), arc.URLMap())
             if not status:
-                self.log.error(f"appjob({job.pandaid}): Failed to download {source.h.GetURL.str()}: {status}")
-                self.resultQueue.put(job)
+                self.log.error(f"appjob({job.pandaid}): Failed to download {source.h.GetURL().str()}: {status}")
+            # Return the job whether or not the download worked. A failed
+            # download leaves no heartbeat, so the caller resubmits the job anyway.
+            self.resultQueue.put(job)
