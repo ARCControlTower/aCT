@@ -45,10 +45,7 @@ class aCTPanda2Arc(aCTATLASProcess):
                     self.log.error(traceback.format_exc())
                     continue
                 self.sendTraces(parser.traces, proxies_map[job.proxyid])
-                try:
-                    xrsl = parser.getXrsl()
-                except:
-                    pass
+                xrsl = parser.getXrsl()
                 if xrsl is not None:
                     endpoints = self.sites[job.siteName]['endpoints']
                     if not endpoints: # No CEs, try later
@@ -107,8 +104,11 @@ class aCTPanda2Arc(aCTATLASProcess):
         self.createArcJobs()
 
     def sendTraces(self, traces, proxypath):
+        client = None
         try:
-            client = HTTPClient('https://rucio-lb-prod.cern.ch:443', proxypath=proxypath)
+            client = HTTPClient('https://rucio-lb-prod.cern.ch:443', proxypath=proxypath, timeout=5)
+            # A rejected trace is logged and the rest are still sent. A
+            # connection error stops the loop, because the rest would fail too.
             for trace in traces:
                 resp = client.request(
                     "POST",
@@ -120,7 +120,9 @@ class aCTPanda2Arc(aCTATLASProcess):
                 # send further requests
                 resp.read()
                 if resp.status != 201:
-                    self.log.error(f"Error sending trace: {resp.staus}: {resp.reason}")
-            client.close()
+                    self.log.error(f"Error sending trace: {resp.status}: {resp.reason}")
         except Exception as error:
             self.log.error(f"Error sending trace: {error}")
+        finally:
+            if client:
+                client.close()
