@@ -1,7 +1,5 @@
 import json
 import urllib.parse, socket, http.client
-import os
-import pickle
 import ssl
 from act.common import aCTConfig
 
@@ -37,73 +35,6 @@ class aCTPanda:
         except Exception as x:
             self.log.error(f"error in connection: {x}")
         return urldata
-
-    def getQueueStatus(self, queue=None):
-        node = {}
-        if queue:
-            node = {'site': queue}
-        self.log.debug('Getting queue info')
-        urldata = self.__HTTPConnect__('getJobStatisticsWithLabel', node)
-        if not urldata:
-            self.log.warning('No queue info returned by panda')
-            return None
-
-        try:
-            data = pickle.loads(urldata.encode())
-        except Exception:
-            self.log.error(f'Could not load panda response: {urldata}')
-            return None
-
-        return data
-
-    def getJob(self,siteName,prodSourceLabel=None):
-        node={}
-        node['siteName']=siteName
-        if prodSourceLabel is not None:
-            node['prodSourceLabel']=prodSourceLabel
-        pid = None
-        urldesc=None
-        self.log.debug(f'Fetching jobs for {siteName} {prodSourceLabel}')
-        urldata=self.__HTTPConnect__('getJob',node)
-        if not urldata:
-            self.log.info('No job from panda')
-            return (None,None,None)
-        try:
-            urldesc = urllib.parse.parse_qs(urldata)
-        except Exception as x:
-            self.log.error(x)
-            return (None,None,None)
-
-        self.log.info(f'panda returned {urldesc}')
-        status = urldesc['StatusCode'][0]
-        if status == '20':
-            self.log.debug('No Panda activated jobs available')
-            return (-1,None,None)
-        elif status == '0':
-            pid = urldesc['PandaID'][0]
-            self.log.info(f'New Panda job with ID pandaid({pid})')
-            prodSourceLabel = urldesc['prodSourceLabel'][0]
-        elif status == '60':
-            self.log.error('Failed to contact Panda, proxy may have expired')
-        else:
-            self.log.error(f'Check out what this Panda rc means {status}')
-        self.log.debug(f"pandaid({pid}) {urldesc}")
-        return (pid,urldata,prodSourceLabel)
-
-
-    def getStatus(self,pandaId):
-        self.log.info(f"entry {pandaId}")
-        node={}
-        node['ids']=pandaId
-        urldesc=None
-        urldata=self.__HTTPConnect__('getStatus',node)
-        try:
-            urldesc = urllib.parse.parse_qs(urldata)
-        except Exception as x:
-            self.log.error(x)
-            return None
-        return urldesc
-
 
     def updateStatus(self,pandaId,state,desc={}):
         node={}
@@ -142,26 +73,3 @@ class aCTPanda:
             self.log.error(x)
             return {}
         return urldesc
-
-
-    def queryJobInfo(self, cloud='ND'):
-        node={}
-        node['cloud']=cloud
-        node['schedulerID']=self.conf.panda.schedulerid
-        try:
-            urldata=self.__HTTPConnect__('queryJobInfoPerCloud',node)
-        except:
-            return []
-        try:
-            return pickle.loads(urldata)
-        except:
-            return []
-
-
-if __name__ == '__main__':
-
-    from act.common.aCTLogger import aCTLogger
-    logger = aCTLogger('test')
-    log = logger()
-    p = aCTPanda(log, os.environ['X509_USER_PROXY'])
-    print(p.getQueueStatus('UIO'))

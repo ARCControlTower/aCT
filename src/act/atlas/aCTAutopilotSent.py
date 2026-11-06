@@ -4,7 +4,7 @@ from threading import Thread
 import arc
 from act.atlas import aCTPanda
 from act.atlas.aCTATLASProcess import aCTATLASProcess
-from act.common import aCTProxy, aCTUtils
+from act.common import aCTUtils
 from act.arc.dbModels import Proxy
 from act.atlas.dbModels import PandaJob
 from sqlalchemy import select, update, or_

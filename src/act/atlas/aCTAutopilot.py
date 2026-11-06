@@ -396,56 +396,6 @@ class aCTAutopilot(aCTATLASProcess):
             pandainputdir = os.path.join(self.tmpdir, 'inputfiles', str(j.pandaid))
             shutil.rmtree(pandainputdir, ignore_errors=True)
 
-    def checkJobs(self):
-        """
-        Sanity checks when restarting aCT. Check for nonexistent jobs... TODO
-
-        Signal handling strategy:
-        - exit is checked before every job update
-        """
-        # Does it matter which proxy is used? Assume no
-        panda = next(iter(self.pandas.values()))
-        pjobs = panda.queryJobInfo()
-
-        # panda error if [] possible
-        if len(pjobs) == 0:
-            self.log.info('No panda jobs found')
-            return
-
-        pjids=[]
-        for j in pjobs:
-            if j['jobStatus'] == 'sent' or j['jobStatus'] == 'running' or j['jobStatus'] == 'transferring' or j['jobStatus'] == 'starting' :
-                pjids.append(j['PandaID'])
-        self.log.info(f"{len(pjids)}")
-
-        # try to recover lost jobs (jobs in aCT but not in Panda)
-        with self.db.Session.begin() as session:
-            jobs = session.execute(select(PandaJob.pandaid, PandaJob.pandastatus).where(PandaJob.pandastatus.is_not(None))).all()
-
-            for j in jobs:
-                self.stopOnFlag()
-                self.log.info(f"appjob({j.pandaid})")
-                if j.pandaid in pjids:
-                    pass
-                else:
-                    self.log.info(f"appjob({j.pandaid}) not in panda, cancel and remove from aCT")
-                    jd={}
-                    jd['pandastatus'] = None
-                    jd['actpandastatus']='tobekilled'
-                    session.execute(update(PandaJob).where(PandaJob.pandaid==j.pandaid).values(**jd))
-
-        # check db for jobs in Panda but not in aCT
-        count=0
-        for j in pjobs:
-            self.stopOnFlag()
-            self.log.info(f"checking panda job pandaid({j['PandaID']})")
-            job=self.dbpanda.getJob(j['PandaID'])
-            if job is None and ( j['pandastatus'] == 'running' or j['pandastatus'] == 'transferring' or j['pandastatus'] == 'starting') :
-                self.log.info(f"Missing: pandaid({j['PandaID']})")
-                count+=1
-                panda.updateStatus(j['PandaID'],'failed')
-        self.log.info(f"missing jobs: {count} removed")
-
 
     def updateArchive(self):
         """
@@ -491,7 +441,7 @@ class aCTAutopilot(aCTATLASProcess):
         """
         self.setSites()
 
-        # Getting new jobs is now done in aCTPandaGetJobs
+        # Getting new jobs from panda is done by Harvester
 
         # Update all jobs currently in the system
         self.updatePandaHeartbeatBulk('starting')
