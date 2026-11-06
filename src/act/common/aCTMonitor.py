@@ -12,8 +12,10 @@ from act.arc.dbModels import ArcJob
 
 class aCTPrometheusCollector:
 
-    def __init__(self, log):
+    def __init__(self, log, db):
         self.log = log
+        # DB object created once by the process and reused for every scrape
+        self.db = db
 
     def app_collect(self):
 
@@ -29,7 +31,6 @@ class aCTPrometheusCollector:
                 self.log.info(f'aCTMonitor.collect() not found in {module}')
             except Exception as e:
                 self.log.error(f'Exception running {module}.aCTMonitor.collect: {e}')
-        raise StopIteration
 
     def collect(self):
         queued_arc_jobs = GaugeMetricFamily('arc_queued_jobs',
@@ -44,8 +45,7 @@ class aCTPrometheusCollector:
                                                'Finishing jobs per ARC CE',
                                                labels=['ce_endpoint'])
 
-        db = aCTDBArc(self.log)
-        with db.Session.begin() as session:
+        with self.db.Session.begin() as session:
             jobs = session.execute(select(func.count().label('counts'), ArcJob.cluster, ArcJob.arcstate).select_from(ArcJob).group_by(ArcJob.cluster, ArcJob.arcstate)).all()
 
         for job in jobs:
@@ -63,11 +63,6 @@ class aCTPrometheusCollector:
         yield from self.app_collect()
 
 
-# TODO: The db is used in the collector class and is created on every collect
-#       call. Could that be reworked so that the db would be created once in
-#       the process class and then passed to the collector as an argument? Or
-#       is it done this way to avoid hangs of the database and avoid
-#       reconnections by just connecting every time?
 class aCTMonitor(aCTProcess):
 
     # override parent's init method to not take the cluster argument
@@ -87,7 +82,9 @@ class aCTMonitor(aCTProcess):
         self.prometheus_port = self.conf.monitor.prometheusport or 0
 
         if self.prometheus_port:
+            # one DB object for all scrapes; pool_pre_ping handles dropped connections
+            self.db = aCTDBArc(self.log)
             start_http_server(self.prometheus_port)
-            REGISTRY.register(aCTPrometheusCollector(self.log))
+            REGISTRY.register(aCTPrometheusCollector(self.log, self.db))
         else:
             self.log.info('Prometheus monitoring not enabled')
