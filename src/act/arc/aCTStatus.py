@@ -394,7 +394,9 @@ class aCTStatus(aCTARCProcess):
             with self.db.Session.begin() as session:
                 # be careful not to cancel jobs that are stuck in cleaning
                 limit = self.db.getTimeStamp() - timedelta(seconds=maxtime)
-                jobs = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.JobID, ArcJob.arcstate).where(ArcJob.State==jobstate, ArcJob.tstate<limit)).all()
+                # only this process's CE, like the other checks
+                jobs = session.execute(select(ArcJob.id, ArcJob.appjobid, ArcJob.JobID, ArcJob.arcstate)
+                                       .where(ArcJob.State==jobstate, ArcJob.tstate<limit, ArcJob.cluster==self.cluster)).all()
 
                 tstamp = self.db.getTimeStamp()
                 for job in jobs:
