@@ -255,9 +255,9 @@ class aCTStatus(aCTARCProcess):
 
                     # Add available job info to dict
 
-                    # difference of two datetime objects yields timedelta object
-                    # with seconds attribute
-                    fromCreated = int((datetime.utcnow() - job.created).total_seconds()) // 60
+                    # seconds since the job was created, in the same unit as
+                    # ARC's UsedTotalWallTime and everything that reads it
+                    fromCreated = int((datetime.utcnow() - job.created).total_seconds())
 
                     # calculate proper wall time and fix wrongly reported one
                     walltime = jobInfo.get("UsedTotalWallTime", None)
