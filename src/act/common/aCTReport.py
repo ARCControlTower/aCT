@@ -106,7 +106,9 @@ class aCTReport:
             if conf:
                 os.environ['ACTCONFIGARC'] = conf
 
-            with self.db.Session() as session:
+            # new DB object per conf: the DB is chosen from ACTCONFIGARC at creation
+            db = aCTDBArcNEW.aCTDBArc(self.actlog)
+            with db.Session() as session:
                 rows = session.execute(select(ArcJob.JobID, ArcJob.State)).all()
             for r in rows:
 

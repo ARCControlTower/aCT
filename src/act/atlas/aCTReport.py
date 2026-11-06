@@ -15,46 +15,47 @@ def report(actconfs):
     states = ["sent", "starting", "running", "slots", "transferring", "tovalidate", "toresubmit",
               "toclean", "finished", "done", "failed", "donefailed",
               "tobekilled", "cancelled", "donecancelled"]
-    db = aCTDBPanda(logger)
-    with db.Session() as session:
-        for conf in actconfs:
-            if conf:
-                os.environ['ACTCONFIGARC'] = conf
-            
+    for conf in actconfs:
+        if conf:
+            os.environ['ACTCONFIGARC'] = conf
+
+        # new DB object per conf: the DB is chosen from ACTCONFIGARC at creation
+        db = aCTDBPanda(logger)
+        with db.Session() as session:
             rows = session.execute(select(PandaJob.siteName, PandaJob.actpandastatus, PandaJob.corecount)).all()
-            for r in rows:
+        for r in rows:
 
-                site, state = (str(r.siteName), str(r.actpandastatus))
-                if r.corecount is None:
-                    corecount = 1
-                else:
-                    corecount = int(r.corecount)
+            site, state = (str(r.siteName), str(r.actpandastatus))
+            if r.corecount is None:
+                corecount = 1
+            else:
+                corecount = int(r.corecount)
 
+            try:
+                rep[site][state] += 1
+                if state == "running":
+                    rep[site]["slots"] += corecount
+            except:
                 try:
-                    rep[site][state] += 1
+                    rep[site][state] = 1
                     if state == "running":
-                        rep[site]["slots"] += corecount
-                except:
-                    try:
-                        rep[site][state] = 1
-                        if state == "running":
-                            try:
-                                rep[site]["slots"] += corecount
-                            except:
-                                rep[site]["slots"] = corecount
-                    except:
-                        rep[site] = {}
-                        rep[site][state] = 1
-                        if state == "running":
+                        try:
+                            rep[site]["slots"] += corecount
+                        except:
                             rep[site]["slots"] = corecount
-                try:
-                    rtot[state] += 1
-                    if state == "running":
-                        rtot["slots"] += corecount
                 except:
-                    rtot[state] = 1
+                    rep[site] = {}
+                    rep[site][state] = 1
                     if state == "running":
-                        rtot["slots"] = corecount
+                        rep[site]["slots"] = corecount
+            try:
+                rtot[state] += 1
+                if state == "running":
+                    rtot["slots"] += corecount
+            except:
+                rtot[state] = 1
+                if state == "running":
+                    rtot["slots"] = corecount
 
     log += f"All Panda jobs: {sum([v for k,v in rtot.items() if k != 'slots'])}\n"
     log += f"{'':29} {' '.join([f'{s:>9}' for s in states])}\n"
