@@ -163,7 +163,8 @@ class aCTATLASStatus(aCTATLASProcess):
                                                   ArcJob.cluster, ArcJob.RequestedSlots, ArcJob.appjobid, ArcJob.tstate,
                                                   PandaJob.pandaid, PandaJob.siteName) \
                                                     .join(PandaJob.arcjob) \
-                                                    .where(ArcJob.arcstate==state, PandaJob.actpandastatus.in_(states)) \
+                                                    .where(ArcJob.arcstate==state, PandaJob.actpandastatus.in_(states),
+                                                           PandaJob.siteName.in_(self.sitesselect)) \
                                                     .limit(100000)).all()
 
             if len(jobstoupdate) == 0:
@@ -183,11 +184,12 @@ class aCTATLASStatus(aCTATLASProcess):
                 if state == "finishing" and datetime.datetime.utcnow() - aj.tstate > datetime.timedelta(minutes=10):
                     desc["pandastatus"] = "transferring"
                     desc["actpandastatus"] = "transferring"
-                if len(aj.ExecutionNode) > 255:
-                    desc["node"] = aj.ExecutionNode[:254]
-                    self.log.warning(f"appjob({aj.pandaid}): Truncating wn hostname from {aj.ExecutionNode} to {desc['node']}")
+                node = aj.ExecutionNode or ""
+                if len(node) > 255:
+                    desc["node"] = node[:254]
+                    self.log.warning(f"appjob({aj.pandaid}): Truncating wn hostname from {node} to {desc['node']}")
                 else:
-                    desc["node"] = aj.ExecutionNode
+                    desc["node"] = node
                 desc["computingElement"] = urlparse(aj.cluster).hostname
                 desc["startTime"] = self.getStartTime(datetime.datetime.utcnow(), aj.UsedTotalWallTime)
                 desc["corecount"] = aj.RequestedSlots
@@ -275,7 +277,7 @@ class aCTATLASStatus(aCTATLASProcess):
                 resubmit = False
                 # TODO: errors part of aCTConfigARC should probably be moved to aCTConfigAPP.
                 for error in self.arcconf.errors.toresubmit.arcerrors or []:
-                    if error in aj.Error:
+                    if error in (aj.Error or ""):
                         resubmit = True
                 if resubmit:
                     self.log.info(f"appjob({aj.appjobid}): Resubmitting arcjob({aj.arcjobid}) arcid({aj.JobID}) {aj.Error}")
@@ -312,7 +314,7 @@ class aCTATLASStatus(aCTATLASProcess):
         import glob
         lf = glob.glob(outd+"/log*")
         try:
-            if(os.path.size(lf[0]) > 1048576):
+            if(os.path.getsize(lf[0]) > 1048576):
                 self.log.info(f"Log file too big: {lf[0]}")
                 raise Exception("Log file too big")
             f = open(lf[0],"r")
@@ -371,18 +373,23 @@ class aCTATLASStatus(aCTATLASProcess):
             gmlogerrors = os.path.join(localdir, "gmlog", "errors")
             arcjoblog = os.path.join(outd, f"{aj['appjobid']}.log")
             if not os.path.exists(arcjoblog):
-                try:
-                    shutil.copy(gmlogerrors, arcjoblog)
-                    os.chmod(arcjoblog, 0o644)
-                except:
-                    self.log.error(f"Failed to copy {gmlogerrors}")
+                if not os.path.exists(gmlogerrors):
+                    # normal for jobs killed or cancelled before their output was downloaded
+                    self.log.info(f"appjob({aj['appjobid']}): no gmlog errors file downloaded, nothing to copy")
+                else:
+                    try:
+                        shutil.copy(gmlogerrors, arcjoblog)
+                        os.chmod(arcjoblog, 0o644)
+                    except Exception as e:
+                        self.log.error(f"appjob({aj['appjobid']}): Failed to copy {gmlogerrors}: {e}")
 
             pilotlog = aj["StdOut"]
             if not pilotlog and os.path.exists(localdir):
-                pilotlogs = [f for f in os.listdir(localdir)]
-                for f in pilotlogs:
-                    if f.find(".log"):
+                # pilot log names contain .log but may have suffixes (e.g. job.log.1)
+                for f in os.listdir(localdir):
+                    if ".log" in f:
                         pilotlog = f
+                        break
             if pilotlog:
                 try:
                     shutil.copy(os.path.join(localdir, pilotlog),
@@ -407,12 +414,12 @@ class aCTATLASStatus(aCTATLASProcess):
             except:
                 pupdate.schedulerID = self.conf.panda.schedulerid
             pupdate.pilotID = f"{self.conf.joblog.urlprefix}/{date}/{aj['siteName']}/{aj['appjobid']}.out|Unknown|Unknown|Unknown|Unknown"
-            if len(aj["ExecutionNode"]) > 255:
-                pupdate.node = aj["ExecutionNode"][:254]
-                self.log.warning(f"appjob({aj['pandaid']}): Truncating wn hostname from {aj['ExecutionNode']} to {pupdate.node}")
+            node = aj["ExecutionNode"] or ""
+            if len(node) > 255:
+                pupdate.node = node[:254]
+                self.log.warning(f"appjob({aj['pandaid']}): Truncating wn hostname from {node} to {pupdate.node}")
             else:
-                pupdate.node = aj["ExecutionNode"]
-            pupdate.node = aj["ExecutionNode"]
+                pupdate.node = node
             pupdate.pilotLog = self.createPilotLog(localdir, aj["pandaid"])
             pupdate.cpuConsumptionTime = aj["UsedTotalCPUTime"]
             pupdate.cpuConsumptionUnit = "seconds"
@@ -556,13 +563,14 @@ class aCTATLASStatus(aCTATLASProcess):
                     desc["sendhb"] = 0
                     desc["pandastatus"] = "transferring"
                     desc["actpandastatus"] = "toclean"
-                    desc["error"] = aj.Error
+                    desc["error"] = aj.Error or ("Job could not be submitted to the ARC CE" if not aj.JobID else None)
 
                 # Jobs that fail submitting to ARC are cancelled. Such jobs should
                 # not be resubmitted.
                 elif not aj.JobID:
                     desc["pandastatus"] = "transferring"
                     desc["actpandastatus"] = "toclean"
+                    desc["error"] = aj.Error or "Job could not be submitted to the ARC CE"
 
                 else:
                     self.log.info(f"appjob({aj.appjobid}): Resubmitting cancelled arcjob({aj.arcjobid}) arcid({aj.JobID})")
