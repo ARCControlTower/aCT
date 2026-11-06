@@ -36,8 +36,10 @@ def getAvailability(config, db: aCTDBPanda):
     # Check heartbeats are being updated
     with db.Session() as session:
         timelimit = 3600
-        jobs = session.execute(select(PandaJob.pandaid).where(PandaJob.sendhb==1, PandaJob.pandastatus.in_(['sent', 'starting', 'running', 'transferring'],
-                                                                PandaJob.theartbeat!=0, db.timeStampLessThan(PandaJob.theartbeat, timelimit)))).all()
+        jobs = session.execute(select(PandaJob.pandaid).where(PandaJob.sendhb==1,
+                                                              PandaJob.pandastatus.in_(['sent', 'starting', 'running', 'transferring']),
+                                                              PandaJob.theartbeat!=0,
+                                                              db.timeStampLessThan(PandaJob.theartbeat, timelimit))).all()
     if len(jobs) > 100:
         return 'degraded', '%d jobs with outdated heartbeat. JUST A TEST PLEASE IGNORE!' % len(jobs)
 
@@ -85,12 +87,13 @@ def main():
         infom['producer'] = 'atlasact'
         infom['type'] = "metric"
         infom['timestamp'] = int(time.time()*1000)
-        infom['arcjobs'] = session.scalar(select(func.count()).select_from(ArcJob))
-        infom['arcslots'] = session.scalar(select(func.sum(ArcJob.RequestedSlots)).where(ArcJob.State == 'Running')) or 0
-        infom['pandasent12h'] = session.scalar(select(func.count()).where(PandaJob.actpandastatus=='sent', db.timeStampLessThan(PandaJob.created, 43200)))
-        infom['arcqueued12h'] = session.scalar(select(func.count()).where(ArcJob.State=='Queuing', db.timeStampLessThan(ArcJob.created, 43200)))
-        infom['pandadone'] = session.scalar(select(func.count()).where(PandaJob.actpandastatus=='done'))
-        infom['pandafailed'] = session.scalar(select(func.count()).where(PandaJob.actpandastatus=='donefailed'))
+        # int(): MySQL returns SUM() as Decimal, which json cannot serialise
+        infom['arcjobs'] = int(session.scalar(select(func.count()).select_from(ArcJob)))
+        infom['arcslots'] = int(session.scalar(select(func.sum(ArcJob.RequestedSlots)).where(ArcJob.State == 'Running')) or 0)
+        infom['pandasent12h'] = int(session.scalar(select(func.count()).where(PandaJob.actpandastatus=='sent', db.timeStampLessThan(PandaJob.created, 43200))))
+        infom['arcqueued12h'] = int(session.scalar(select(func.count()).where(ArcJob.State=='Queuing', db.timeStampLessThan(ArcJob.created, 43200))))
+        infom['pandadone'] = int(session.scalar(select(func.count()).where(PandaJob.actpandastatus=='done')))
+        infom['pandafailed'] = int(session.scalar(select(func.count()).where(PandaJob.actpandastatus=='donefailed')))
         infom['serviceid'] = service_id
         infom["idb_tags"] = ["serviceid"]
 
