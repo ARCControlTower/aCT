@@ -268,7 +268,16 @@ class aCTValidator(aCTATLASProcess):
 
         return True
 
-    def extractOutputFilesFromMetadata(self, session, arcjobid):
+    def extractOutputFilesFromMetadata(self, session, arcjobid, expected=True):
+        """
+        Return the job's output files per SE from its heartbeat.json, or {}.
+
+        expected: whether a readable heartbeat is expected. True for finished
+        jobs, where a missing or unreadable heartbeat is an error. False when
+        cleaning failed or resubmitted jobs, where the pilot often wrote no
+        heartbeat, so the problem is only logged as info.
+        """
+        logproblem = self.log.error if expected else self.log.info
         aj = session.execute(select(ArcJob.JobID, ArcJob.appjobid).where(ArcJob.id==arcjobid)).one_or_none()
         if not aj:
             self.log.error(f"failed to find arcjob({arcjobid}) in database")
@@ -284,13 +293,13 @@ class aCTValidator(aCTATLASProcess):
             jobinfo = aCTPandaJob(filename=os.path.join(self.tmpdir, sessionid, 'heartbeat.json'))
             metadata = getattr(jobinfo, 'xml') # travis doesn't like jobinfo.xml
         except Exception as x:
-            self.log.error(f"appjob({aj.appjobid}): failed to extract metadata for arcid({jobid}): {x}")
+            logproblem(f"appjob({aj.appjobid}): failed to extract metadata for arcid({jobid}): {x}")
             return {}
 
         try:
             outputfiles = json.loads(metadata)
         except Exception as e:
-            self.log.error(f"appjob({aj.appjobid}): failed to load output file info for arcid({jobid}): {e}")
+            logproblem(f"appjob({aj.appjobid}): failed to load output file info for arcid({jobid}): {e}")
             return {}
 
         surls = {}
@@ -560,10 +569,11 @@ class aCTValidator(aCTATLASProcess):
             for job in toremove:
                 self.stopOnFlag()
                 jobid = job.arcjobid
-                jobsurls = self.extractOutputFilesFromMetadata(session, jobid)
+                jobsurls = self.extractOutputFilesFromMetadata(session, jobid, expected=False)
                 if not jobsurls:
                     # problem extracting files, fail job, clean ARC job and files
-                    self.log.warning(f"appjob({job.pandaid}): Cannot remove output, skipping")
+                    # (normal for failed jobs: the pilot often wrote no heartbeat)
+                    self.log.info(f"appjob({job.pandaid}): Cannot remove output, skipping")
                     self.cleanDownloadedJob(session, jobid)
                     session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
                     session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**faildesc))
@@ -653,7 +663,7 @@ class aCTValidator(aCTATLASProcess):
             surls = {}
             for job in toremove:
                 self.stopOnFlag()
-                jobsurls = self.extractOutputFilesFromMetadata(session, job.arcjobid)
+                jobsurls = self.extractOutputFilesFromMetadata(session, job.arcjobid, expected=False)
                 if not jobsurls:
                     jobid = job.arcjobid
                     if job in downloaded or job.RestartState != "Finishing" and job.arcstate != "done":
