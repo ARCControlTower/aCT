@@ -309,9 +309,9 @@ class aCTValidator(aCTATLASProcess):
                 adler32 = attrs['adler32']
                 surl = attrs['surl']
                 # davs -> srm for ndgf
-                res=re.match('davs://dav.ndgf.org:443/(.+)',surl)
-                if res is not None:
-                    surl = 'srm://srm.ndgf.org:8443/'+res.group(1)
+                #res=re.match('davs://dav.ndgf.org:443/(.+)',surl)
+                #if res is not None:
+                #    surl = 'srm://srm.ndgf.org:8443/'+res.group(1)
                 se = arc.URL(str(surl)).Host()
             except Exception as x:
                 self.log.error(f"appjob({aj.appjobid}): {x}")
