@@ -20,28 +20,30 @@ def main():
     # database
     db = aCTDBPanda(log)
 
-    # Query for running jobs with theartbeat longer than timelimit seconds ago
-    with db.Session.begin() as session:
+    # Query for running jobs with theartbeat longer than timelimit seconds ago,
+    # and the proxy paths needed to talk to Panda for them
+    with db.Session() as session:
         jobs = session.execute(select(PandaJob.pandaid, PandaJob.pandastatus, PandaJob.proxyid, PandaJob.siteName, PandaJob.theartbeat) \
                                .where(PandaJob.sendhb==1, PandaJob.pandastatus.in_(['sent', 'starting', 'running', 'transferring']),
                                       PandaJob.theartbeat!=0, db.timeStampLessThan(PandaJob.theartbeat, timelimit))).all()
+        proxypaths = {proxyid: db.getProxyPath(session, proxyid) for proxyid in {job.proxyid for job in jobs}}
 
-        if jobs:
-            print('Found %d jobs with outdated heartbeat (older than %d seconds):\n' % (len(jobs), timelimit))
-            print('\t'.join(['pandaid', 'site', 'status', 'theartbeat', 'Panda response']))
+    if not jobs:
+        return
 
-            # Panda server for each proxy
-            pandas = {}
-            for job in jobs:
-                proxyid = job.proxyid
-                if proxyid not in pandas:
-                    panda = aCTPanda(log, db.getProxyPath(session, proxyid))
-                    pandas[proxyid] = panda
+    print('Found %d jobs with outdated heartbeat (older than %d seconds):\n' % (len(jobs), timelimit))
+    print('\t'.join(['pandaid', 'site', 'status', 'theartbeat', 'Panda response']))
 
-                response = pandas[proxyid].updateStatus(job.pandaid, job.pandastatus)
-                print('\t'.join([str(job.pandaid), job.siteName, job.pandastatus, str(job.theartbeat), str(response)]))
-                # update heartbeat time in the DB
-                session.execute(update(PandaJob).where(PandaJob.pandaid==job.pandaid).values(theartbeat=db.getTimeStamp(time.time()+1)))
+    # send heartbeats to Panda (one Panda client per proxy), no DB session open
+    pandas = {proxyid: aCTPanda(log, path) for proxyid, path in proxypaths.items()}
+    for job in jobs:
+        response = pandas[job.proxyid].updateStatus(job.pandaid, job.pandastatus)
+        print('\t'.join([str(job.pandaid), job.siteName, job.pandastatus, str(job.theartbeat), str(response)]))
+
+    # update heartbeat time in the DB for all of them in one short transaction
+    with db.Session.begin() as session:
+        session.execute(update(PandaJob).where(PandaJob.pandaid.in_([job.pandaid for job in jobs]))
+                        .values(theartbeat=db.getTimeStamp(time.time()+1)))
 
 
 if __name__ == '__main__':
