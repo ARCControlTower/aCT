@@ -23,7 +23,7 @@ class aCTSubmitter(aCTARCProcess):
         try:
             url = urlparse(self.cluster)
         except ValueError as exc:
-            self.log.error(f"Error parsing cluster URL {url}: {exc}")
+            self.log.error(f"Error parsing cluster URL {self.cluster}: {exc}")
             raise
         self.queue = url.path.split("/")[-1]
         self.hostname = url.hostname
@@ -118,29 +118,23 @@ class aCTSubmitter(aCTARCProcess):
             #global usercred
             #usercred = self.uc
 
-            # Filter only sites for this process
+            # queued/running counts and max queued priority of this CE and
+            # fairshare, computed in the DB instead of loading every job
             with self.db.Session() as session:
-                qjobs = session.execute(select(ArcJob.id, ArcJob.priority).where(ArcJob.arcstate=='submitted', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).all()
-                rjobs = session.execute(select(ArcJob.id, ArcJob.priority).where(ArcJob.arcstate=='running', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).all()
+                nqueued, maxprioqueued = session.execute(
+                    select(func.count(ArcJob.id), func.max(ArcJob.priority))
+                    .where(ArcJob.arcstate=='submitted', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).one()
+                nrunning = session.execute(
+                    select(func.count(ArcJob.id))
+                    .where(ArcJob.arcstate=='running', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).scalar_one()
 
-            # max waiting priority
-            try:
-                maxpriowaiting = max(jobs, key=lambda x: x.priority).priority
-            except:
-                maxpriowaiting = 0
+            maxpriowaiting = max((job.priority or 0) for job in jobs)
             self.log.info(f"Maximum priority of waiting jobs: {maxpriowaiting}")
-
-
-            # max queued priority
-            try:
-                maxprioqueued = max(qjobs, key=lambda x: x.priority).priority
-            except:
-                maxprioqueued = 0
-            self.log.info(f"Max priority queued: {maxprioqueued}")
+            self.log.info(f"Max priority queued: {maxprioqueued or 0}")
 
             qfraction = self.conf.jobs.get("queuefraction", 15)/100
             qoffset = self.conf.jobs.get("queueoffset", 100)
-            numbertosubmit = min(max(int(max(qfraction*len(rjobs), qoffset) - len(qjobs)), 0), len(jobs))
+            numbertosubmit = min(max(int(max(qfraction*nrunning, qoffset) - nqueued), 0), len(jobs))
             self.log.info(f"Number of jobs to submit: {numbertosubmit} for fairshare {fairshare} and proxyid {proxyid}")
 
             ##################################################################
@@ -149,54 +143,56 @@ class aCTSubmitter(aCTARCProcess):
             #
             ##################################################################
 
-            # read job descriptions from DB
-            descs = [job.jobdescription for job in jobs]
-
-            # get REST client
-            jobids = [job.id for job in jobs]
-
+            # put back the jobs above the number to submit, and trim jobs so
+            # that jobs, descs, jobids and the submission results line up
             if numbertosubmit < len(jobs):
                 with self.db.Session.begin() as session:
-                    session.execute(self.db.setJobsArcstate(jobids[numbertosubmit:], 'tosubmit'))
+                    session.execute(self.db.setJobsArcstate([job.id for job in jobs[numbertosubmit:]], 'tosubmit'))
                 if numbertosubmit == 0:
                     continue
-                descs = descs[:numbertosubmit]
-                jobids = jobids[:numbertosubmit]
+                jobs = jobs[:numbertosubmit]
+
+            # job descriptions and DB ids of the jobs to submit
+            descs = [job.jobdescription for job in jobs]
+            jobids = [job.id for job in jobs]
 
             arcrest = self.getARCClient(proxyid)
+            if not arcrest:
+                with self.db.Session.begin() as session:
+                    session.execute(self.db.setJobsArcstate(jobids, 'tosubmit'))
+                continue
+
+            # submit jobs to ARC: network only, no DB session is open while
+            # the jobs are created and their inputs uploaded
+            failstate = None
+            try:
+                delegationID = arcrest.createDelegation()
+                results = arcrest.submitJobs(
+                    descs,
+                    self.queue,
+                    delegationID,
+                    workers=self.conf.rest.upload_workers or 10,
+                    sendsize=self.conf.rest.upload_size or 8388608,  # 8MB
+                    timeout=self.conf.rest.timeout or 60,
+                )
+            except JSONDecodeError as exc:
+                failstate = 'tosubmit'
+                self.log.error(f"Invalid JSON response from ARC: {exc}")
+            except MatchmakingError as exc:
+                failstate = 'cancelled'
+                self.log.error(str(exc))
+            except Exception as exc:
+                failstate = 'tosubmit'
+                self.log.error(f"Error submitting jobs to ARC: {exc}", exc_info=True, stack_info=True)
+            finally:
+                arcrest.close()
+
+            if failstate:
+                with self.db.Session.begin() as session:
+                    session.execute(self.db.setJobsArcstate(jobids, failstate))
+                continue
 
             with self.db.Session.begin() as session:
-                if not arcrest:
-                    session.execute(self.db.setJobsArcstate(jobids, 'tosubmit'))
-                    continue
-
-            # submit jobs to ARC
-                try:
-                    delegationID = arcrest.createDelegation()
-                    results = arcrest.submitJobs(
-                        descs,
-                        self.queue,
-                        delegationID,
-                        workers=self.conf.rest.upload_workers or 10,
-                        sendsize=self.conf.rest.upload_size or 8388608,  # 8MB
-                        timeout=self.conf.rest.timeout or 60,
-                    )
-                except JSONDecodeError as exc:
-                    session.execute(self.db.setJobsArcstate(jobids, 'tosubmit'))
-                    self.log.error(f"Invalid JSON response from ARC: {exc}")
-                    continue
-                except MatchmakingError as exc:
-                    session.execute(self.db.setJobsArcstate(jobids, 'cancelled'))
-                    self.log.error(str(exc))
-                    continue
-                except Exception as exc:
-                    session.execute(self.db.setJobsArcstate(jobids, 'tosubmit'))
-                    self.log.error(f"Error submitting jobs to ARC: {exc}", exc_info=True, stack_info=True)
-                    #self.log.error(f"Error submitting jobs to ARC: {exc}")
-                    continue
-                finally:
-                    arcrest.close()
-
                 tstamp = self.db.getTimeStamp()
 
                 # log submission results and set job state
