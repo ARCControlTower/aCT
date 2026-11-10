@@ -1,5 +1,6 @@
 import os
 import traceback
+from collections import defaultdict
 
 from act.atlas.aCTATLASProcess import aCTATLASProcess
 from act.atlas.aCTPanda2Xrsl import aCTPanda2Xrsl
@@ -20,6 +21,10 @@ class aCTPanda2Arc(aCTATLASProcess):
         Signal handling strategy:
         - exit is checked before every job update
         """
+        # Rucio traces per proxy path, sent after the transaction is committed
+        # so that no HTTP request is made while the transaction is open
+        tracesByProxy = defaultdict(list)
+
         with self.db.Session.begin() as session:
             jobs = session.execute(select(PandaJob.proxyid, PandaJob.siteName, PandaJob.pandaid, PandaJob.created, PandaJob.pandajob, PandaJob.metadata_, PandaJob.id)
                                    .where(PandaJob.arcjobid.is_(None), PandaJob.actpandastatus.in_(['sent', 'starting']), PandaJob.siteName.in_(self.sitesselect))
@@ -44,7 +49,7 @@ class aCTPanda2Arc(aCTATLASProcess):
                     self.log.error(f"appjob({job.pandaid}): Cant handle job description: {e}")
                     self.log.error(traceback.format_exc())
                     continue
-                self.sendTraces(parser.traces, proxies_map[job.proxyid])
+                tracesByProxy[proxies_map[job.proxyid]].extend(parser.traces)
                 xrsl = parser.getXrsl()
                 if xrsl is not None:
                     endpoints = self.sites[job.siteName]['endpoints']
@@ -98,6 +103,11 @@ class aCTPanda2Arc(aCTATLASProcess):
                         with open(jdlfile, 'w') as f:
                             self.log.debug(f'Wrote description to {jdlfile}')
                             f.write(xrsl)
+
+        # transaction committed: send the traces, one Rucio connection per proxy
+        for proxypath, traces in tracesByProxy.items():
+            if traces:
+                self.sendTraces(traces, proxypath)
 
     def process(self):
         self.setSites()
