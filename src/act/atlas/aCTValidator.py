@@ -258,13 +258,18 @@ class aCTValidator(aCTATLASProcess):
                     pilotlog = f
                     break
         if pilotlog:
-            try:
-                shutil.move(os.path.join(localdir, pilotlog),
-                            os.path.join(outd, f'{aj.appjobid}.out'))
-                os.chmod(os.path.join(outd, f'{aj.appjobid}.out'), 0o644)
-            except Exception as e:
-                self.log.error(f"Failed to copy file {os.path.join(localdir,pilotlog)}: {e}")
-                return False
+            src = os.path.join(localdir, pilotlog)
+            dest = os.path.join(outd, f'{aj.appjobid}.out')
+            if not os.path.exists(src) and os.path.exists(dest):
+                # already moved by an earlier attempt whose DB update failed
+                pass
+            else:
+                try:
+                    shutil.move(src, dest)
+                    os.chmod(dest, 0o644)
+                except Exception as e:
+                    self.log.error(f"Failed to copy file {src}: {e}")
+                    return False
 
         return True
 
@@ -324,18 +329,27 @@ class aCTValidator(aCTATLASProcess):
         return surls
 
 
-    def cleanDownloadedJob(self, session, arcjobid):
+    def cleanDownloadedJobs(self, arcjobids):
         '''
-        Remove directory to which job was downloaded.
+        Remove the download directories of several jobs: one short DB read,
+        then the (possibly slow, CephFS) deletions with no DB session open.
         '''
-        job = session.execute(select(ArcJob.JobID, ArcJob.appjobid).where(ArcJob.id==arcjobid)).one_or_none()
-        if job and job.JobID:
-            sessionid = job.JobID[job.JobID.rfind('/'):]
-            localdir = self.tmpdir + sessionid
-            shutil.rmtree(localdir, ignore_errors=True)
-            pandaid=job.appjobid
-            pandainputdir = os.path.join(self.tmpdir, 'inputfiles', str(pandaid))
-            shutil.rmtree(pandainputdir, ignore_errors=True)
+        if not arcjobids:
+            return
+        with self.db.Session() as session:
+            jobs = session.execute(select(ArcJob.JobID, ArcJob.appjobid).where(ArcJob.id.in_(arcjobids))).all()
+        for job in jobs:
+            self._removeJobDirs(job.JobID, job.appjobid)
+
+    def _removeJobDirs(self, jobid, appjobid):
+        '''Remove a job's download directory and its Panda input file directory.'''
+        if not jobid:
+            return
+        sessionid = jobid[jobid.rfind('/'):]
+        localdir = self.tmpdir + sessionid
+        shutil.rmtree(localdir, ignore_errors=True)
+        pandainputdir = os.path.join(self.tmpdir, 'inputfiles', str(appjobid))
+        shutil.rmtree(pandainputdir, ignore_errors=True)
 
 
     def validateFinishedJobs(self):
@@ -349,35 +363,49 @@ class aCTValidator(aCTATLASProcess):
         values in heartbeat.json. If everything matches, the job is marked
         finished, otherwise it is failed.
         """
+        # File work on CephFS (copying logs, reading heartbeats, removing job
+        # directories) is done before the DB transactions, so that no
+        # transaction is open while waiting on the file system. Each step then
+        # writes its DB changes in one short transaction.
+
         # TODO: HARDCODED limit
         # get all jobs with pandastatus running and actpandastatus tovalidate
-        with self.db.Session.begin() as session:
+        with self.db.Session() as session:
             jobstoupdate = session.execute(select(PandaJob.arcjobid, PandaJob.pandaid, PandaJob.siteName, PandaJob.metadata_)
                                            .where(PandaJob.pandastatus=='transferring', PandaJob.actpandastatus=='tovalidate', PandaJob.siteName.in_(self.sitesselect))
                                            .limit(1000)).all()
 
-            cleandesc = {"arcstate": "toclean", "tarcstate": self.db.getTimeStamp()}
+        cleandesc = {"arcstate": "toclean", "tarcstate": self.db.getTimeStamp()}
 
-            # skip validation for the true pilot jobs, just copy logs, set to done
-            # and clean arc job
-            toremove = []
-            for job in jobstoupdate:
-                self.stopOnFlag()
-                if self.sites[job.siteName]['truepilot']:
-                    self.log.info(f"appjob({job.pandaid}): Pilot job, skip validation")
-                    if not self.copyFinishedFiles(job.arcjobid, False):
-                        self.log.warning(f"appjob({job.pandaid}): Failed to copy log files")
-                    self.cleanDownloadedJob(session, job.arcjobid)
-                    session.execute(update(ArcJob).where(ArcJob.id==job.arcjobid).values(**cleandesc))
-                    desc = {"pandastatus": None, "actpandastatus": "done"}
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==job.arcjobid).values(**desc))
-                else:
-                    toremove.append(job)
+        # skip validation for the true pilot jobs, just copy logs, set to done
+        # and clean arc job
+        pilotjobs = []
+        toremove = []
+        for job in jobstoupdate:
+            self.stopOnFlag()
+            if self.sites[job.siteName]['truepilot']:
+                self.log.info(f"appjob({job.pandaid}): Pilot job, skip validation")
+                if not self.copyFinishedFiles(job.arcjobid, False):
+                    self.log.warning(f"appjob({job.pandaid}): Failed to copy log files")
+                pilotjobs.append(job.arcjobid)
+            else:
+                toremove.append(job)
 
-        with self.db.Session.begin() as session:
-            # pull out output file info from pilot heartbeat json into dict, order
-            # by SE
-            surls = {}
+        if pilotjobs:
+            with self.db.Session.begin() as session:
+                session.execute(update(ArcJob).where(ArcJob.id.in_(pilotjobs)).values(**cleandesc))
+                desc = {"pandastatus": None, "actpandastatus": "done"}
+                session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(pilotjobs)).values(**desc))
+            # only after the commit: if the DB write fails the job directories
+            # are still there for the retry
+            self.cleanDownloadedJobs(pilotjobs)
+
+        # pull out output file info from pilot heartbeat json into dict, order
+        # by SE (reads heartbeat.json from the file system)
+        surls = {}
+        failedjobs = []
+        validatingjobs = []
+        with self.db.Session() as session:
             for job in toremove:
                 self.stopOnFlag()
                 jobsurls = self.extractOutputFilesFromMetadata(session, job.arcjobid)
@@ -385,32 +413,49 @@ class aCTValidator(aCTATLASProcess):
                     # problem extracting files, fail job, clean ARC job
                     # and job files
                     self.log.error(f"appjob({job.pandaid}): Cannot validate output, setting to failed")
-                    self.cleanDownloadedJob(session, job.arcjobid)
-                    session.execute(update(ArcJob).where(ArcJob.id==job.arcjobid).values(**cleandesc))
-                    desc = {"actpandastatus": "failed", "pandastatus": "failed"}
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==job.arcjobid).values(**desc))
+                    failedjobs.append(job.arcjobid)
                 else:
-                    desc = {"actpandastatus": "validating"}
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==job.arcjobid).values(**desc))
+                    validatingjobs.append(job.arcjobid)
                     for se in jobsurls:
                         surls.setdefault(se, []).extend(jobsurls[se])
+
+        if failedjobs or validatingjobs:
+            with self.db.Session.begin() as session:
+                if failedjobs:
+                    session.execute(update(ArcJob).where(ArcJob.id.in_(failedjobs)).values(**cleandesc))
+                    desc = {"actpandastatus": "failed", "pandastatus": "failed"}
+                    session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(failedjobs)).values(**desc))
+                if validatingjobs:
+                    desc = {"actpandastatus": "validating"}
+                    session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(validatingjobs)).values(**desc))
+            # only after the commit (see above)
+            self.cleanDownloadedJobs(failedjobs)
 
         # send surls to output validator threads and process their results
         checkResults = self.checkOutputFiles(surls)
 
+        # copy logs and heartbeats of successfully validated jobs first
+        okjobs = []       # validated, set to finished
+        copiedjobs = []   # validated and files copied: also clean ARC job
+        for jobid, status in checkResults:
+            if status == JobStatus.OK:
+                self.stopOnFlag()
+                self.log.info(f"Successful output file check for arcjob({jobid})")
+                okjobs.append(jobid)
+                if self.copyFinishedFiles(jobid, True):
+                    copiedjobs.append(jobid)
+                # else: id was gone already, skip cleaning
+
         with self.db.Session.begin() as session:
             # process jobs based on their final status after output validation
+            if okjobs:
+                desc = {"pandastatus": "finished", "actpandastatus": "finished"}
+                session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(okjobs)).values(**desc))
+            if copiedjobs:
+                session.execute(update(ArcJob).where(ArcJob.id.in_(copiedjobs)).values(**cleandesc))
             for jobid, status in checkResults:
-                self.stopOnFlag()
                 if status == JobStatus.OK:
-                    self.log.info(f"Successful output file check for arcjob({jobid})")
-                    desc = {"pandastatus": "finished", "actpandastatus": "finished"}
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**desc))
-                    if not self.copyFinishedFiles(jobid, True):
-                        # id was gone already, skip cleaning
-                        continue
-                    self.cleanDownloadedJob(session, jobid)
-                    session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
+                    continue
                 elif status == JobStatus.FAILED:
                     # output file failed, set toresubmit to clean up output and resubmit
                     self.log.error(f"Failed output file check for arcjob({jobid}), resubmitting")
@@ -421,6 +466,10 @@ class aCTValidator(aCTATLASProcess):
                     self.log.warning(f"Failed output file check for arcjob({jobid}), will retry")
                     desc = {"actpandastatus": "tovalidate"}
                     session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**desc))
+
+        # only after the commit: if the DB write fails, the jobs go back to
+        # tovalidate and need their downloaded heartbeat.json again
+        self.cleanDownloadedJobs(copiedjobs)
 
     def checkOutputFiles(self, surls):
         """
@@ -539,33 +588,44 @@ class aCTValidator(aCTATLASProcess):
         validateFinishedJobs). Regardless of the success or failure of the
         cleaning operations the jobs are marked as failed.
         """
+        # As in validateFinishedJobs: no file work while a transaction is open,
+        # each step writes in one short transaction, and job directories are
+        # only removed after the commit.
+
         # TODO: HARDCODED limit
         # get all jobs with pandastatus transferring and actpandastatus toclean
-        with self.db.Session.begin() as session:
+        with self.db.Session() as session:
             jobstoupdate = session.execute(select(PandaJob.arcjobid, PandaJob.pandaid, PandaJob.siteName)
                                            .where(PandaJob.pandastatus=='transferring', PandaJob.actpandastatus=='toclean', PandaJob.siteName.in_(self.sitesselect))
                                            .limit(1000)).all()
 
-            cleandesc = {"arcstate": "toclean", "tarcstate": self.db.getTimeStamp()}
-            faildesc = {"actpandastatus": "failed", "pandastatus": "failed"}
+        cleandesc = {"arcstate": "toclean", "tarcstate": self.db.getTimeStamp()}
+        faildesc = {"actpandastatus": "failed", "pandastatus": "failed"}
 
-            # for truepilot jobs, don't try to clean outputs (too dangerous), just
-            # clean arc job
-            toremove = []
-            for job in jobstoupdate:
-                self.stopOnFlag()
-                if self.sites[job.siteName]['truepilot']:
-                    self.log.info(f"appjob({job.pandaid}): Pilot job, skip cleanup of output files")
-                    self.cleanDownloadedJob(session, job.arcjobid)
-                    session.execute(update(ArcJob).where(ArcJob.id==job.arcjobid).values(**cleandesc))
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==job.arcjobid).values(**faildesc))
-                else:
-                    toremove.append(job)
+        # for truepilot jobs, don't try to clean outputs (too dangerous), just
+        # clean arc job
+        pilotjobs = []
+        toremove = []
+        for job in jobstoupdate:
+            self.stopOnFlag()
+            if self.sites[job.siteName]['truepilot']:
+                self.log.info(f"appjob({job.pandaid}): Pilot job, skip cleanup of output files")
+                pilotjobs.append(job.arcjobid)
+            else:
+                toremove.append(job)
 
-        with self.db.Session.begin() as session:
-            # pull out output file info from pilot heartbeat json into dict, order
-            # by SE
-            surls = {}
+        if pilotjobs:
+            with self.db.Session.begin() as session:
+                session.execute(update(ArcJob).where(ArcJob.id.in_(pilotjobs)).values(**cleandesc))
+                session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(pilotjobs)).values(**faildesc))
+            self.cleanDownloadedJobs(pilotjobs)
+
+        # pull out output file info from pilot heartbeat json into dict, order
+        # by SE
+        surls = {}
+        nofilesjobs = []
+        cleaningjobs = []
+        with self.db.Session() as session:
             for job in toremove:
                 self.stopOnFlag()
                 jobid = job.arcjobid
@@ -574,37 +634,52 @@ class aCTValidator(aCTATLASProcess):
                     # problem extracting files, fail job, clean ARC job and files
                     # (normal for failed jobs: the pilot often wrote no heartbeat)
                     self.log.info(f"appjob({job.pandaid}): Cannot remove output, skipping")
-                    self.cleanDownloadedJob(session, jobid)
-                    session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**faildesc))
+                    nofilesjobs.append(jobid)
                 else:
-                    desc = {"actpandastatus": "cleaning"}
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**desc))
+                    cleaningjobs.append(jobid)
                     for se in jobsurls:
                         surls.setdefault(se, []).extend(jobsurls[se])
+
+        if nofilesjobs or cleaningjobs:
+            with self.db.Session.begin() as session:
+                if nofilesjobs:
+                    session.execute(update(ArcJob).where(ArcJob.id.in_(nofilesjobs)).values(**cleandesc))
+                    session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(nofilesjobs)).values(**faildesc))
+                if cleaningjobs:
+                    desc = {"actpandastatus": "cleaning"}
+                    session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(cleaningjobs)).values(**desc))
+            self.cleanDownloadedJobs(nofilesjobs)
 
         # send surls to remover threads and process their results
         removeResults = self.removeOutputFiles(surls, self.cleaners, self.cleanRemoves, self.cleanStatus, self.cleanSurls)
 
-        with self.db.Session.begin() as session:
-            # process jobs based on their final status after output removal
-            for jobid, status in removeResults:
-                self.stopOnFlag()
-                if status in (JobStatus.OK, JobStatus.FAILED):
-                    if status == JobStatus.OK:
-                        self.log.info(f"Successfuly removed output files for failed arcjob({jobid})")
-                    else:
-                        # If unretriably failed, there is not much we can do except
-                        # continue
-                        self.log.warning(f"Output file removal failed for arcjob({jobid}), skipping")
-                    self.cleanDownloadedJob(session, jobid)
-                    session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**faildesc))
+        # process jobs based on their final status after output removal
+        donejobs = []
+        retryjobs = []
+        for jobid, status in removeResults:
+            self.stopOnFlag()
+            if status in (JobStatus.OK, JobStatus.FAILED):
+                if status == JobStatus.OK:
+                    self.log.info(f"Successfuly removed output files for failed arcjob({jobid})")
                 else:
-                    # Retry next time
-                    self.log.warning(f"Output file removal failed for arcjob({jobid}), will retry")
+                    # If unretriably failed, there is not much we can do except
+                    # continue
+                    self.log.warning(f"Output file removal failed for arcjob({jobid}), skipping")
+                donejobs.append(jobid)
+            else:
+                # Retry next time
+                self.log.warning(f"Output file removal failed for arcjob({jobid}), will retry")
+                retryjobs.append(jobid)
+
+        if donejobs or retryjobs:
+            with self.db.Session.begin() as session:
+                if donejobs:
+                    session.execute(update(ArcJob).where(ArcJob.id.in_(donejobs)).values(**cleandesc))
+                    session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(donejobs)).values(**faildesc))
+                if retryjobs:
                     desc = {"actpandastatus": "toclean"}
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**desc))
+                    session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(retryjobs)).values(**desc))
+            self.cleanDownloadedJobs(donejobs)
 
     def resubmitNonARCJobs(self):
         """Resubmit jobs with no ARC job ID."""
@@ -639,10 +714,11 @@ class aCTValidator(aCTATLASProcess):
             # Create a list of jobs to remove outputs and a list to fetch
             # heartbeats.
             desc = {"actpandastatus": "resubmitting"}
+            if jobstoupdate:
+                session.execute(update(PandaJob).where(PandaJob.arcjobid.in_([job.arcjobid for job in jobstoupdate])).values(**desc))
             toremove = []
             todownload = []
             for job in jobstoupdate:
-                session.execute(update(PandaJob).where(PandaJob.arcjobid==job.arcjobid).values(**desc))
                 if job.arcstate not in ("donefailed", "done", "lost", "cancelled"):
                     todownload.append(job)
                 else:
@@ -658,65 +734,87 @@ class aCTValidator(aCTATLASProcess):
         faildesc = {"actpandastatus": "failed", "pandastatus": "failed"}
         resubdesc = {"actpandastatus": "starting", "arcjobid": None}
 
-        with self.db.Session.begin() as session:
-            # pull out output file info from pilot heartbeat json into dict, order by SE
-            surls = {}
+        # pull out output file info from pilot heartbeat json into dict, order by SE
+        surls = {}
+        resubjobs = []    # clean ARC job, finish resubmission
+        failjobs = []     # clean ARC job, fail job
+        with self.db.Session() as session:
             for job in toremove:
                 self.stopOnFlag()
                 jobsurls = self.extractOutputFilesFromMetadata(session, job.arcjobid, expected=False)
                 if not jobsurls:
-                    jobid = job.arcjobid
                     if job in downloaded or job.RestartState != "Finishing" and job.arcstate != "done":
                         # Clean job files and ARC job, finish resubmission if
                         # resubmitted manually or job failed before finishing,
                         # since there are likely no output files.
                         self.log.info(f"appjob({job.pandaid}): Cannot remove output, resubmit finished")
-                        self.cleanDownloadedJob(session, jobid)
-                        session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
-                        session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**resubdesc))
+                        resubjobs.append(job.arcjobid)
                     else:
                         # Otherwise fail job whose outputs cannot be cleaned.
                         self.log.error(f"appjob({job.pandaid}): Cannot remove output, skipping")
-                        self.cleanDownloadedJob(session, jobid)
-                        session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
-                        session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**faildesc))
+                        failjobs.append(job.arcjobid)
                 else:
                     for se in jobsurls:
                         surls.setdefault(se, []).extend(jobsurls[se])
 
+        self._finishResubmitting(resubjobs, failjobs, [], cleandesc, resubdesc, faildesc)
+
         # send surls to remover threads and process their results
         removeResults = self.removeOutputFiles(surls, self.resubers, self.resubRemoves, self.resubStatus, self.resubSurls)
 
-        with self.db.Session.begin() as session:
-            # process results from remover
-            for jobid, status in removeResults:
-                self.stopOnFlag()
-                if jobid in manualIDs or status == JobStatus.OK:
-                    # clean ARC job and finish resubmission for manually
-                    # resubmitted jobs or jobs whose files were successfully
-                    # removed
-                    if jobid in manualIDs and status != JobStatus.OK:
-                        self.log.warning(f"Failed deleting outputs for manually resubmitted arcjob({jobid}), will clean arcjob and finish resubmit")
-                    else:
-                        self.log.info(f"Successfully deleted outputs for arcjob({jobid}), resubmit finished")
-                    self.cleanDownloadedJob(session, jobid)
-                    session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**resubdesc))
-
-                elif status == JobStatus.FAILED:
-                    # If we couldn't clean outputs the next try of the job will
-                    # also fail. Better to return to panda for an increased attempt
-                    # no.
-                    self.log.error(f"Failed deleting outputs for arcjob({jobid}), setting to failed")
-                    self.cleanDownloadedJob(session, jobid)
-                    session.execute(update(ArcJob).where(ArcJob.id==jobid).values(**cleandesc))
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**faildesc))
-
+        # process results from remover
+        resubjobs = []
+        failjobs = []
+        retryjobs = []
+        for jobid, status in removeResults:
+            self.stopOnFlag()
+            if jobid in manualIDs or status == JobStatus.OK:
+                # clean ARC job and finish resubmission for manually
+                # resubmitted jobs or jobs whose files were successfully
+                # removed
+                if jobid in manualIDs and status != JobStatus.OK:
+                    self.log.warning(f"Failed deleting outputs for manually resubmitted arcjob({jobid}), will clean arcjob and finish resubmit")
                 else:
-                    # set back to toresubmit to retry
-                    self.log.warning(f"Failed deleting outputs for arcjob({jobid}), will retry")
-                    desc = {"actpandastatus": "toresubmit"}
-                    session.execute(update(PandaJob).where(PandaJob.arcjobid==jobid).values(**desc))
+                    self.log.info(f"Successfully deleted outputs for arcjob({jobid}), resubmit finished")
+                resubjobs.append(jobid)
+
+            elif status == JobStatus.FAILED:
+                # If we couldn't clean outputs the next try of the job will
+                # also fail. Better to return to panda for an increased attempt
+                # no.
+                self.log.error(f"Failed deleting outputs for arcjob({jobid}), setting to failed")
+                failjobs.append(jobid)
+
+            else:
+                # set back to toresubmit to retry
+                self.log.warning(f"Failed deleting outputs for arcjob({jobid}), will retry")
+                retryjobs.append(jobid)
+
+        self._finishResubmitting(resubjobs, failjobs, retryjobs, cleandesc, resubdesc, faildesc)
+
+    def _finishResubmitting(self, resubjobs, failjobs, retryjobs, cleandesc, resubdesc, faildesc):
+        """
+        Write the outcome for resubmitting jobs in one short transaction, then
+        remove the job directories of the jobs that are done.
+
+        resubjobs: clean ARC job, finish resubmission
+        failjobs: clean ARC job, fail job
+        retryjobs: back to toresubmit to retry
+        """
+        if not (resubjobs or failjobs or retryjobs):
+            return
+        with self.db.Session.begin() as session:
+            if resubjobs or failjobs:
+                session.execute(update(ArcJob).where(ArcJob.id.in_(resubjobs + failjobs)).values(**cleandesc))
+            if resubjobs:
+                session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(resubjobs)).values(**resubdesc))
+            if failjobs:
+                session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(failjobs)).values(**faildesc))
+            if retryjobs:
+                desc = {"actpandastatus": "toresubmit"}
+                session.execute(update(PandaJob).where(PandaJob.arcjobid.in_(retryjobs)).values(**desc))
+        # only after the commit, so a failed DB write leaves the job files for the retry
+        self.cleanDownloadedJobs(resubjobs + failjobs)
 
     def downloadHeartbeats(self, jobs):
         """
