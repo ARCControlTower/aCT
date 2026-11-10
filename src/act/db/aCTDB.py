@@ -15,6 +15,9 @@ class aCTDB(object):
             max_overflow=0,
             pool_pre_ping=True,
             pool_recycle=3600,
+            # no gap locks on range scans: avoids lock waits and deadlocks
+            # between the aCT processes that update the same tables
+            isolation_level="READ COMMITTED",
             )
         self.Session = sessionmaker(bind=self.engine)
 
