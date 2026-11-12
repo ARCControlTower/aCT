@@ -118,39 +118,38 @@ class aCTSubmitter(aCTARCProcess):
             #global usercred
             #usercred = self.uc
 
-            # queued/running counts and max queued priority of this CE and
-            # fairshare, computed in the DB instead of loading every job
-            with self.db.Session() as session:
-                nqueued, maxprioqueued = session.execute(
-                    select(func.count(ArcJob.id), func.max(ArcJob.priority))
-                    .where(ArcJob.arcstate=='submitted', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).one()
-                nrunning = session.execute(
-                    select(func.count(ArcJob.id))
-                    .where(ArcJob.arcstate=='running', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).scalar_one()
-
             maxpriowaiting = max((job.priority or 0) for job in jobs)
             self.log.info(f"Maximum priority of waiting jobs: {maxpriowaiting}")
-            self.log.info(f"Max priority queued: {maxprioqueued or 0}")
 
-            qfraction = self.conf.jobs.get("queuefraction", 15)/100
-            qoffset = self.conf.jobs.get("queueoffset", 100)
-            numbertosubmit = min(max(int(max(qfraction*nrunning, qoffset) - nqueued), 0), len(jobs))
-            self.log.info(f"Number of jobs to submit: {numbertosubmit} for fairshare {fairshare} and proxyid {proxyid}")
+            # Queue limit per CE and fairshare, only if configured: at least
+            # queueoffset jobs, or queuefraction percent of running jobs,
+            # may be queued (defaults 15 and 100). Without either option
+            # there is no limit.
+            if self.conf.jobs.get("queuefraction") is not None or self.conf.jobs.get("queueoffset") is not None:
+                # counts and max queued priority computed in the DB instead
+                # of loading every job
+                with self.db.Session() as session:
+                    nqueued, maxprioqueued = session.execute(
+                        select(func.count(ArcJob.id), func.max(ArcJob.priority))
+                        .where(ArcJob.arcstate=='submitted', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).one()
+                    nrunning = session.execute(
+                        select(func.count(ArcJob.id))
+                        .where(ArcJob.arcstate=='running', ArcJob.cluster==self.cluster, ArcJob.fairshare==fairshare)).scalar_one()
+                self.log.info(f"Max priority queued: {maxprioqueued or 0}")
+                # an option left out takes its default
+                qfraction = self.conf.jobs.get("queuefraction", 15) / 100
+                qoffset = self.conf.jobs.get("queueoffset", 100)
+                numbertosubmit = min(max(int(max(qfraction*nrunning, qoffset) - nqueued), 0), len(jobs))
+                self.log.info(f"Number of jobs to submit: {numbertosubmit} for fairshare {fairshare} and proxyid {proxyid}")
 
-            ##################################################################
-            #
-            # New REST submission code
-            #
-            ##################################################################
-
-            # put back the jobs above the number to submit, and trim jobs so
-            # that jobs, descs, jobids and the submission results line up
-            if numbertosubmit < len(jobs):
-                with self.db.Session.begin() as session:
-                    session.execute(self.db.setJobsArcstate([job.id for job in jobs[numbertosubmit:]], 'tosubmit'))
-                if numbertosubmit == 0:
-                    continue
-                jobs = jobs[:numbertosubmit]
+                # put back the jobs above the number to submit, and trim jobs
+                # so that jobs, descs, jobids and the submission results line up
+                if numbertosubmit < len(jobs):
+                    with self.db.Session.begin() as session:
+                        session.execute(self.db.setJobsArcstate([job.id for job in jobs[numbertosubmit:]], 'tosubmit'))
+                    if numbertosubmit == 0:
+                        continue
+                    jobs = jobs[:numbertosubmit]
 
             # job descriptions and DB ids of the jobs to submit
             descs = [job.jobdescription for job in jobs]
